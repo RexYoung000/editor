@@ -1,0 +1,97 @@
+{
+  "name": "forge",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "pack-game": "node scripts/pack-game-zip.mjs",
+    "electron:dev": "electron .",
+    "electron:start": "electron .",
+    "electron:build": "electron-builder",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ]
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.2.3",
+    "jszip": "^3.10.1",
+    "lucide-react": "^1.8.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^24.12.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.5.0",
+    "cross-env": "^10.1.0",
+    "electron": "41.4.0",
+    "electron-builder": "^26.8.1",
+    "esbuild": "^0.25.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.5.0",
+    "immer": "^11.1.4",
+    "layaair2-cmd": "^1.6.15",
+    "postcss": "^8.5.10",
+    "tailwindcss": "^4.2.3",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.58.2",
+    "vite": "^8.0.9",
+    "zustand": "^5.0.12"
+  },
+  "packageManager": "pnpm@10.13.1+sha512.37ebf1a5c7a30d5fabe0c5df44ee8da4c965ca0c5af3dbab28c3a1681b70a256218d05c81c9c0dcf767ef6b8551eb5b960042b9ed4300c59242336377e01cfad",
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.vipthink.forge",
+    "productName": "wandouEditor",
+    "executableName": "wandouEditor",
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "electron/**/*",
+      "!node_modules"
+    ],
+    "directories": {
+      "output": "release/${version}"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "public/favicon.ico"
+    },
+    "nsis": {
+      "shortcutName": "豌豆课件编辑器",
+      "installerIcon": "public/favicon.ico",
+      "uninstallerIcon": "public/favicon.ico",
+      "artifactName": "豌豆课件编辑器 Setup ${version}.${ext}"
+    },
+    "asarUnpack": [],
+    "extraResources": [
+      {
+        "from": "node_modules/esbuild",
+        "to": "node_modules/esbuild"
+      },
+      {
+        "from": "node_modules/.pnpm/@esbuild+win32-x64@0.25.12/node_modules/@esbuild/win32-x64",
+        "to": "node_modules/@esbuild/win32-x64"
+      },
+      {
+        "from": "node_modules/.pnpm/layaair2-cmd@1.6.15/node_modules",
+        "to": "node_modules"
+      },
+      {
+        "from": "node_modules/.pnpm/iconv-lite@0.5.2/node_modules/safer-buffer",
+        "to": "node_modules/safer-buffer"
+      }
+    ],
+    "afterPack": "./electron/afterPack.cjs"
+  }
+}

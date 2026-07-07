@@ -1,0 +1,2316 @@
+import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer';
+import type { Element, SubPage, Stage, Course } from '../types';
+import {
+  type CustomTemplate,
+  type ImportResult,
+  listTemplates,
+  saveTemplate,
+  removeTemplate,
+  renameTemplate,
+  applyTemplate,
+  getTemplateDir,
+  setTemplateDir,
+  importTemplatesFromDir,
+  pinTemplate,
+} from '../utils/customTemplateFs';
+import { getCourseDirPath } from '../utils/electronFs';
+import { PRESET_TEMPLATES } from '../presets';
+import { getUniqueElementName, normalizeElementNames, createDefaultElement, elementMeta, rebuildSubPageCounters, getNextNumberedName, getNextItemNameForCenterMatch } from '../elements/elementMeta';
+import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
+
+export type { Element, SubPage, Stage, Course };
+// Backwards alias: many call sites still import `Page`
+export type { SubPage as Page } from '../types';
+
+async function loadImageSize(skin: string): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    if (!skin) { resolve(null); return; }
+    const img = new window.Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = skin;
+  });
+}
+
+interface EditorState {
+  currentCourse: Course | null;
+  currentStageId: string | null;
+  currentSubPageId: string | null;
+  selectedElementIds: string[];
+  selectedStageTarget?: 'preview' | 'normal';
+  clipboard: Element[];
+  history: Course[];
+  historyIndex: number;
+  pageThumbnails: Record<string, string>;
+  customTemplates: CustomTemplate[];
+  /** 自定义模板根目录（localStorage 持久化），未设置时点选自定义模板 tab 会引导选择 */
+  customTemplateDir: string | null;
+
+  // Actions
+  setCurrentCourse: (course: Course) => void;
+  setCurrentSubPage: (stageId: string, subPageId: string) => void;
+  toggleStageShrink: (stageId: string) => void;
+  setPageThumbnail: (subPageId: string, dataUrl: string) => void;
+
+  addStage: () => void;
+  addVideoStage: () => void;  // 复习课专用：添加视频关卡
+  addStageFromSubPage: (sourceSubPageId: string) => void;
+  addStageFromTemplate: (templateId: string) => Promise<void>;
+  addStageFromPreset: (presetId: string) => void;
+  deleteStage: (stageId: string) => void;
+  clearAllStages: () => void;
+  reorderStages: (fromIndex: number, toIndex: number) => void;
+
+  addPreviewStage: () => void;
+  addPreviewStageFromPreset: (presetId: string) => void;
+  addPreviewStageFromSubPage: (sourceSubPageId: string) => void;
+  addPreviewStageFromTemplate: (templateId: string) => Promise<void>;
+  deletePreviewStage: (stageId: string) => void;
+  reorderPreviewStages: (fromIndex: number, toIndex: number) => void;
+  renamePreviewStage: (stageId: string, name: string) => void;
+  togglePreviewShrinked: () => void;
+  toggleNormalShrinked: () => void;
+  setFeedback: (value: 'spirit' | 'newLD') => void;
+
+  addSubPage: (stageId: string) => void;
+  addSubPageFromSubPage: (stageId: string, sourceSubPageId: string) => void;
+  addSubPageFromTemplate: (stageId: string, templateId: string) => Promise<void>;
+  addSubPageFromPreset: (stageId: string, presetId: string) => void;
+  deleteSubPage: (stageId: string, subPageId: string) => void;
+  duplicateSubPage: (stageId: string, subPageId: string) => void;
+  reorderSubPages: (stageId: string, fromIndex: number, toIndex: number) => void;
+  renameSubPage: (subPageId: string, name: string) => void;
+  renameStage: (stageId: string, name: string) => void;
+
+  addElement: (element: Element) => void;
+  updateElement: (id: string, updates: Partial<Element>) => void;
+  deleteElement: (id: string) => void;
+  reorderElement: (id: string, newIndex: number) => void;
+  setElementParent: (id: string, newParentId: string | undefined) => void;
+  selectElement: (id: string, multi?: boolean) => void;
+  selectElements: (ids: string[]) => void;
+  selectAll: () => void;
+  clearSelection: () => void;
+  copyElements: () => void;
+  pasteElements: () => void;
+  duplicateElements: () => void;
+  alignElements: (direction: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => void;
+  groupElements: () => void;
+  ungroupElements: () => void;
+  undo: () => void;
+  redo: () => void;
+  saveHistory: () => void;
+
+  saveAsCustomTemplate: (subPageId: string) => Promise<{ ok: true; template: CustomTemplate } | { ok: false; error: string }>;
+  removeCustomTemplateAction: (templateId: string) => Promise<void>;
+  renameCustomTemplate: (templateId: string, newName: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  loadCustomTemplates: () => Promise<void>;
+  setCustomTemplateDir: (dir: string | null) => Promise<void>;
+  importCustomTemplates: (sourceDir: string) => Promise<ImportResult>;
+  pinCustomTemplate: (templateId: string) => Promise<void>;
+
+  switchPageTurnPage: (elementId: string, newIndex: number) => void;
+  addPageTurnPage: (elementId: string) => void;
+  removePageTurnPage: (elementId: string, pageIndex: number) => void;
+  changePageTurnButtonType: (elementId: string, newType: 'arrows' | 'tabs' | 'both') => void;
+  movePageTurnButtons: (elementId: string, position: 'top' | 'bottom') => void;
+
+  addChoiceOption: (choiceBoxId: string) => void;
+  removeChoiceOption: (choiceBoxId: string) => void;
+
+  addFillBlankInput: (klInputBoxId: string) => void;
+  removeFillBlankInput: (klInputBoxId: string) => void;
+
+  /** 连线题：添加一对连线项（左 camp1 + 右 camp2） */
+  addMatchingPair: (matchingGameId: string) => void;
+  /** 连线题：删除最后一对连线项 */
+  removeMatchingPair: (matchingGameId: string) => void;
+
+  addDropObj: (dragViewBoxId: string) => void;
+  removeDropObj: (dragViewBoxId: string) => void;
+  addDragObj: (dragViewBoxId: string) => void;
+  removeDragObj: (dragViewBoxId: string) => void;
+  setProxySkin: (parentId: string, skinValue: string) => void;
+  alignDragChildren: (containerId: string, childType: string, action: 'alignH' | 'alignV' | 'spaceH' | 'spaceV', spacing?: number) => void;
+  alignMatchingItems: (matchingGameId: string, camp: 'camp1' | 'camp2', action: 'alignH' | 'alignV' | 'spaceH' | 'spaceV', spacing?: number) => void;
+  alignDropObjToSkin: (elementId: string, propKey: 'skin' | 'tipSkin') => void;
+}
+
+/** 在 course 上根据 subPageId 找到 SubPage（同时遍历 stages 和 previewStages），找不到返回 null。
+ *  实现位于 utils/findSubPage.ts（避免 selection.ts ↔ editorStore.ts 循环 import）。
+ *  re-export 让 store 内部和组件都能从同一处用。 */
+import { findSubPage } from '../utils/findSubPage';
+export { findSubPage };
+
+/** 在 state 上根据当前 currentSubPageId 找到 SubPage（mutable 引用），找不到返回 null */
+function findCurrentSubPage(state: EditorState): SubPage | null {
+  return findSubPage(state.currentCourse, state.currentSubPageId);
+}
+
+function findStageOfSubPage(course: Course | null, subPageId: string | null): Stage | null {
+  if (!course || !subPageId) return null;
+  const fromStages = course.stages.find((s) => s.subPages.some((sp) => sp.id === subPageId));
+  if (fromStages) return fromStages;
+  return (course.previewStages ?? []).find((s) => s.subPages.some((sp) => sp.id === subPageId)) ?? null;
+}
+
+let _idSeq = 0;
+function genId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${(_idSeq++).toString(36)}`;
+}
+
+/** 深拷贝元素数组并为每个元素重新分配 ID，同时把 parentId 和 actions[].targetId 内的旧 ID 引用改写为新 ID。
+ *  用于 duplicateSubPage / addSubPageFromTemplate 等需要克隆整页元素的场景，避免出现重复 React key。 */
+function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[] {
+  const cloned: Element[] = JSON.parse(JSON.stringify(elements));
+  const idMap = new Map<string, string>();
+  for (const el of cloned) {
+    idMap.set(el.id, genId(idPrefix));
+  }
+  for (const el of cloned) {
+    el.id = idMap.get(el.id)!;
+    if (el.parentId && idMap.has(el.parentId)) {
+      el.parentId = idMap.get(el.parentId);
+    }
+    if (Array.isArray(el.actions)) {
+      for (const a of el.actions as Array<{ targetId?: string }>) {
+        if (a.targetId && idMap.has(a.targetId)) a.targetId = idMap.get(a.targetId);
+      }
+    }
+  }
+  return cloned;
+}
+
+/** 确保 course 至少有 1 个 stage、每个 stage 至少有 1 个 subPage。
+ *  对老数据（旧 `pages` 字段）做最小迁移：把每个旧 page 包装成一个独立大关卡，避免直接崩溃。 */
+function ensureCourseShape(course: Course): Course {
+  const legacy = (course as unknown as { pages?: SubPage[] }).pages;
+  if ((!course.stages || course.stages.length === 0) && Array.isArray(legacy) && legacy.length > 0) {
+    course.stages = legacy.map((page, i) => ({
+      id: genId('stage'),
+      name: `关卡 ${i + 1}`,
+      subPages: [{ ...page, name: `小关卡 ${i + 1}-1` }],
+    }));
+    delete (course as unknown as { pages?: SubPage[] }).pages;
+  }
+  if (!course.stages) {
+    course.stages = [];
+  }
+  if (!course.previewStages) {
+    course.previewStages = [];
+  }
+  if (course.previewShrinked === undefined) course.previewShrinked = false;
+  if (course.normalShrinked === undefined) course.normalShrinked = false;
+  return course;
+}
+
+/** 默认关卡命名格式正则。重命名时只覆盖默认格式，保留用户自定义名称。 */
+const STAGE_DEFAULT_RE = /^关卡\s+\d+$/;
+const SUBPAGE_DEFAULT_RE = /^小关卡\s+\d+-\d+$/;
+const PREVIEW_STAGE_DEFAULT_RE = /^预习\s+\d+$/;
+
+/** 按位置重排关卡序号，仅覆盖默认命名格式 */
+function renumberAll(course: Course): void {
+  course.stages.forEach((stage, si) => {
+    if (STAGE_DEFAULT_RE.test(stage.name)) {
+      stage.name = `关卡 ${si + 1}`;
+    }
+    stage.subPages.forEach((sp, sj) => {
+      if (SUBPAGE_DEFAULT_RE.test(sp.name)) {
+        sp.name = `小关卡 ${si + 1}-${sj + 1}`;
+      }
+    });
+  });
+}
+
+function renumberPreviewAll(course: Course): void {
+  course.previewStages?.forEach((stage, si) => {
+    if (PREVIEW_STAGE_DEFAULT_RE.test(stage.name)) {
+      stage.name = `预习 ${si + 1}`;
+    }
+  });
+}
+
+export const useEditorStore = create<EditorState>()(
+  immer((set, get) => ({
+    currentCourse: null,
+    currentStageId: null,
+    currentSubPageId: null,
+    selectedElementIds: [],
+    selectedStageTarget: undefined,
+    clipboard: [],
+    history: [],
+    historyIndex: -1,
+    pageThumbnails: {},
+    customTemplates: [],
+    customTemplateDir: getTemplateDir(),
+
+    loadCustomTemplates: async () => {
+      const list = await listTemplates();
+      set((state) => { state.customTemplates = list; });
+    },
+
+    setCustomTemplateDir: async (dir) => {
+      setTemplateDir(dir);
+      set((state) => { state.customTemplateDir = dir; });
+      const list = await listTemplates();
+      set((state) => { state.customTemplates = list; });
+    },
+
+    setPageThumbnail: (subPageId, dataUrl) =>
+      set((state) => { state.pageThumbnails[subPageId] = dataUrl; }),
+
+    saveHistory: () =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        const newHistory = state.history.slice(0, state.historyIndex + 1);
+        newHistory.push(JSON.parse(JSON.stringify(state.currentCourse)));
+        state.history = newHistory.slice(-50);
+        state.historyIndex = state.history.length - 1;
+        }),
+
+    undo: () =>
+      set((state) => {
+        if (state.historyIndex > 0) {
+          state.historyIndex--;
+          state.currentCourse = JSON.parse(JSON.stringify(state.history[state.historyIndex]));
+        }
+      }),
+
+    redo: () =>
+      set((state) => {
+        if (state.historyIndex < state.history.length - 1) {
+          state.historyIndex++;
+          state.currentCourse = JSON.parse(JSON.stringify(state.history[state.historyIndex]));
+        }
+      }),
+
+    setCurrentCourse: (course) =>
+      set((state) => {
+        ensureCourseShape(course);
+        course.stages = course.stages.map((stage) => ({
+          ...stage,
+          subPages: stage.subPages.map((sp) => ({
+            ...sp,
+            elements: normalizeElementNames(sp.elements),
+          })),
+        }));
+        state.currentCourse = course;
+        const firstStage = course.stages[0];
+        const firstSub = firstStage?.subPages[0];
+        state.currentStageId = firstStage?.id ?? null;
+        state.currentSubPageId = firstSub?.id ?? null;
+        state.history = [JSON.parse(JSON.stringify(course))];
+        state.historyIndex = 0;
+        // 重建所有 SubPage 的局部类型计数器，让新建组件按局部序号命名
+        const allSubPages = [
+          ...course.stages.flatMap(s => s.subPages),
+          ...(course.previewStages?.flatMap(s => s.subPages) ?? []),
+        ];
+        rebuildSubPageCounters(allSubPages);
+      }),
+
+    setCurrentSubPage: (stageId, subPageId) =>
+      set((state) => {
+        state.currentStageId = stageId;
+        state.currentSubPageId = subPageId;
+        // frozen 页面切换进入时自动选中锁定元素
+        const stage = state.currentCourse?.stages.find(s => s.id === stageId)
+          ?? (state.currentCourse?.previewStages ?? []).find(s => s.id === stageId);
+        const page = stage?.subPages.find(sp => sp.id === subPageId);
+        if (page?.frozen) {
+          state.selectedElementIds = page.elements.filter(e => e.locked).map(e => e.id);
+        } else {
+          state.selectedElementIds = [];
+        }
+        state.selectedStageTarget = state.currentCourse?.previewStages?.some(s => s.id === stageId) ? 'preview' : 'normal';
+      }),
+
+    toggleStageShrink: (stageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        // 先从预习关卡查找
+        const previewStage = state.currentCourse.previewStages?.find((s) => s.id === stageId);
+        if (previewStage) {
+          previewStage.shrinked = !previewStage.shrinked;
+          return;
+        }
+        // 再从正课关卡查找
+        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
+        if (stage) stage.shrinked = !stage.shrinked;
+      }),
+
+    addStage: () =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        const stageNum = state.currentCourse.stages.length + 1;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `小关卡 ${stageNum}-1`,
+          elements: [],
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: `关卡 ${stageNum}`,
+          subPages: [newSub],
+        };
+        state.currentCourse.stages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        state.selectedStageTarget = 'normal';
+        renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    addVideoStage: () =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        const stageNum = state.currentCourse.stages.length + 1;
+        const videoEl: Element = {
+          id: genId('el'),
+          type: 'Video',
+          layaType: 'Box',
+          name: 'VideoBg',
+          x: 0,
+          y: 0,
+          width: 1920,
+          height: 1080,
+          rotation: 0,
+          opacity: 1,
+          locked: true,
+          actions: [],
+          props: { videoUrl: '' },
+        };
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: '视频关卡',
+          frozen: true,
+          elements: [videoEl],
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: `视频${stageNum}`,
+          noSubPages: true,
+          subPages: [newSub],
+        };
+        state.currentCourse.stages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [videoEl.id];
+        state.selectedStageTarget = 'normal';
+        renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    addStageFromSubPage: (sourceSubPageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        // Find source sub-page across all stages
+        let sourceSub: SubPage | null = null;
+        for (const stage of state.currentCourse.stages) {
+          const found = stage.subPages.find((sp) => sp.id === sourceSubPageId);
+          if (found) { sourceSub = found; break; }
+        }
+        if (!sourceSub) return;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `小关卡 0-0`,
+          elements: cloneElementsWithNewIds(sourceSub.elements),
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: `关卡 0`,
+          subPages: [newSub],
+        };
+        state.currentCourse.stages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        state.selectedStageTarget = 'normal';
+        renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    addStageFromTemplate: async (templateId) => {
+      const state0 = get();
+      if (!state0.currentCourse) return;
+      const template = state0.customTemplates.find((t) => t.id === templateId);
+      if (!template) return;
+      const courseDir = getCourseDirPath(state0.currentCourse.id);
+      if (!courseDir) throw new Error('NO_DIR_PATH');
+      const elements = await applyTemplate({
+        courseId: state0.currentCourse.id,
+        courseDir,
+        template,
+      });
+      set((state) => {
+        if (!state.currentCourse) return;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `小关卡 0-0`,
+          elements,
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: `关卡 0`,
+          subPages: [newSub],
+        };
+        state.currentCourse.stages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        state.selectedStageTarget = 'normal';
+        renumberAll(state.currentCourse);
+      });
+      get().saveHistory();
+    },
+
+    deleteStage: (stageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        const idx = state.currentCourse.stages.findIndex((s) => s.id === stageId);
+        if (idx === -1) return;
+        state.currentCourse.stages.splice(idx, 1);
+        if (state.currentCourse.stages.length > 0) {
+          const first = state.currentCourse.stages[0];
+          state.currentStageId = first.id;
+          state.currentSubPageId = first.subPages[0]?.id ?? null;
+          state.selectedStageTarget = 'normal';
+        } else {
+          state.currentStageId = null;
+          state.currentSubPageId = null;
+          state.selectedStageTarget = undefined;
+        }
+        state.selectedElementIds = [];
+        if (state.currentCourse.stages.length > 0) renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    clearAllStages: () =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        if (state.currentCourse.stages.length === 0) return;
+        state.currentCourse.stages = [];
+        state.currentStageId = null;
+        state.currentSubPageId = null;
+        state.selectedStageTarget = undefined;
+        state.selectedElementIds = [];
+        get().saveHistory();
+      }),
+
+    reorderStages: (fromIndex, toIndex) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        const [removed] = state.currentCourse.stages.splice(fromIndex, 1);
+        state.currentCourse.stages.splice(toIndex, 0, removed);
+        state.selectedStageTarget = 'normal';
+        renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    addPreviewStage: () =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
+        const previewNum = state.currentCourse.previewStages.length + 1;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `预习 ${previewNum}`,
+          elements: [],
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: `预习 ${previewNum}`,
+          noSubPages: true,
+          subPages: [newSub],
+        };
+        state.currentCourse.previewStages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        state.selectedStageTarget = 'preview';
+        renumberPreviewAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    addPreviewStageFromPreset: (presetId) => {
+      const preset = PRESET_TEMPLATES.find((p) => p.id === presetId);
+      if (!preset) return;
+      set((state) => {
+        if (!state.currentCourse) return;
+        if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
+        const previewNum = state.currentCourse.previewStages.length + 1;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: preset.defaultSubPageName ?? `预习 ${previewNum}`,
+          elements: cloneElementsWithNewIds(preset.elements, 'el'),
+          frozen: preset.frozen ?? false,
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: preset.defaultStageName ?? `预习 ${previewNum}`,
+          noSubPages: true,
+          subPages: [newSub],
+        };
+        state.currentCourse.previewStages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedStageTarget = 'preview';
+        // frozen 页面自动选中锁定元素
+        if (preset.frozen) {
+          state.selectedElementIds = newSub.elements.filter(e => e.locked).map(e => e.id);
+        } else {
+          state.selectedElementIds = [];
+        }
+        renumberPreviewAll(state.currentCourse);
+      });
+      get().saveHistory();
+    },
+
+    addPreviewStageFromSubPage: (sourceSubPageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
+        // Find source sub-page across all arrays (stages + previewStages)
+        let sourceSub: SubPage | null = null;
+        for (const stage of state.currentCourse.stages) {
+          const found = stage.subPages.find((sp) => sp.id === sourceSubPageId);
+          if (found) { sourceSub = found; break; }
+        }
+        if (!sourceSub) {
+          for (const stage of state.currentCourse.previewStages) {
+            const found = stage.subPages.find((sp) => sp.id === sourceSubPageId);
+            if (found) { sourceSub = found; break; }
+          }
+        }
+        if (!sourceSub) return;
+        const previewNum = state.currentCourse.previewStages.length + 1;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `预习 ${previewNum}`,
+          elements: cloneElementsWithNewIds(sourceSub.elements),
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: `预习 ${previewNum}`,
+          noSubPages: true,
+          subPages: [newSub],
+        };
+        state.currentCourse.previewStages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        state.selectedStageTarget = 'preview';
+        renumberPreviewAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    addPreviewStageFromTemplate: async (templateId) => {
+      const state0 = get();
+      if (!state0.currentCourse) return;
+      const template = state0.customTemplates.find((t) => t.id === templateId);
+      if (!template) return;
+      const courseDir = getCourseDirPath(state0.currentCourse.id);
+      if (!courseDir) throw new Error('NO_DIR_PATH');
+      const elements = await applyTemplate({
+        courseId: state0.currentCourse.id,
+        courseDir,
+        template,
+      });
+      set((state) => {
+        if (!state.currentCourse) return;
+        if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
+        const previewNum = state.currentCourse.previewStages.length + 1;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `预习 ${previewNum}`,
+          elements,
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: `预习 ${previewNum}`,
+          noSubPages: true,
+          subPages: [newSub],
+        };
+        state.currentCourse.previewStages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        state.selectedStageTarget = 'preview';
+        renumberPreviewAll(state.currentCourse);
+      });
+      get().saveHistory();
+    },
+
+    deletePreviewStage: (stageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        if (!state.currentCourse.previewStages) return;
+        const idx = state.currentCourse.previewStages.findIndex((s) => s.id === stageId);
+        if (idx === -1) return;
+        state.currentCourse.previewStages.splice(idx, 1);
+        if (state.currentCourse.previewStages.length > 0) {
+          const first = state.currentCourse.previewStages[0];
+          state.currentStageId = first.id;
+          state.currentSubPageId = first.subPages[0]?.id ?? null;
+          state.selectedStageTarget = 'preview';
+        } else if (state.currentCourse.stages.length > 0) {
+          // Fallback to normal stages if previewStages is empty
+          const first = state.currentCourse.stages[0];
+          state.currentStageId = first.id;
+          state.currentSubPageId = first.subPages[0]?.id ?? null;
+          state.selectedStageTarget = 'normal';
+        } else {
+          state.currentStageId = null;
+          state.currentSubPageId = null;
+          state.selectedStageTarget = undefined;
+        }
+        state.selectedElementIds = [];
+        if (state.currentCourse.previewStages.length > 0) renumberPreviewAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    reorderPreviewStages: (fromIndex, toIndex) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        if (!state.currentCourse.previewStages) return;
+        const [removed] = state.currentCourse.previewStages.splice(fromIndex, 1);
+        state.currentCourse.previewStages.splice(toIndex, 0, removed);
+        state.selectedStageTarget = 'preview';
+        renumberPreviewAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    renamePreviewStage: (stageId, name) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        if (!state.currentCourse.previewStages) return;
+        const stage = state.currentCourse.previewStages.find((s) => s.id === stageId);
+        if (stage && name.trim()) {
+          stage.name = name.trim();
+          get().saveHistory();
+        }
+      }),
+
+    togglePreviewShrinked: () =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        state.currentCourse.previewShrinked = !state.currentCourse.previewShrinked;
+      }),
+
+    toggleNormalShrinked: () =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        state.currentCourse.normalShrinked = !state.currentCourse.normalShrinked;
+      }),
+
+    setFeedback: (value) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        state.currentCourse.feedback = value;
+      }),
+
+    addSubPage: (stageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
+        if (!stage) return;
+        const stageIdx = state.currentCourse.stages.indexOf(stage);
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `小关卡 ${stageIdx + 1}-${stage.subPages.length + 1}`,
+          elements: [],
+        };
+        stage.subPages.push(newSub);
+        state.currentStageId = stage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    addSubPageFromSubPage: (stageId, sourceSubPageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
+        if (!stage) return;
+        // Find source sub-page across all stages
+        let sourceSub: SubPage | null = null;
+        for (const s of state.currentCourse.stages) {
+          const found = s.subPages.find((sp) => sp.id === sourceSubPageId);
+          if (found) { sourceSub = found; break; }
+        }
+        if (!sourceSub && state.currentCourse.previewStages) {
+          for (const s of state.currentCourse.previewStages) {
+            const found = s.subPages.find((sp) => sp.id === sourceSubPageId);
+            if (found) { sourceSub = found; break; }
+          }
+        }
+        if (!sourceSub) return;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `小关卡 0-0`,
+          elements: cloneElementsWithNewIds(sourceSub.elements),
+        };
+        stage.subPages.push(newSub);
+        state.currentStageId = stage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    addSubPageFromTemplate: async (stageId, templateId) => {
+      const state0 = get();
+      if (!state0.currentCourse) return;
+      const template = state0.customTemplates.find((t) => t.id === templateId);
+      if (!template) return;
+      const courseDir = getCourseDirPath(state0.currentCourse.id);
+      if (!courseDir) throw new Error('NO_DIR_PATH');
+      const elements = await applyTemplate({
+        courseId: state0.currentCourse.id,
+        courseDir,
+        template,
+      });
+      set((state) => {
+        if (!state.currentCourse) return;
+        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
+        if (!stage) return;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: `小关卡 0-0`,
+          elements,
+        };
+        stage.subPages.push(newSub);
+        state.currentStageId = stage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        renumberAll(state.currentCourse);
+      });
+      get().saveHistory();
+    },
+
+    addStageFromPreset: (presetId) => {
+      const preset = PRESET_TEMPLATES.find((p) => p.id === presetId);
+      if (!preset) return;
+      set((state) => {
+        if (!state.currentCourse) return;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: preset.defaultSubPageName ?? `小关卡 0-0`,
+          elements: cloneElementsWithNewIds(preset.elements, 'el'),
+          frozen: preset.frozen ?? false,
+        };
+        const newStage: Stage = {
+          id: genId('stage'),
+          name: preset.defaultStageName ?? `关卡 0`,
+          noSubPages: preset.noSubPages ?? false,
+          subPages: [newSub],
+        };
+        state.currentCourse.stages.push(newStage);
+        state.currentStageId = newStage.id;
+        state.currentSubPageId = newSub.id;
+        state.selectedStageTarget = 'normal';
+        // frozen 页面自动选中锁定元素
+        if (preset.frozen) {
+          state.selectedElementIds = newSub.elements.filter(e => e.locked).map(e => e.id);
+        } else {
+          state.selectedElementIds = [];
+        }
+        renumberAll(state.currentCourse);
+      });
+      get().saveHistory();
+    },
+
+    addSubPageFromPreset: (stageId, presetId) => {
+      const preset = PRESET_TEMPLATES.find((p) => p.id === presetId);
+      if (!preset) return;
+      set((state) => {
+        if (!state.currentCourse) return;
+        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
+        if (!stage) return;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          name: preset.defaultSubPageName ?? `小关卡 0-0`,
+          elements: cloneElementsWithNewIds(preset.elements, 'el'),
+          frozen: preset.frozen ?? false,
+        };
+        stage.subPages.push(newSub);
+        state.currentStageId = stage.id;
+        state.currentSubPageId = newSub.id;
+        // frozen 页面自动选中锁定元素
+        if (preset.frozen) {
+          state.selectedElementIds = newSub.elements.filter(e => e.locked).map(e => e.id);
+        } else {
+          state.selectedElementIds = [];
+        }
+        renumberAll(state.currentCourse);
+      });
+      get().saveHistory();
+    },
+
+    deleteSubPage: (stageId, subPageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        let stage: Stage | null = state.currentCourse.stages.find((s) => s.id === stageId) ?? null;
+        let target: 'preview' | 'normal' = 'normal';
+        if (!stage && state.currentCourse.previewStages) {
+          stage = state.currentCourse.previewStages.find((s) => s.id === stageId) ?? null;
+          if (stage) target = 'preview';
+        }
+        if (!stage) return;
+        const idx = stage.subPages.findIndex((sp) => sp.id === subPageId);
+        if (idx === -1) return;
+        stage.subPages.splice(idx, 1);
+
+        // 若删完最后一个 sub-page，连大关卡一起删
+        if (stage.subPages.length === 0) {
+          if (target === 'preview') {
+            const stageIdx = state.currentCourse.previewStages!.indexOf(stage);
+            state.currentCourse.previewStages!.splice(stageIdx, 1);
+          } else {
+            const stageIdx = state.currentCourse.stages.indexOf(stage);
+            state.currentCourse.stages.splice(stageIdx, 1);
+          }
+        }
+
+        // 当前选中的 subPage 若被删，重新选中
+        if (state.currentSubPageId === subPageId) {
+          if (target === 'preview' && state.currentCourse.previewStages && state.currentCourse.previewStages.length > 0) {
+            const first = state.currentCourse.previewStages[0];
+            state.currentStageId = first.id;
+            state.currentSubPageId = first.subPages[0]?.id ?? null;
+            state.selectedStageTarget = 'preview';
+          } else if (state.currentCourse.stages.length > 0) {
+            const first = state.currentCourse.stages[0];
+            state.currentStageId = first.id;
+            state.currentSubPageId = first.subPages[0]?.id ?? null;
+            state.selectedStageTarget = 'normal';
+          } else if (state.currentCourse.previewStages && state.currentCourse.previewStages.length > 0) {
+            const first = state.currentCourse.previewStages[0];
+            state.currentStageId = first.id;
+            state.currentSubPageId = first.subPages[0]?.id ?? null;
+            state.selectedStageTarget = 'preview';
+          } else {
+            state.currentStageId = null;
+            state.currentSubPageId = null;
+            state.selectedStageTarget = undefined;
+          }
+          state.selectedElementIds = [];
+        }
+        if (target === 'preview' && state.currentCourse.previewStages && state.currentCourse.previewStages.length > 0) {
+          renumberPreviewAll(state.currentCourse);
+        }
+        if (state.currentCourse.stages.length > 0) renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    duplicateSubPage: (stageId, subPageId) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        let stage: Stage | null = state.currentCourse.stages.find((s) => s.id === stageId) ?? null;
+        if (!stage && state.currentCourse.previewStages) {
+          stage = state.currentCourse.previewStages.find((s) => s.id === stageId) ?? null;
+        }
+        if (!stage) return;
+        const sp = stage.subPages.find((s) => s.id === subPageId);
+        if (!sp) return;
+        const newSub: SubPage = {
+          id: genId('subpage'),
+          // 用合法默认格式占位，下面 renumberAll 会按位置正确编号；
+          // 若原 sub 是用户自定义名，则保留 "副本" 副本格式不被自动重命名覆盖
+          name: SUBPAGE_DEFAULT_RE.test(sp.name) ? `小关卡 0-0` : `${sp.name} 副本`,
+          elements: cloneElementsWithNewIds(sp.elements),
+        };
+        const subIdx = stage.subPages.indexOf(sp);
+        stage.subPages.splice(subIdx + 1, 0, newSub);
+        state.currentSubPageId = newSub.id;
+        state.selectedElementIds = [];
+        renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    reorderSubPages: (stageId, fromIndex, toIndex) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        let stage: Stage | null = state.currentCourse.stages.find((s) => s.id === stageId) ?? null;
+        if (!stage && state.currentCourse.previewStages) {
+          stage = state.currentCourse.previewStages.find((s) => s.id === stageId) ?? null;
+        }
+        if (!stage) return;
+        const [removed] = stage.subPages.splice(fromIndex, 1);
+        stage.subPages.splice(toIndex, 0, removed);
+        if (state.currentCourse.previewStages && state.currentCourse.previewStages.find((s) => s.id === stageId)) {
+          renumberPreviewAll(state.currentCourse);
+        }
+        renumberAll(state.currentCourse);
+        get().saveHistory();
+      }),
+
+    renameStage: (stageId, name) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
+        if (stage && name.trim()) {
+          stage.name = name.trim();
+          get().saveHistory();
+          return;
+        }
+        if (state.currentCourse.previewStages) {
+          const ps = state.currentCourse.previewStages.find((s) => s.id === stageId);
+          if (ps && name.trim()) {
+            ps.name = name.trim();
+            renumberPreviewAll(state.currentCourse);
+            get().saveHistory();
+          }
+        }
+      }),
+
+    renameSubPage: (subPageId, name) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        for (const stage of state.currentCourse.stages) {
+          const sp = stage.subPages.find((s) => s.id === subPageId);
+          if (sp && name.trim()) {
+            sp.name = name.trim();
+            get().saveHistory();
+            return;
+          }
+        }
+        for (const stage of (state.currentCourse.previewStages ?? [])) {
+          const sp = stage.subPages.find((s) => s.id === subPageId);
+          if (sp && name.trim()) {
+            sp.name = name.trim();
+            renumberPreviewAll(state.currentCourse);
+            get().saveHistory();
+            return;
+          }
+        }
+      }),
+
+    addElement: (element) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        if (page.frozen) return;
+        if (!element.name?.trim()) element.name = `${element.layaType || element.type}_1`;
+        // 确保 name 在同一父节点下唯一（局部作用域）
+        const siblings = page.elements.filter(e => e.parentId === element.parentId);
+        const existingNames = siblings.map(e => e.name ?? '');
+        element.name = getUniqueElementName(element.name, existingNames);
+        // 确保 var 唯一（如果需要）— var 仍然是全局唯一标识符
+        if (elementMeta[element.type]?.varFromName) {
+          const baseVar = element.name;
+          element.props.var = getUniqueElementName(baseVar, page.elements.map((e) => (e.props?.var as string) || ''));
+        }
+        page.elements.push(element);
+        get().saveHistory();
+      }),
+
+    updateElement: (id, updates) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const element = page.elements.find((e) => e.id === id);
+        if (!element) return;
+        // locked 元素只允许修改 props（如 videoUrl），不允许修改位置/尺寸
+        if (element.locked) {
+          if (updates.props) {
+            element.props = { ...element.props, ...updates.props };
+          }
+          return;
+        }
+        if (updates.props) {
+          element.props = { ...element.props, ...updates.props };
+        }
+        const { props: _p, ...rest } = updates;
+        Object.assign(element, rest);
+        if (updates.name && elementMeta[element.type]?.varFromName) {
+          const otherVars = page.elements.filter(e => e.id !== id).map(e => (e.props?.var as string) || '');
+          element.props.var = getUniqueElementName(updates.name, otherVars);
+        }
+      }),
+
+    deleteElement: (id) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const el = page.elements.find((e) => e.id === id);
+        if (el?.locked) return;
+        if (el && (el.type === 'BrushDrawBtn' || el.type === 'BrushClearBtn')) {
+          const parent = el.parentId ? page.elements.find((e) => e.id === el.parentId) : null;
+          if (parent && parent.type === 'NewBrushSprite') return;
+        }
+        const toDelete = new Set([id]);
+        if (el?.groupId) {
+          page.elements.forEach((e) => { if (e.groupId === el.groupId) toDelete.add(e.id); });
+        }
+        let changed = true;
+        while (changed) {
+          changed = false;
+          page.elements.forEach((e) => {
+            if (e.parentId && toDelete.has(e.parentId) && !toDelete.has(e.id)) {
+              toDelete.add(e.id);
+              changed = true;
+            }
+          });
+        }
+        page.elements = page.elements.filter((e) => !toDelete.has(e.id));
+        state.selectedElementIds = state.selectedElementIds.filter((eid) => !toDelete.has(eid));
+        get().saveHistory();
+      }),
+
+    reorderElement: (id, newIndex) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const element = page.elements.find((e) => e.id === id);
+        if (!element || element.locked) return;
+        const parentId = element.parentId;
+        // Collect siblings in their current flat-array order
+        const siblings = page.elements.filter((e) => e.parentId === parentId);
+        const currentSiblingPos = siblings.findIndex((e) => e.id === id);
+        if (currentSiblingPos === -1 || currentSiblingPos === newIndex) return;
+        // Reorder the siblings array
+        const [removed] = siblings.splice(currentSiblingPos, 1);
+        siblings.splice(newIndex, 0, removed);
+        // Rebuild flat array: replace all sibling entries with reordered ones, keep others in place
+        const siblingIdSet = new Set(siblings.map((e) => e.id));
+        const newElements: Element[] = [];
+        let siblingIdx = 0;
+        for (const el of page.elements) {
+          if (siblingIdSet.has(el.id)) {
+            newElements.push(siblings[siblingIdx++]);
+          } else {
+            newElements.push(el);
+          }
+        }
+        page.elements = newElements;
+        get().saveHistory();
+      }),
+
+    setElementParent: (id, newParentId) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const element = page.elements.find((e) => e.id === id);
+        if (!element || element.locked) return;
+        if (newParentId) {
+          if (newParentId === id) return;
+          let pid: string | undefined = newParentId;
+          while (pid) {
+            if (pid === id) return;
+            const p = page.elements.find((e) => e.id === pid);
+            pid = p?.parentId;
+          }
+          const parentEl = page.elements.find((e) => e.id === newParentId);
+          if (!parentEl) return;
+          const containerTypes = ['Box', 'ContainerBox', 'PageTurnBox', 'HBox', 'VBox', 'Panel', 'DragView', 'DragViewBox', 'DragDropBox', 'DragDragBox', 'ChoiceBox', 'MatchingGame', 'OneStrokeGame', 'MazeView', 'KlInputBox'];
+          if (!containerTypes.includes(parentEl.type)) return;
+        }
+        const getAncestorOffset = (pid: string | undefined): { ax: number; ay: number } => {
+          let ax = 0, ay = 0, cur = pid;
+          while (cur) {
+            const p = page.elements.find((e) => e.id === cur);
+            if (!p) break;
+            ax += p.x; ay += p.y; cur = p.parentId;
+          }
+          return { ax, ay };
+        };
+        const oldOff = getAncestorOffset(element.parentId);
+        const newOff = getAncestorOffset(newParentId);
+        element.x += oldOff.ax - newOff.ax;
+        element.y += oldOff.ay - newOff.ay;
+        element.parentId = newParentId || undefined;
+
+        // [新增] 调整数组位置：子元素排在父容器所有现有子元素之后
+        if (newParentId) {
+          // 1. 找到父容器在数组中的索引
+          const parentIdx = page.elements.findIndex(e => e.id === newParentId);
+
+          // 2. 找到该容器的所有现有子元素（不包括当前元素）
+          const siblings = page.elements.filter(e =>
+            e.parentId === newParentId && e.id !== id
+          );
+
+          // 3. 确定插入位置
+          let insertIdx;
+          if (siblings.length > 0) {
+            // 有子元素：插在最后一个子元素之后
+            const lastSibling = siblings[siblings.length - 1];
+            insertIdx = page.elements.findIndex(e => e.id === lastSibling.id) + 1;
+          } else {
+            // 无子元素：插在父容器紧邻的下一个位置
+            insertIdx = parentIdx + 1;
+          }
+
+          // 4. 调整数组：先移除，再插入
+          const currentIdx = page.elements.findIndex(e => e.id === id);
+          const [removed] = page.elements.splice(currentIdx, 1);
+          // 如果插入位置在移除位置之后，移除操作会让插入索引向前偏移 1
+          if (insertIdx > currentIdx) insertIdx--;
+          page.elements.splice(insertIdx, 0, removed);
+        }
+
+        get().saveHistory();
+      }),
+
+    selectElement: (id, multi = false) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        const el = page?.elements.find((e) => e.id === id);
+
+        if (multi) {
+          // frozen 页面不允许取消锁定元素的选中
+          if (page?.frozen && page.elements.some(e => e.locked && state.selectedElementIds.includes(e.id))) {
+            if (state.selectedElementIds.includes(id) && el?.locked) return;
+          }
+          if (state.selectedElementIds.includes(id)) {
+            state.selectedElementIds = state.selectedElementIds.filter((eid) => eid !== id);
+          } else {
+            state.selectedElementIds.push(id);
+          }
+        } else {
+          if (el?.groupId && page) {
+            const groupIds = page.elements.filter(e => e.groupId === el.groupId).map(e => e.id);
+            state.selectedElementIds = groupIds;
+          } else {
+            state.selectedElementIds = [id];
+          }
+        }
+      }),
+
+    selectElements: (ids) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (page?.frozen) return;
+        state.selectedElementIds = ids;
+      }),
+
+    clearSelection: () =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        // frozen 页面不允许清空选中（锁定元素必须保持选中）
+        if (page?.frozen) return;
+        state.selectedElementIds = [];
+      }),
+
+    selectAll: () =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (page) state.selectedElementIds = page.elements.map((e) => e.id);
+      }),
+
+    copyElements: () =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const selected = new Set(state.selectedElementIds);
+        // 递归收集选中元素的所有后代元素（子、孙、曾孙...）
+        const toCopy = new Set<string>(selected);
+        const addDescendants = (parentId: string) => {
+          for (const el of page.elements) {
+            if (el.parentId === parentId && !toCopy.has(el.id)) {
+              toCopy.add(el.id);
+              addDescendants(el.id); // 递归收集子元素的子元素
+            }
+          }
+        };
+        for (const id of selected) {
+          addDescendants(id);
+        }
+        state.clipboard = JSON.parse(JSON.stringify(
+          page.elements.filter((e) => toCopy.has(e.id))
+        ));
+      }),
+
+    pasteElements: () =>
+      set((state) => {
+        if (state.clipboard.length === 0) return;
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const idMap = new Map<string, string>();
+        const now = Date.now();
+        state.clipboard.forEach((el, i) => {
+          idMap.set(el.id, `el-${now + i}-${Math.random().toString(36).slice(2, 6)}`);
+        });
+        const newIds: string[] = [];
+
+        // MatchingItem / DragObj / DropObj 走"扫描已用序号 + 最大+1"规则；
+        // 其他类型沿用 getUniqueElementName（按父节点局部去重，含 _2/_3 后缀）。
+        const FIXED_NAME_TYPES = new Set(['MatchingItem', 'DragObj', 'DropObj']);
+
+        state.clipboard.forEach((el) => {
+          const newEl = JSON.parse(JSON.stringify(el));
+          newEl.id = idMap.get(el.id)!;
+          // 先重映射 parentId 和 actions.targetId，让后续 name 生成能扫到正确父节点下的兄弟
+          if (newEl.parentId && idMap.has(newEl.parentId)) newEl.parentId = idMap.get(newEl.parentId);
+          if (newEl.actions) {
+            newEl.actions.forEach((a: { targetId?: string }) => {
+              if (a.targetId && idMap.has(a.targetId)) a.targetId = idMap.get(a.targetId);
+            });
+          }
+
+          // 生成唯一的 name
+          if (FIXED_NAME_TYPES.has(newEl.type)) {
+            // 固定格式命名：保留前缀，重新生成序号
+            if (newEl.type === 'DropObj') {
+              newEl.name = getNextNumberedName('dj', page.elements, newEl.parentId);
+            } else if (newEl.type === 'DragObj') {
+              newEl.name = getNextNumberedName('aj', page.elements, newEl.parentId);
+            } else if (newEl.type === 'MatchingItem') {
+              const originalPrefix = (newEl.name || '').match(/^([a-zA-Z]+)\d+$/)?.[1];
+              const camp = (newEl.props as Record<string, unknown>)?.camp;
+              if (originalPrefix === 'item' && (camp === 'camp1' || camp === 'camp2')) {
+                newEl.name = getNextItemNameForCenterMatch(page.elements, newEl.parentId, camp);
+              } else if (originalPrefix && ['l', 'r', 't', 'b'].includes(originalPrefix)) {
+                newEl.name = getNextNumberedName(originalPrefix, page.elements, newEl.parentId);
+              } else {
+                // 前缀异常 → 走通用兜底
+                const siblings = page.elements.filter(e => e.parentId === newEl.parentId);
+                const reservedNames = new Set(siblings.map(e => e.name ?? '').filter(Boolean));
+                const baseName = (newEl.name?.trim() || '').replace(/_\d+$/, '') || 'item';
+                newEl.name = getUniqueElementName(baseName, reservedNames);
+              }
+            }
+          } else if (newEl.name?.trim()) {
+            // 通用：按父节点分组去重（保留旧行为）
+            const siblings = page.elements.filter(e => e.parentId === newEl.parentId);
+            const reservedNames = new Set(siblings.map(e => e.name ?? '').filter(Boolean));
+            const baseName = newEl.name.trim();
+            const baseNameWithoutNumber = baseName.replace(/_\d+$/, '');
+            newEl.name = getUniqueElementName(baseNameWithoutNumber, reservedNames);
+          }
+
+          // 生成唯一的 var（如果元素需要 var）— var 仍然是全局唯一
+          if (elementMeta[newEl.type]?.varFromName) {
+            const reservedVars = page.elements.map((e) => (e.props?.var as string) || '').filter(Boolean);
+            const baseVar = newEl.name?.trim() || newEl.layaType || newEl.type;
+            const baseVarWithoutNumber = baseVar.replace(/_\d+$/, '');
+            newEl.props.var = getUniqueElementName(baseVarWithoutNumber, reservedVars);
+          }
+
+          // 原位复制：不偏移位置
+          page.elements.push(newEl);
+          newIds.push(newEl.id);
+        });
+        state.selectedElementIds = newIds;
+        get().saveHistory();
+      }),
+
+    duplicateElements: () => {
+      get().copyElements();
+      get().pasteElements();
+    },
+
+    alignElements: (direction) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const els = page.elements.filter((e) => state.selectedElementIds.includes(e.id));
+        if (els.length < 2) return;
+
+        switch (direction) {
+          case 'left': {
+            const minX = Math.min(...els.map((e) => e.x));
+            els.forEach((e) => { e.x = minX; });
+            break;
+          }
+          case 'right': {
+            const maxR = Math.max(...els.map((e) => e.x + e.width));
+            els.forEach((e) => { e.x = maxR - e.width; });
+            break;
+          }
+          case 'centerH': {
+            const minX = Math.min(...els.map((e) => e.x));
+            const maxR = Math.max(...els.map((e) => e.x + e.width));
+            const cx = (minX + maxR) / 2;
+            els.forEach((e) => { e.x = cx - e.width / 2; });
+            break;
+          }
+          case 'top': {
+            const minY = Math.min(...els.map((e) => e.y));
+            els.forEach((e) => { e.y = minY; });
+            break;
+          }
+          case 'bottom': {
+            const maxB = Math.max(...els.map((e) => e.y + e.height));
+            els.forEach((e) => { e.y = maxB - e.height; });
+            break;
+          }
+          case 'centerV': {
+            const minY = Math.min(...els.map((e) => e.y));
+            const maxB = Math.max(...els.map((e) => e.y + e.height));
+            const cy = (minY + maxB) / 2;
+            els.forEach((e) => { e.y = cy - e.height / 2; });
+            break;
+          }
+          case 'distributeH': {
+            if (els.length < 3) return;
+            const sorted = [...els].sort((a, b) => a.x - b.x);
+            const minX = sorted[0].x;
+            const maxR = sorted[sorted.length - 1].x + sorted[sorted.length - 1].width;
+            const totalW = sorted.reduce((s, e) => s + e.width, 0);
+            const gap = (maxR - minX - totalW) / (sorted.length - 1);
+            let cx = minX;
+            sorted.forEach((e) => { e.x = Math.round(cx); cx += e.width + gap; });
+            break;
+          }
+          case 'distributeV': {
+            if (els.length < 3) return;
+            const sorted = [...els].sort((a, b) => a.y - b.y);
+            const minY = sorted[0].y;
+            const maxB = sorted[sorted.length - 1].y + sorted[sorted.length - 1].height;
+            const totalH = sorted.reduce((s, e) => s + e.height, 0);
+            const gap = (maxB - minY - totalH) / (sorted.length - 1);
+            let cy = minY;
+            sorted.forEach((e) => { e.y = Math.round(cy); cy += e.height + gap; });
+            break;
+          }
+        }
+        get().saveHistory();
+      }),
+
+    groupElements: () =>
+      set((state) => {
+        if (state.selectedElementIds.length < 2) return;
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const gid = `group-${Date.now()}`;
+        page.elements.forEach((e) => {
+          if (state.selectedElementIds.includes(e.id)) e.groupId = gid;
+        });
+        get().saveHistory();
+      }),
+
+    ungroupElements: () =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const groupIds = new Set<string>();
+        page.elements.forEach((e) => {
+          if (state.selectedElementIds.includes(e.id) && e.groupId) groupIds.add(e.groupId);
+        });
+        page.elements.forEach((e) => {
+          if (e.groupId && groupIds.has(e.groupId)) e.groupId = undefined;
+        });
+        get().saveHistory();
+      }),
+
+    saveAsCustomTemplate: async (subPageId) => {
+      const state0 = get();
+      if (!state0.currentCourse) return { ok: false, error: 'NO_COURSE' };
+      if (!state0.customTemplateDir) return { ok: false, error: 'NO_TEMPLATE_DIR' };
+      // 跨 stages 找小关卡
+      let sourceSub: SubPage | null = null;
+      for (const stage of state0.currentCourse.stages) {
+        const found = stage.subPages.find((sp) => sp.id === subPageId);
+        if (found) { sourceSub = found; break; }
+      }
+      if (!sourceSub && state0.currentCourse.previewStages) {
+        for (const stage of state0.currentCourse.previewStages) {
+          const found = stage.subPages.find((sp) => sp.id === subPageId);
+          if (found) { sourceSub = found; break; }
+        }
+      }
+      if (!sourceSub) return { ok: false, error: 'SUBPAGE_NOT_FOUND' };
+      const courseDir = getCourseDirPath(state0.currentCourse.id);
+      if (!courseDir) return { ok: false, error: 'NO_DIR_PATH' };
+      try {
+        const template = await saveTemplate({
+          courseId: state0.currentCourse.id,
+          courseDir,
+          sourceSubPage: sourceSub,
+          thumbnailDataUrl: state0.pageThumbnails[subPageId] || undefined,
+        });
+        const list = await listTemplates();
+        set((state) => { state.customTemplates = list; });
+        return { ok: true, template };
+      } catch (e) {
+        return { ok: false, error: (e as Error).message };
+      }
+    },
+
+    removeCustomTemplateAction: async (templateId) => {
+      await removeTemplate(templateId);
+      const list = await listTemplates();
+      set((state) => { state.customTemplates = list; });
+    },
+
+    renameCustomTemplate: async (templateId, newName) => {
+      try {
+        await renameTemplate(templateId, newName);
+        const list = await listTemplates();
+        set((state) => { state.customTemplates = list; });
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: (e as Error).message };
+      }
+    },
+
+    importCustomTemplates: async (sourceDir) => {
+      const result = await importTemplatesFromDir(sourceDir);
+      const list = await listTemplates();
+      set((state) => { state.customTemplates = list; });
+      return result;
+    },
+
+    pinCustomTemplate: async (templateId) => {
+      await pinTemplate(templateId);
+      const list = await listTemplates();
+      set((state) => { state.customTemplates = list; });
+    },
+
+      /** 翻页：切换页面索引，切换 ContainerBox visible */
+      switchPageTurnPage: (elementId: string, newIndex: number) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const ptBox = page.elements.find(e => e.id === elementId);
+        if (!ptBox || ptBox.type !== 'PageTurnBox') return;
+        const pageBoxes = page.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox');
+        const tabBtns = page.elements.filter(e => e.parentId === elementId && e.type === 'SpeechSelectableObj');
+        if (newIndex < 0 || newIndex >= pageBoxes.length) return;
+
+        set((state) => {
+          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          if (!p) return state;
+          // 遍历所有页面，选中的设成 true，其他设成 false
+          pageBoxes.forEach((box, i) => {
+            const el = p.elements.find(e => e.id === box.id);
+            if (el) el.props = { ...el.props, visible: i === newIndex };
+          });
+          tabBtns.forEach((tab, i) => {
+            const el = p.elements.find(e => e.id === tab.id);
+            if (el) el.props = { ...el.props, isSelected: i === newIndex };
+          });
+          const ptEl = p.elements.find(e => e.id === elementId);
+          if (ptEl) ptEl.props = { ...ptEl.props, currentPageIndex: newIndex };
+          return state;
+        });
+        // 同步 Laya 实例侧的 visible
+        pageBoxes.forEach((box, i) => {
+          const obj = getObject(box.id);
+          if (obj) obj.visible = (i === newIndex);
+        });
+        tabBtns.forEach((tab, i) => {
+          const obj = getObject(tab.id);
+          if (obj) obj.isSelected = (i === newIndex);
+        });
+      },
+
+      /** 翻页:添加新页面(ContainerBox + 同步创建标签按钮如果 buttonType 包含 tabs) */
+      addPageTurnPage: (elementId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const ptBox = page.elements.find(e => e.id === elementId);
+        if (!ptBox || ptBox.type !== 'PageTurnBox') return;
+        const buttonType = ((ptBox.props as Record<string, unknown>).buttonType as string) || 'arrows';
+        const needTab = buttonType === 'tabs' || buttonType === 'both';
+        const pageBoxes = page.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox');
+        const tabBtns = page.elements.filter(e => e.parentId === elementId && e.type === 'SpeechSelectableObj');
+        const newIdx = pageBoxes.length;
+
+        const newBox = createDefaultElement('ContainerBox', subPageId ?? undefined);
+        newBox.props = { ...newBox.props, visible: true };
+        newBox.parentId = elementId;
+
+        const lastPageBox = pageBoxes[pageBoxes.length - 1];
+        const lastTab = tabBtns[tabBtns.length - 1];
+
+        let newTab: Element | null = null;
+        if (needTab) {
+          newTab = createDefaultElement('SpeechSelectableObj', subPageId ?? undefined);
+          newTab.parentId = elementId;
+          // 紧贴最后一个标签按钮右侧;没有就放默认位置
+          if (lastTab) {
+            newTab.x = lastTab.x + lastTab.width + 10;
+            newTab.y = lastTab.y;
+          } else {
+            newTab.x = 466;
+            newTab.y = 366;
+          }
+          // 默认 1 对 1：第 newIdx 个 SelectableObj 跳到第 newIdx 个 ContainerBox
+          newTab.actions = [{
+            id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            event: 'onClick',
+            actionType: 'pageTurnGoTo',
+            targetId: elementId,
+            value: newIdx,
+            groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          }];
+        }
+
+        set((state) => {
+          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          if (!p) return state;
+          // 把所有旧页面都设成 false
+          pageBoxes.forEach(box => {
+            const el = p.elements.find(e2 => e2.id === box.id);
+            if (el) el.props = { ...el.props, visible: false };
+          });
+          // 新 ContainerBox 插入到最后一个分页 ContainerBox 后面
+          if (lastPageBox) {
+            const insertAt = p.elements.findIndex(e2 => e2.id === lastPageBox.id) + 1;
+            p.elements.splice(insertAt, 0, newBox);
+          } else {
+            p.elements.push(newBox);
+          }
+          // 标签按钮插入到最后一个 SelectableObj 后面;没有就放在 elements 末尾
+          if (newTab) {
+            if (lastTab) {
+              const insertAt = p.elements.findIndex(e2 => e2.id === lastTab.id) + 1;
+              p.elements.splice(insertAt, 0, newTab);
+            } else {
+              p.elements.push(newTab);
+            }
+          }
+          // 同步所有标签按钮 isSelected
+          const allTabs = p.elements.filter(e2 => e2.parentId === elementId && e2.type === 'SpeechSelectableObj');
+          allTabs.forEach((tab, i) => {
+            const el = p.elements.find(e2 => e2.id === tab.id);
+            if (el) el.props = { ...el.props, isSelected: i === newIdx };
+          });
+          const ptEl = p.elements.find(e2 => e2.id === elementId);
+          if (ptEl) ptEl.props = { ...ptEl.props, currentPageIndex: newIdx };
+          return state;
+        });
+        const ptObj = getObject(elementId);
+        const newObj = createLayaComponent(newBox, ptObj);
+        if (newObj) registerObject(newBox.id, newObj);
+        if (newTab) {
+          const tabObj = createLayaComponent(newTab, ptObj);
+          if (tabObj) registerObject(newTab.id, tabObj);
+        }
+        // 同步 Laya 实例侧的 visible：所有旧页面 false，新页面 true
+        const finalSp = findSubPage(get().currentCourse, subPageId);
+        const finalPageBoxes = finalSp?.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox') ?? [];
+        finalPageBoxes.forEach((box, i) => {
+          const obj = getObject(box.id);
+          if (obj) obj.visible = (i === newIdx);
+        });
+        const finalTabs = finalSp?.elements.filter(e => e.parentId === elementId && e.type === 'SpeechSelectableObj') ?? [];
+        finalTabs.forEach((tab, i) => {
+          const obj = getObject(tab.id);
+          if (obj) obj.isSelected = (i === newIdx);
+        });
+      },
+
+      /** 翻页:删除页面(ContainerBox + 子元素 + 对应标签按钮) */
+      removePageTurnPage: (elementId: string, pageIndex: number) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const ptBox = page.elements.find(e => e.id === elementId);
+        if (!ptBox || ptBox.type !== 'PageTurnBox') return;
+        const pageBoxes = page.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox');
+        const tabBtns = page.elements.filter(e => e.parentId === elementId && e.type === 'SpeechSelectableObj');
+        if (pageIndex < 0 || pageIndex >= pageBoxes.length || pageBoxes.length <= 1) return;
+
+        const boxToRemove = pageBoxes[pageIndex];
+        const tabToRemove = tabBtns[pageIndex]; // 第 i 个标签按钮对应第 i 个分页;可能 undefined
+        const idsToDelete = new Set<string>();
+        idsToDelete.add(boxToRemove.id);
+        if (tabToRemove) idsToDelete.add(tabToRemove.id);
+        for (const el of page.elements) {
+          if (el.parentId === boxToRemove.id) idsToDelete.add(el.id);
+        }
+
+        set((state) => {
+          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          if (!p) return state;
+          p.elements = p.elements.filter(e => !idsToDelete.has(e.id));
+          const currentIndex = (ptBox.props as Record<string, unknown>).currentPageIndex as number;
+          let newIdx = currentIndex;
+          if (pageIndex < currentIndex) newIdx = currentIndex - 1;
+          else if (pageIndex === currentIndex) newIdx = Math.min(currentIndex, pageBoxes.length - 2);
+          const ptEl = p.elements.find(e => e.id === elementId);
+          if (ptEl) ptEl.props = { ...ptEl.props, currentPageIndex: newIdx };
+          const remainingBoxes = p.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox');
+          if (remainingBoxes.length > 0) {
+            remainingBoxes.forEach((box, i) => {
+              const el = p.elements.find(e2 => e2.id === box.id);
+              if (el) el.props = { ...el.props, visible: i === newIdx };
+            });
+          }
+          // 同步剩余标签按钮的 isSelected
+          const remainingTabs = p.elements.filter(e => e.parentId === elementId && e.type === 'SpeechSelectableObj');
+          remainingTabs.forEach((tab, i) => {
+            const el = p.elements.find(e2 => e2.id === tab.id);
+            if (!el) return;
+            el.props = { ...el.props, isSelected: i === newIdx };
+          });
+          return state;
+        });
+        for (const id of idsToDelete) removeObject(id);
+        // 同步 Laya 实例侧的 visible
+        const finalSp = findSubPage(get().currentCourse, subPageId);
+        const finalPageBoxes = finalSp?.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox') ?? [];
+        const finalNewIdx = (finalSp?.elements.find(e => e.id === elementId)?.props as Record<string, unknown> | undefined)?.currentPageIndex as number ?? 0;
+        finalPageBoxes.forEach((box, i) => {
+          const obj = getObject(box.id);
+          if (obj) obj.visible = (i === finalNewIdx);
+        });
+      },
+
+      /** 翻页:切换按钮类型(arrows / tabs / both) */
+      changePageTurnButtonType: (elementId: string, newType: 'arrows' | 'tabs' | 'both') => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const ptBox = page.elements.find(e => e.id === elementId);
+        if (!ptBox || ptBox.type !== 'PageTurnBox') return;
+        const oldType = ((ptBox.props as Record<string, unknown>).buttonType as string) || 'arrows';
+        if (oldType === newType) return;
+
+        const pageBoxes = page.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox');
+        const arrows = page.elements.filter(e =>
+          e.parentId === elementId && (e.type === 'PageTurnLeftBtn' || e.type === 'PageTurnRightBtn')
+        );
+        const tabs = page.elements.filter(e => e.parentId === elementId && e.type === 'SpeechSelectableObj');
+        const currentIndex = (ptBox.props as Record<string, unknown>).currentPageIndex as number;
+
+        const wantArrows = newType === 'arrows' || newType === 'both';
+        const wantTabs = newType === 'tabs' || newType === 'both';
+
+        const idsToDelete = new Set<string>();
+        const elementsToAdd: Element[] = [];
+
+        // 删多余的箭头
+        if (!wantArrows) {
+          for (const a of arrows) idsToDelete.add(a.id);
+        } else if (arrows.length === 0) {
+          // 补齐箭头：注入默认 actions（不设置初始 visible，由运行时 initView 根据当前页决定）
+          const leftBtn = createDefaultElement('PageTurnLeftBtn', subPageId ?? undefined);
+          leftBtn.parentId = elementId;
+          leftBtn.actions = [{
+            id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            event: 'onClick',
+            actionType: 'pageTurnPrevOnce',
+            targetId: elementId,
+            groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          }];
+          const rightBtn = createDefaultElement('PageTurnRightBtn', subPageId ?? undefined);
+          rightBtn.parentId = elementId;
+          rightBtn.actions = [{
+            id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            event: 'onClick',
+            actionType: 'pageTurnNextOnce',
+            targetId: elementId,
+            groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          }];
+          elementsToAdd.push(leftBtn, rightBtn);
+        }
+
+        // 删多余的标签 / 补齐缺失的标签
+        if (!wantTabs) {
+          for (const t of tabs) idsToDelete.add(t.id);
+        } else {
+          // 每页都要有标签
+          const need = pageBoxes.length;
+          if (tabs.length < need) {
+            for (let i = tabs.length; i < need; i++) {
+              const tab = createDefaultElement('SpeechSelectableObj', subPageId ?? undefined);
+              tab.parentId = elementId;
+              const last = tabs[tabs.length - 1] ?? elementsToAdd.find(e => e.type === 'SpeechSelectableObj');
+              if (last) {
+                tab.x = last.x + last.width + 10;
+                tab.y = last.y;
+              } else {
+                tab.x = 466 + i * 130;
+                tab.y = 366;
+              }
+              tab.props = { ...tab.props, isSelected: i === currentIndex };
+              // 默认 1 对 1：第 i 个 SelectableObj 跳到第 i 个 ContainerBox
+              tab.actions = [{
+                id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                event: 'onClick',
+                actionType: 'pageTurnGoTo',
+                targetId: elementId,
+                value: i,
+                groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              }];
+              elementsToAdd.push(tab);
+            }
+          } else if (tabs.length > need) {
+            // 多余的删掉(从尾部开始)
+            for (let i = need; i < tabs.length; i++) idsToDelete.add(tabs[i].id);
+          }
+        }
+
+        set((state) => {
+          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          if (!p) return state;
+          p.elements = p.elements.filter(e => !idsToDelete.has(e.id));
+          for (const el of elementsToAdd) p.elements.push(el);
+          const ptEl = p.elements.find(e => e.id === elementId);
+          if (ptEl) ptEl.props = { ...ptEl.props, buttonType: newType };
+          return state;
+        });
+        for (const id of idsToDelete) removeObject(id);
+        const ptObj = getObject(elementId);
+        for (const el of elementsToAdd) {
+          const obj = createLayaComponent(el, ptObj);
+          if (obj) registerObject(el.id, obj);
+        }
+      },
+
+      /** 翻页:把所有翻页按钮(左/右箭头 + 标签按钮)在 elements 数组里移到 ContainerBox 的最前或最后 */
+      movePageTurnButtons: (elementId: string, position: 'top' | 'bottom') => {
+        set((state) => {
+          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          if (!p) return state;
+          const ptBox = p.elements.find(e => e.id === elementId);
+          if (!ptBox || ptBox.type !== 'PageTurnBox') return state;
+          const isBtn = (e: Element) =>
+            e.parentId === elementId &&
+            (e.type === 'PageTurnLeftBtn' || e.type === 'PageTurnRightBtn' || e.type === 'SpeechSelectableObj');
+          const isPage = (e: Element) =>
+            e.parentId === elementId && e.type === 'ContainerBox';
+          // 收集子元素的位置索引(子元素 = buttons + pages)
+          const childIndices: number[] = [];
+          for (let i = 0; i < p.elements.length; i++) {
+            const e = p.elements[i];
+            if (isBtn(e) || isPage(e)) childIndices.push(i);
+          }
+          if (childIndices.length === 0) return state;
+          const buttons = p.elements.filter(isBtn);
+          const pages = p.elements.filter(isPage);
+          const ordered = position === 'top' ? [...buttons, ...pages] : [...pages, ...buttons];
+          // 把 ordered 写回到原 childIndices 位置(保持其他元素位置不变)
+          for (let k = 0; k < childIndices.length; k++) {
+            p.elements[childIndices[k]] = ordered[k];
+          }
+          return state;
+        });
+      },
+
+      /** 口才课选择题：添加选项 */
+      addChoiceOption: (choiceBoxId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const existingOptions = page.elements.filter(e => e.parentId === choiceBoxId && e.type === 'SpeechSelectableObj');
+        const existingNames = new Set(existingOptions.map(e => e.name));
+        // a-z 用完后继续 aa-zz；预期足够支撑任何合理课件
+        const letters = 'abcdefghijklmnopqrstuvwxyz';
+        let nextName: string | undefined;
+        for (const c of letters) {
+          if (!existingNames.has(c)) { nextName = c; break; }
+        }
+        if (!nextName) {
+          outer: for (const a of letters) {
+            for (const b of letters) {
+              const candidate = a + b;
+              if (!existingNames.has(candidate)) { nextName = candidate; break outer; }
+            }
+          }
+        }
+        if (!nextName) nextName = `opt_${existingOptions.length + 1}`;
+
+        const lastOpt = existingOptions[existingOptions.length - 1];
+        const newOpt = createDefaultElement('SpeechSelectableObj', subPageId ?? undefined);
+        newOpt.name = nextName;
+        newOpt.parentId = choiceBoxId;
+        // 横向追加：上一个选项右侧 +10；与一键创建的横向布局一致
+        newOpt.x = lastOpt ? lastOpt.x + lastOpt.width + 10 : 50;
+        newOpt.y = lastOpt ? lastOpt.y : 50;
+        set((state) => {
+          const sp = findSubPage(state.currentCourse, state.currentSubPageId);
+          if (!sp) return state;
+          sp.elements.push(newOpt);
+          return state;
+        });
+        const obj = createLayaComponent(newOpt, getObject(choiceBoxId));
+        if (obj) registerObject(newOpt.id, obj);
+      },
+
+      /** 口才课选择题：删除最后一个选项 */
+      removeChoiceOption: (choiceBoxId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const existingOptions = page.elements.filter(e => e.parentId === choiceBoxId && e.type === 'SpeechSelectableObj');
+        if (existingOptions.length === 0) return;
+        const lastOpt = existingOptions[existingOptions.length - 1];
+        get().deleteElement(lastOpt.id);
+      },
+
+      /** 填空题：添加输入格 */
+      addFillBlankInput: (klInputBoxId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const existing = page.elements.filter(e => e.parentId === klInputBoxId && e.type === 'KlInputImage');
+        const lastOpt = existing[existing.length - 1];
+        const newInput = createDefaultElement('KlInputImage', subPageId ?? undefined);
+        newInput.parentId = klInputBoxId;
+        newInput.x = lastOpt ? lastOpt.x + lastOpt.width + 10 : 0;
+        newInput.y = lastOpt ? lastOpt.y : 0;
+        // 继承同组键盘 camp
+        if (lastOpt) {
+          const lastProps = lastOpt.props as Record<string, unknown>;
+          if (lastProps.camp) newInput.props = { ...newInput.props, camp: lastProps.camp };
+        }
+        set((state) => {
+          const sp = findSubPage(state.currentCourse, state.currentSubPageId);
+          if (!sp) return state;
+          sp.elements.push(newInput);
+          return state;
+        });
+        const obj = createLayaComponent(newInput, getObject(klInputBoxId));
+        if (obj) registerObject(newInput.id, obj);
+      },
+
+      /** 填空题：删除最后一个输入格 */
+      removeFillBlankInput: (klInputBoxId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const existing = page.elements.filter(e => e.parentId === klInputBoxId && e.type === 'KlInputImage');
+        if (existing.length <= 1) return;
+        const lastOpt = existing[existing.length - 1];
+        get().deleteElement(lastOpt.id);
+      },
+
+      /** 连线题：添加一对连线项（左 camp1 + 右 camp2），位置紧跟各阵营最后一个 item 之后 */
+      addMatchingPair: (matchingGameId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const matchingGame = page.elements.find(e => e.id === matchingGameId);
+        if (!matchingGame) return;
+        const matchBox = page.elements.find(e => e.parentId === matchingGameId && e.type === 'Box');
+        if (!matchBox) return;
+        const items = page.elements.filter(e => e.parentId === matchBox.id && e.type === 'MatchingItem');
+        const camp1Items = items.filter(e => (e.props as Record<string, unknown>).camp === 'camp1');
+        const camp2Items = items.filter(e => (e.props as Record<string, unknown>).camp === 'camp2');
+        const direction = (matchingGame.props as Record<string, unknown>).direction ?? 0;
+
+        // 各阵营起始位置（阵营为空时用默认值）
+        // 默认值与 getMatchingLayout(direction=0/1/2) 第一个 item 的位置一致
+        let leftDefaultX: number, leftDefaultY: number, rightDefaultX: number, rightDefaultY: number;
+        // 沿着哪个方向追加
+        let appendDir: 'down' | 'right';
+        if (direction === 1) {
+          // 上下连线：上方阵营 (860,300) 起始，横向追加（x+100）
+          leftDefaultX = 860; leftDefaultY = 300;
+          rightDefaultX = 860; rightDefaultY = 780;
+          appendDir = 'right';
+        } else {
+          // 左右 / 中心点连线：左侧阵营 (750,450) 起始，纵向追加（y+90）
+          leftDefaultX = 750; leftDefaultY = 450;
+          rightDefaultX = 1130; rightDefaultY = 450;
+          appendDir = 'down';
+        }
+
+        // 命名规则：扫描 matchBox 下已用序号，取最大+1（中心点模式下奇偶分流，每边步进 2）
+        let leftName: string, rightName: string;
+        if (direction === 1) {
+          leftName = getNextNumberedName('t', page.elements, matchBox.id);
+          rightName = getNextNumberedName('b', page.elements, matchBox.id);
+        } else if (direction === 2) {
+          leftName = getNextItemNameForCenterMatch(page.elements, matchBox.id, 'camp1');
+          rightName = getNextItemNameForCenterMatch(page.elements, matchBox.id, 'camp2');
+        } else {
+          leftName = getNextNumberedName('l', page.elements, matchBox.id);
+          rightName = getNextNumberedName('r', page.elements, matchBox.id);
+        }
+
+        // 紧跟各阵营最后一个 item：纵向 +90，横向 +100
+        const lastLeft = camp1Items[camp1Items.length - 1];
+        const lastRight = camp2Items[camp2Items.length - 1];
+        const leftX = lastLeft ? (appendDir === 'down' ? lastLeft.x : lastLeft.x + 100) : leftDefaultX;
+        const leftY = lastLeft ? (appendDir === 'down' ? lastLeft.y + 90 : lastLeft.y) : leftDefaultY;
+        const rightX = lastRight ? (appendDir === 'down' ? lastRight.x : lastRight.x + 100) : rightDefaultX;
+        const rightY = lastRight ? (appendDir === 'down' ? lastRight.y + 90 : lastRight.y) : rightDefaultY;
+
+        const leftItem = createDefaultElement('MatchingItem', subPageId ?? undefined);
+        leftItem.parentId = matchBox.id;
+        leftItem.name = leftName;
+        leftItem.x = leftX;
+        leftItem.y = leftY;
+        leftItem.props = { ...leftItem.props, camp: 'camp1', connectableCamps: 'camp2', rightItemNames: '' };
+
+        const rightItem = createDefaultElement('MatchingItem', subPageId ?? undefined);
+        rightItem.parentId = matchBox.id;
+        rightItem.name = rightName;
+        rightItem.x = rightX;
+        rightItem.y = rightY;
+        rightItem.props = { ...rightItem.props, camp: 'camp2', connectableCamps: 'camp1', rightItemNames: '' };
+
+        set((state) => {
+          const sp = findSubPage(state.currentCourse, state.currentSubPageId);
+          if (!sp) return state;
+          // 元素列表顺序：左 item 插入到 camp1 最后一个之后；右 item 插入到 camp2 最后一个之后
+          // camp1 为空时插入到 matchBox 之后；camp2 为空时插入到 leftItem 之后
+          const arr = sp.elements;
+          const matchBoxIdx = arr.findIndex(e => e.id === matchBox.id);
+          // 计算 leftItem 插入位置
+          let leftInsertIdx: number;
+          if (camp1Items.length > 0) {
+            const lastCamp1Id = camp1Items[camp1Items.length - 1].id;
+            leftInsertIdx = arr.findIndex(e => e.id === lastCamp1Id) + 1;
+          } else {
+            leftInsertIdx = matchBoxIdx + 1;
+          }
+          arr.splice(leftInsertIdx, 0, leftItem);
+          // 计算 rightItem 插入位置（leftItem 已插入，索引可能后移）
+          let rightInsertIdx: number;
+          if (camp2Items.length > 0) {
+            const lastCamp2Id = camp2Items[camp2Items.length - 1].id;
+            rightInsertIdx = arr.findIndex(e => e.id === lastCamp2Id) + 1;
+          } else {
+            // camp2 为空：放在 leftItem 之后
+            rightInsertIdx = arr.findIndex(e => e.id === leftItem.id) + 1;
+          }
+          arr.splice(rightInsertIdx, 0, rightItem);
+          return state;
+        });
+        const boxObj = getObject(matchBox.id);
+        const leftObj = createLayaComponent(leftItem, boxObj);
+        if (leftObj) registerObject(leftItem.id, leftObj);
+        const rightObj = createLayaComponent(rightItem, boxObj);
+        if (rightObj) registerObject(rightItem.id, rightObj);
+      },
+
+      /** 连线题：删除最后一对连线项（camp1 最后一个 + camp2 最后一个） */
+      removeMatchingPair: (matchingGameId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        const page = findSubPage(course, subPageId);
+        if (!page) return;
+        const matchBox = page.elements.find(e => e.parentId === matchingGameId && e.type === 'Box');
+        if (!matchBox) return;
+        const items = page.elements.filter(e => e.parentId === matchBox.id && e.type === 'MatchingItem');
+        const camp1Items = items.filter(e => (e.props as Record<string, unknown>).camp === 'camp1');
+        const camp2Items = items.filter(e => (e.props as Record<string, unknown>).camp === 'camp2');
+        // 两边都为空时无可删项
+        if (camp1Items.length === 0 && camp2Items.length === 0) return;
+        // 各自删除最后一个（允许全删）
+        if (camp1Items.length > 0) {
+          get().deleteElement(camp1Items[camp1Items.length - 1].id);
+        }
+        if (camp2Items.length > 0) {
+          get().deleteElement(camp2Items[camp2Items.length - 1].id);
+        }
+      },
+
+      addDropObj: (dragViewBoxId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
+          for (const page of stage.subPages) {
+            if (page.id !== subPageId) continue;
+            const dropbox = page.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDropBox');
+            if (!dropbox) return;
+            const existing = page.elements.filter(e => e.parentId === dropbox.id && e.type === 'DropObj');
+            const last = existing[existing.length - 1];
+            const newEl = createDefaultElement('DropObj', subPageId ?? undefined);
+            // 扫描 dropbox 下已用 dj 序号，取最大+1（避免删除中间项后产生重复）
+            newEl.name = getNextNumberedName('dj', page.elements, dropbox.id);
+            newEl.parentId = dropbox.id;
+            newEl.x = last ? last.x + 280 : 606;
+            newEl.y = last ? last.y : 445;
+            if (newEl.x > 1700) { newEl.x = 606; newEl.y = (last?.y ?? 445) + 220; }
+            newEl.props = { ...newEl.props, var: newEl.name };
+            set((state) => {
+              const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === state.currentSubPageId);
+              if (!sp) return state;
+              sp.elements.push(newEl);
+              return state;
+            });
+            const obj = createLayaComponent(newEl, getObject(dropbox.id));
+            if (obj) registerObject(newEl.id, obj);
+            return;
+          }
+        }
+      },
+
+      removeDropObj: (dragViewBoxId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
+          for (const page of stage.subPages) {
+            if (page.id !== subPageId) continue;
+            const dropbox = page.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDropBox');
+            if (!dropbox) return;
+            const existing = page.elements.filter(e => e.parentId === dropbox.id && e.type === 'DropObj');
+            if (existing.length === 0) return;
+            const last = existing[existing.length - 1];
+            get().deleteElement(last.id);
+            return;
+          }
+        }
+      },
+
+      addDragObj: (dragViewBoxId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
+          for (const page of stage.subPages) {
+            if (page.id !== subPageId) continue;
+            const dragbox = page.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDragBox');
+            if (!dragbox) return;
+            const existing = page.elements.filter(e => e.parentId === dragbox.id && e.type === 'DragObj');
+            const last = existing[existing.length - 1];
+            const newEl = createDefaultElement('DragObj', subPageId ?? undefined);
+            // 扫描 dragbox 下已用 aj 序号，取最大+1（避免删除中间项后产生重复）
+            newEl.name = getNextNumberedName('aj', page.elements, dragbox.id);
+            newEl.parentId = dragbox.id;
+            newEl.x = last ? last.x + 280 : 606;
+            newEl.y = last ? last.y : 734;
+            if (newEl.x > 1700) { newEl.x = 606; newEl.y = (last?.y ?? 734) + 220; }
+            newEl.props = { ...newEl.props, var: newEl.name };
+            set((state) => {
+              const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === state.currentSubPageId);
+              if (!sp) return state;
+              sp.elements.push(newEl);
+              return state;
+            });
+            const obj = createLayaComponent(newEl, getObject(dragbox.id));
+            if (obj) registerObject(newEl.id, obj);
+            return;
+          }
+        }
+      },
+
+      removeDragObj: (dragViewBoxId: string) => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
+          for (const page of stage.subPages) {
+            if (page.id !== subPageId) continue;
+            const dragbox = page.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDragBox');
+            if (!dragbox) return;
+            const existing = page.elements.filter(e => e.parentId === dragbox.id && e.type === 'DragObj');
+            if (existing.length === 0) return;
+            const last = existing[existing.length - 1];
+            const children = page.elements.filter(e => e.parentId === last.id);
+            for (const child of children) get().deleteElement(child.id);
+            get().deleteElement(last.id);
+            return;
+          }
+        }
+      },
+
+      setProxySkin: (parentId: string, skinValue: string) => {
+        const subPageId = get().currentSubPageId;
+        if (!subPageId) return;
+        const trimmed = (skinValue ?? '').trim();
+
+        // 更新 props.skin
+        set((state) => {
+          const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === subPageId);
+          if (!sp) return state;
+          const p = sp.elements.find(e => e.id === parentId);
+          if (!p) return state;
+          (p.props as Record<string, unknown>).skin = trimmed;
+          (p.props as Record<string, unknown>)._skinLoadToken = (((p.props as Record<string, unknown>)._skinLoadToken as number) ?? 0) + 1;
+          return state;
+        });
+
+        if (!trimmed) return;
+
+        // 读取当前 token
+        const getToken = () => {
+          const cur = get().currentCourse;
+          if (!cur) return -1;
+          for (const stage of [...cur.stages, ...(cur.previewStages ?? [])]) {
+            for (const p of stage.subPages) {
+              const el = p.elements.find(e => e.id === parentId);
+              if (el) return ((el.props as Record<string, unknown>)._skinLoadToken as number) ?? 0;
+            }
+          }
+          return -1;
+        };
+        const token = getToken();
+
+        loadImageSize(trimmed).then(size => {
+          if (!size) return;
+          if (getToken() !== token) return;
+          set((state) => {
+            const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === subPageId);
+            if (!sp) return state;
+            const p = sp.elements.find(e => e.id === parentId);
+            if (!p) return state;
+            p.width = size.w; p.height = size.h;
+            (p.props as Record<string, unknown>).pivotX = size.w / 2;
+            (p.props as Record<string, unknown>).pivotY = size.h / 2;
+            return state;
+          });
+        });
+      },
+
+      alignDragChildren: (containerId: string, childType: string, action: 'alignH' | 'alignV' | 'spaceH' | 'spaceV', spacing?: number) => {
+        set((state) => {
+          const page = findCurrentSubPage(state);
+          if (!page) return;
+          const container = page.elements.find(e => e.id === containerId);
+          if (!container) return;
+          const slot = page.elements.find(e => e.parentId === containerId && e.type === childType);
+          if (!slot) return;
+          const children = page.elements.filter(e => e.parentId === slot.id);
+          if (children.length < 2) return;
+          const sorted = [...children];
+          switch (action) {
+            case 'alignH': {
+              const sorted = [...children].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true }));
+              const cy = sorted[0].y + sorted[0].height / 2;
+              children.forEach(e => { e.y = Math.round(cy - e.height / 2); });
+              break;
+            }
+            case 'alignV': {
+              const sorted = [...children].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true }));
+              const cx = sorted[0].x + sorted[0].width / 2;
+              children.forEach(e => { e.x = Math.round(cx - e.width / 2); });
+              break;
+            }
+            case 'spaceH': {
+              const gap = spacing ?? 0;
+              sorted.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true }));
+              let x = sorted[0].x;
+              sorted.forEach(e => { e.x = Math.round(x); x += e.width + gap; });
+              break;
+            }
+            case 'spaceV': {
+              const gap = spacing ?? 0;
+              sorted.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true }));
+              let y = sorted[0].y;
+              sorted.forEach(e => { e.y = Math.round(y); y += e.height + gap; });
+              break;
+            }
+          }
+        });
+      },
+
+      alignMatchingItems: (matchingGameId: string, camp: 'camp1' | 'camp2', action: 'alignH' | 'alignV' | 'spaceH' | 'spaceV', spacing?: number) => {
+        set((state) => {
+          const page = findCurrentSubPage(state);
+          if (!page) return;
+          const matchBox = page.elements.find(e => e.parentId === matchingGameId && e.type === 'Box');
+          if (!matchBox) return;
+          const items = page.elements.filter(e =>
+            e.parentId === matchBox.id
+            && e.type === 'MatchingItem'
+            && (e.props as Record<string, unknown>)?.camp === camp
+          );
+          if (items.length < 2) return;
+          const sorted = [...items].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '', undefined, { numeric: true }));
+          switch (action) {
+            case 'alignH': {
+              const cy = sorted[0].y + sorted[0].height / 2;
+              items.forEach(e => { e.y = Math.round(cy - e.height / 2); });
+              break;
+            }
+            case 'alignV': {
+              const cx = sorted[0].x + sorted[0].width / 2;
+              items.forEach(e => { e.x = Math.round(cx - e.width / 2); });
+              break;
+            }
+            case 'spaceH': {
+              const gap = spacing ?? 0;
+              let x = sorted[0].x;
+              sorted.forEach(e => { e.x = Math.round(x); x += e.width + gap; });
+              break;
+            }
+            case 'spaceV': {
+              const gap = spacing ?? 0;
+              let y = sorted[0].y;
+              sorted.forEach(e => { e.y = Math.round(y); y += e.height + gap; });
+              break;
+            }
+          }
+        });
+      },
+
+      alignDropObjToSkin: (elementId: string, propKey: 'skin' | 'tipSkin') => {
+        const course = get().currentCourse;
+        const subPageId = get().currentSubPageId;
+        if (!course || !subPageId) return;
+        let el: Element | undefined;
+        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
+          for (const page of stage.subPages) {
+            if (page.id !== subPageId) continue;
+            el = page.elements.find(e => e.id === elementId);
+          }
+        }
+        if (!el) return;
+        const skinPath = (el.props as Record<string, unknown>)?.[propKey] as string | undefined;
+        if (!skinPath) return;
+
+        const applySize = (w: number, h: number) => {
+          set((state) => {
+            const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === subPageId);
+            if (!sp) return state;
+            const target = sp.elements.find(e => e.id === elementId);
+            if (!target) return state;
+            target.width = w;
+            target.height = h;
+            return state;
+          });
+        };
+
+        if (skinPath.startsWith('images/')) {
+          import('../utils/electronFs').then(({ readFileAsDataUrl: readFile }) => {
+            const courseId = course.id;
+            readFile(courseId, skinPath).then(dataUrl => {
+              if (!dataUrl) return;
+              const img = new window.Image();
+              img.onload = () => applySize(img.naturalWidth, img.naturalHeight);
+              img.src = dataUrl;
+            });
+          });
+        } else {
+          const img = new window.Image();
+          img.onload = () => applySize(img.naturalWidth, img.naturalHeight);
+          img.src = skinPath;
+        }
+      },
+  }))
+);
+
+/** 工具函数：从当前 store 状态找到当前 SubPage（外部读取用，请勿修改返回值） */
+export function getCurrentSubPage(state: { currentCourse: Course | null; currentSubPageId: string | null }): SubPage | null {
+  if (!state.currentCourse || !state.currentSubPageId) return null;
+  for (const stage of state.currentCourse.stages) {
+    const sp = stage.subPages.find((s) => s.id === state.currentSubPageId);
+    if (sp) return sp;
+  }
+  for (const stage of (state.currentCourse.previewStages ?? [])) {
+    const sp = stage.subPages.find((s) => s.id === state.currentSubPageId);
+    if (sp) return sp;
+  }
+  return null;
+}
+
+/** 工具函数：从课件中找到包含指定 subPage 的 stage */
+export function getStageOfSubPage(course: Course | null, subPageId: string | null): Stage | null {
+  return findStageOfSubPage(course, subPageId);
+}

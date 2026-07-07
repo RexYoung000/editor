@@ -1,0 +1,414 @@
+{
+    "theme": [
+        {
+            "name": "主题1",
+            "id": 1,
+            "blockly_thumb": "",
+            "keyButtonClickSound": "share/wdkeyboard/sound/click.mp3",
+            "keyboardBg": {
+                "normal": "bg_keyboard.png",
+                "sizeGrid": "36,36,36,36"
+            },
+            "keyButtonBgSkin": {
+                "normal": "btn_button.png",
+                "down": "",
+                "sizeGrid": "24,26,29,23"
+            },
+            "imageButtonsMap": {
+                "normal": {
+                    "橡皮": "tb_xiangpi.png"
+                },
+                "down": null
+            },
+            "fontclips": {
+                "normal": "fc.png",
+                "down": "",
+                "sheet": "0123456789 <-+=>√×"
+            },
+            "res": [
+                {
+                    "url": "res/atlas/share/wdkeyboard/t1.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "share/wdkeyboard/t1/fc.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/sound/click.mp3",
+                    "type": "sound"
+                }
+            ]
+        },
+        {
+            "name": "主题2",
+            "id": 2,
+            "blockly_thumb": "",
+            "keyButtonClickSound": "share/wdkeyboard/sound/click.mp3",
+            "keyboardBg": {
+                "normal": "bg_keyboard.png",
+                "sizeGrid": "36,36,36,36"
+            },
+            "keyButtonBgSkin": {
+                "normal": "btn_button.png",
+                "down": "",
+                "sizeGrid": "24,26,29,23"
+            },
+            "imageButtonsMap": {
+                "normal": {
+                    "橡皮": "tb_xiangpi.png"
+                },
+                "down": null
+            },
+            "fontclips": {
+                "normal": "fc.png",
+                "down": "",
+                "sheet": "0123456789 <-+=>√×"
+            },
+            "res": [
+                {
+                    "url": "res/atlas/share/wdkeyboard/t2.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "share/wdkeyboard/t2/fc.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/sound/click.mp3",
+                    "type": "sound"
+                }
+            ]
+        },
+        {
+            "name": "主题3",
+            "id": 3,
+            "blockly_thumb": "",
+            "keyButtonClickSound": "share/wdkeyboard/sound/click.mp3",
+            "keyboardBg": {
+                "normal": "bg_keyboard.png",
+                "sizeGrid": "36,36,36,36"
+            },
+            "keyButtonBgSkin": {
+                "normal": "btn_button.png",
+                "down": "",
+                "sizeGrid": "24,26,29,23"
+            },
+            "imageButtonsMap": {
+                "normal": {
+                    "橡皮": "tb_xiangpi.png"
+                },
+                "down": null
+            },
+            "fontclips": {
+                "normal": "fc.png",
+                "down": "",
+                "sheet": "0123456789 <-+=>√×"
+            },
+            "res": [
+                {
+                    "url": "res/atlas/share/wdkeyboard/t3.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "share/wdkeyboard/t3/fc.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/sound/click.mp3",
+                    "type": "sound"
+                }
+            ]
+        },
+        {
+            "name": "主题4",
+            "id": 4,
+            "blockly_thumb": "",
+            "keyButtonClickSound": "share/wdkeyboard/sound/click.mp3",
+            "keyboardBg": {
+                "normal": "bg_keyboard.png",
+                "sizeGrid": "36,36,36,36"
+            },
+            "keyButtonBgSkin": {
+                "normal": "btn_button.png",
+                "down": "btn_button_down.png",
+                "sizeGrid": "21,28,29,20"
+            },
+            "imageButtonsMap": {
+                "normal": {
+                    "平方厘米": "dw_pflm.png",
+                    "平方分米": "dw_pffm.png",
+                    "平方米": "dw_pfm.png",
+                    "删除": "tb_shanchu.png",
+                    "橡皮": "tb_xiangpi.png",
+                    "毫米": "dw_hm.png",
+                    "厘米": "dw_lm.png",
+                    "分米": "dw_fm.png",
+                    "千米": "dw_qm.png",
+                    "千克": "dw_qk.png",
+                    "毫升": "dw_hs.png",
+                    "公顷": "dw_gq.png",
+                    "不能": "dw_bn.png"
+                },
+                "down": {
+                    "平方厘米": "dw_pflm_down.png",
+                    "平方分米": "dw_pffm_down.png",
+                    "平方米": "dw_pfm_down.png",
+                    "删除": "tb_shanchu_down.png",
+                    "橡皮": "tb_xiangpi_down.png",
+                    "毫米": "dw_hm_down.png",
+                    "厘米": "dw_lm_down.png",
+                    "分米": "dw_fm_down.png",
+                    "千米": "dw_qm_down.png",
+                    "千克": "dw_qk_down.png",
+                    "毫升": "dw_hs_down.png",
+                    "公顷": "dw_gq_down.png",
+                    "不能": "dw_bn_down.png"
+                }
+            },
+            "fontclips": {
+                "normal": "fc.png",
+                "down": "fc_down.png",
+                "sheet": "ABCDEFGHIJKLMNOPQRSTUVWY abcdefghijklmnopqrstuvwy 0123456789><()×-÷+=.@#XZ []≠≥≤√²³≈°∠αβ平方公顷升米xz分克吨 时秒零一二三四五六七八九个十百千万亿毫厘…不能"
+            },
+            "res": [
+                {
+                    "url": "res/atlas/share/wdkeyboard/t4.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "res/atlas/share/wdkeyboard/t456_down.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "share/wdkeyboard/t4/fc.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/t456_down/fc_down.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/sound/click.mp3",
+                    "type": "sound"
+                }
+            ]
+        },
+        {
+            "name": "主题5",
+            "id": 5,
+            "blockly_thumb": "",
+            "keyButtonClickSound": "share/wdkeyboard/sound/click.mp3",
+            "keyboardBg": {
+                "normal": "bg_keyboard.png",
+                "sizeGrid": "36,36,36,36"
+            },
+            "keyButtonBgSkin": {
+                "normal": "btn_button.png",
+                "down": "btn_button_down.png",
+                "sizeGrid": "21,28,29,20"
+            },
+            "imageButtonsMap": {
+                "normal": {
+                    "平方厘米": "dw_pflm.png",
+                    "平方分米": "dw_pffm.png",
+                    "平方米": "dw_pfm.png",
+                    "删除": "tb_shanchu.png",
+                    "橡皮": "tb_xiangpi.png",
+                    "毫米": "dw_hm.png",
+                    "厘米": "dw_lm.png",
+                    "分米": "dw_fm.png",
+                    "千米": "dw_qm.png",
+                    "千克": "dw_qk.png",
+                    "毫升": "dw_hs.png",
+                    "公顷": "dw_gq.png",
+                    "不能": "dw_bn.png"
+                },
+                "down": {
+                    "平方厘米": "dw_pflm_down.png",
+                    "平方分米": "dw_pffm_down.png",
+                    "平方米": "dw_pfm_down.png",
+                    "删除": "tb_shanchu_down.png",
+                    "橡皮": "tb_xiangpi_down.png",
+                    "毫米": "dw_hm_down.png",
+                    "厘米": "dw_lm_down.png",
+                    "分米": "dw_fm_down.png",
+                    "千米": "dw_qm_down.png",
+                    "千克": "dw_qk_down.png",
+                    "毫升": "dw_hs_down.png",
+                    "公顷": "dw_gq_down.png",
+                    "不能": "dw_bn_down.png"
+                }
+            },
+            "fontclips": {
+                "normal": "fc.png",
+                "down": "fc_down.png",
+                "sheet": "ABCDEFGHIJKLMNOPQRSTUVWY abcdefghijklmnopqrstuvwy 0123456789><()×-÷+=.@#XZ []≠≥≤√²³≈°∠αβ平方公顷升米xz分克吨 时秒零一二三四五六七八九个十百千万亿毫厘…不能"
+            },
+            "res": [
+                {
+                    "url": "res/atlas/share/wdkeyboard/t5.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "res/atlas/share/wdkeyboard/t456_down.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "share/wdkeyboard/t5/fc.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/t456_down/fc_down.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/sound/click.mp3",
+                    "type": "sound"
+                }
+            ]
+        },
+        {
+            "name": "主题6",
+            "id": 6,
+            "blockly_thumb": "",
+            "keyButtonClickSound": "share/wdkeyboard/sound/click.mp3",
+            "keyboardBg": {
+                "normal": "bg_keyboard.png",
+                "sizeGrid": "36,36,36,36"
+            },
+            "keyButtonBgSkin": {
+                "normal": "btn_button.png",
+                "down": "btn_button_down.png",
+                "sizeGrid": "21,28,29,20"
+            },
+            "imageButtonsMap": {
+                "normal": {
+                    "平方厘米": "dw_pflm.png",
+                    "平方分米": "dw_pffm.png",
+                    "平方米": "dw_pfm.png",
+                    "删除": "tb_shanchu.png",
+                    "橡皮": "tb_xiangpi.png",
+                    "毫米": "dw_hm.png",
+                    "厘米": "dw_lm.png",
+                    "分米": "dw_fm.png",
+                    "千米": "dw_qm.png",
+                    "千克": "dw_qk.png",
+                    "毫升": "dw_hs.png",
+                    "公顷": "dw_gq.png",
+                    "不能": "dw_bn.png"
+                },
+                "down": {
+                    "平方厘米": "dw_pflm_down.png",
+                    "平方分米": "dw_pffm_down.png",
+                    "平方米": "dw_pfm_down.png",
+                    "删除": "tb_shanchu_down.png",
+                    "橡皮": "tb_xiangpi_down.png",
+                    "毫米": "dw_hm_down.png",
+                    "厘米": "dw_lm_down.png",
+                    "分米": "dw_fm_down.png",
+                    "千米": "dw_qm_down.png",
+                    "千克": "dw_qk_down.png",
+                    "毫升": "dw_hs_down.png",
+                    "公顷": "dw_gq_down.png",
+                    "不能": "dw_bn_down.png"
+                }
+            },
+            "fontclips": {
+                "normal": "fc.png",
+                "down": "fc_down.png",
+                "sheet": "ABCDEFGHIJKLMNOPQRSTUVWY abcdefghijklmnopqrstuvwy 0123456789><()×-÷+=.@#XZ []≠≥≤√²³≈°∠αβ平方公顷升米xz分克吨 时秒零一二三四五六七八九个十百千万亿毫厘…不能"
+            },
+            "res": [
+                {
+                    "url": "res/atlas/share/wdkeyboard/t6.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "res/atlas/share/wdkeyboard/t456_down.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "share/wdkeyboard/t6/fc.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/t456_down/fc_down.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/sound/click.mp3",
+                    "type": "sound"
+                }
+            ]
+        },
+        {
+            "name": "主题7",
+            "id": 7,
+            "blockly_thumb": "",
+            "keyButtonClickSound": "share/wdkeyboard/sound/click.mp3",
+            "keyboardBg": {
+                "normal": "bg_keyboard.png",
+                "sizeGrid": "10,10,10,10"
+            },
+            "keyButtonBgSkin": {
+                "normal": "btn_button.png",
+                "down": "btn_button_down.png",
+                "sizeGrid": "14,14,14,14"
+            },
+            "imageButtonsMap": {
+                "normal": {
+                    "平方厘米": "dw_pflm.png",
+                    "平方分米": "dw_pffm.png",
+                    "平方米": "dw_pfm.png",
+                    "删除": "tb_shanchu.png",
+                    "橡皮": "tb_xiangpi.png",
+                    "毫米": "dw_hm.png",
+                    "厘米": "dw_lm.png",
+                    "分米": "dw_fm.png",
+                    "千米": "dw_qm.png",
+                    "千克": "dw_qk.png",
+                    "毫升": "dw_hs.png",
+                    "公顷": "dw_gq.png"
+                },
+                "down": {
+                    "平方厘米": "dw_pflm_down.png",
+                    "平方分米": "dw_pffm_down.png",
+                    "平方米": "dw_pfm_down.png",
+                    "删除": "tb_shanchu_down.png",
+                    "橡皮": "tb_xiangpi_down.png",
+                    "毫米": "dw_hm_down.png",
+                    "厘米": "dw_lm_down.png",
+                    "分米": "dw_fm_down.png",
+                    "千米": "dw_qm_down.png",
+                    "千克": "dw_qk_down.png",
+                    "毫升": "dw_hs_down.png",
+                    "公顷": "dw_gq_down.png"
+                }
+            },
+            "fontclips": {
+                "normal": "fc.png",
+                "down": "fc_down.png",
+                "sheet": "ABCDEFGHIJKLMNOPQRSTUVWY abcdefghijklmnopqrstuvwy 0123456789><()×-÷+=.@#XZ []≠≥≤√²³≈°∠αβ平方公顷升米xz分克吨 时秒零一二三四五六七八九个十百千万亿毫厘…"
+            },
+            "res": [
+                {
+                    "url": "res/atlas/share/wdkeyboard/t7.atlas",
+                    "type": "atlas"
+                },
+                {
+                    "url": "share/wdkeyboard/t7/fc.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/t7/fc_down.png",
+                    "type": "image"
+                },
+                {
+                    "url": "share/wdkeyboard/sound/click.mp3",
+                    "type": "sound"
+                }
+            ]
+        }
+    ]
+}

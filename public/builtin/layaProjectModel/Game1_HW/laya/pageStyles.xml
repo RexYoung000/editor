@@ -1,0 +1,4 @@
+<page>
+   <item name="TestView.ui" props="" ifExport="默认" aName=""/>
+   <item name="game_hw/Game1.scene" props="" ifExport="内嵌模式" aName=""/>
+</page>

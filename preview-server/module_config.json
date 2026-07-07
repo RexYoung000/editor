@@ -1,0 +1,45 @@
+{
+	"name": "module_config",
+	"module": {
+		"count_down": {"name": "计时器", "version": "0.4", "enabled": true},
+		"music_vol_ctrl": {"name": "背景音量调节", "version": "0.4", "enabled": true},
+		"author_prompt": {"name": "授权提示动画", "version": "0.5", "enabled": true},
+		"submit_score": {"name": "提交游戏分数", "version": "0.5", "enabled": true},
+		"race_answer": {"name": "抢答器", "version": "0.6", "enabled": true},
+		"student_draw_tool": {"name": "学生端画笔工具", "version": "0.7", "enabled": true},
+		"baby_evaluation": {"name": "宝贝测评", "version": "0.7", "enabled": true},
+		"stage_evaluation": {"name": "阶段测评", "version": "0.7", "enabled": true},
+		"subject_evaluation": {"name": "专题测评", "version": "0.7", "enabled": true},
+		"computing_camp": {"name": "299计算营", "version": "0.7", "enabled": true}
+	},
+	"course":{
+		"desc":"课件类型配置信息",
+		"ct1":{
+			"extSDK":[]
+		},
+		"ct5":{
+			"extSDK":["sdk_baiya_extend.js"]
+		},
+		"ct31":{
+			"extSDK":["sdk_baiya_extend.js"]
+		},
+		"ct32":{
+			"extSDK":["sdk_baiya_extend.js"]
+		},
+		"ct33":{
+			"extSDK":["sdk_baiya_extend.js"]
+		},
+		"ct35":{
+			"extSDK":["sdk_baiya_extend.js"]
+		},
+		"ct102":{
+			"extSDK":["sdk_baiya_extend.js"]
+		},
+		"ct83":{
+			"extSDK":["sdk_baiya_extend.js"]
+		},
+		"ct12":{
+			"extSDK":["sdk_baiya_extend.js"]
+		}
+	}
+}

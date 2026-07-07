@@ -1,0 +1,67 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+!.env.example
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.superpowers/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Runtime files
+.pid
+.preview-pid
+.socket-pid
+.socket.log
+
+# Local service credentials/certificates
+conf/DBConfig.xml
+conf/socket.properties
+conf/*.jks
+socket_baiya/conf/DBConfig.xml
+socket_baiya/conf/socket.properties
+socket_baiya/conf/*.jks
+
+# Sync server runtime artifacts (生成于 forge 根目录，由 teachingService.jar 写入)
+cache/
+
+# Memory and uploads
+memory/
+public/uploads/
+public/builtin/library/
+!public/builtin/library/豌豆表达/
+
+# Preview server generated content
+preview-server/lessons/
+
+# Temporary docs
+docs/research/
+docs/*.pdf
+docs/*.png
+
+# GitLab push documentation (temporary)
+PUSH_TO_GITLAB.md
+
+.claude/*
+!.claude/skills/
+.claude/settings.local.json
+release/

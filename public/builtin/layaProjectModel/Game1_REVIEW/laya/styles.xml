@@ -1,0 +1,31 @@
+<res>
+   <item name="share/comp/label.png" type="Label" compress="0" pack="0" quality="80" props="font=SimHei@@!@@fontSize=30@@!@@color=#ff0000" picType="0" scale="0"/>
+   <item name="share/comp/bg.png" type="Image" compress="0" pack="0" quality="80" props="sizeGrid=30,8,5,8" picType="0" scale="0"/>
+   <item name="share/comp/progress.png" type="ProgressBar" compress="0" pack="0" quality="80" props="sizeGrid=0,9,0,12" picType="0" scale="0"/>
+   <item name="share/comp/button.png" type="Button" compress="0" pack="0" quality="80" props="sizeGrid=10,13,10,12@@!@@labelSize=30@@!@@labelFont=SimHei" picType="0" scale="0"/>
+   <item name="share/comp/blank.png" type="Image" compress="0" pack="0" quality="80" props="sizeGrid=2,2,2,2" picType="0" scale="0"/>
+   <item name="share/comp/textinput.png" type="TextInput" compress="0" pack="0" quality="80" props="font=SimHei@@!@@fontSize=30" picType="0" scale="0"/>
+   <item name="share/bg_1.jpg" type="Image" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="share/ui/dipan_1.png" type="Image" compress="0" pack="0" quality="80" props="sizeGrid=37,42,38,31" picType="0" scale="0"/>
+   <item name="share/animation/answerRace.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="share/animation/txktexiao.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="share/animation/q001.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="share/animation/30001.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="share/animation/guochang_dongwu.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0"/>
+   <item name="share/animation/guochang_xa.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0"/>
+   <item name="share/animation/guochang_xa2.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0"/>
+   <item name="share/animation/guochang_senlin.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0"/>
+   <item name="share/animation/guochang_kuang.png" type="Image" compress="0" pack="2" quality="80" props="" picType="0"/>
+   <item name="game_homework/image/clip_num.png" type="Clip" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="game_homework/image/clip_num1.png" type="Clip" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="game_homework/image/img_cuowutishi.png" type="Image" compress="0" pack="0" quality="80" props="sizeGrid=30,30,30,30" picType="0" scale="0"/>
+   <item name="game_homework/image/img_xuanzhong3.png" type="Image" compress="0" pack="0" quality="80" props="sizeGrid=30,30,30,30" picType="0" scale="0"/>
+   <item name="game_homework/image/img_xuanzhong5.png" type="Image" compress="0" pack="0" quality="80" props="sizeGrid=30,30,30,30" picType="0" scale="0"/>
+   <item name="game_homework/image/clip_num3.png" type="Clip" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="game_homework/image/clip_num5.png" type="Clip" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="game_homework/image/clip_num5_1.png" type="Clip" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="game_homework/image/img_keyboard_green.png" type="Image" compress="0" pack="0" quality="80" props="sizeGrid=30,50,30,50" picType="0" scale="0"/>
+   <item name="share" type="" compress="0" pack="0" quality="80" props="" picType="0" scale="0"/>
+   <item name="game_fxk/animation" type="" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+   <item name="game_fxk/animation/huanjie34/yindao.png" type="Sprite" compress="0" pack="2" quality="80" props="" picType="0" scale="0"/>
+</res>

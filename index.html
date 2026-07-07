@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>豌豆课件编辑器</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // In editor mode there's no course to load, so silence all GameLoader alerts
+      // and prevent GameLoader from auto-initializing its course loading pipeline
+      // which would cause vite to crash when handling the error stacktrace
+      window.alert = function() {};
+      // Override console.error to suppress GameLoader's error reports during editor mode
+      // that would otherwise crash vite's HMR error handler
+      const _origConsoleError = console.error;
+      console.error = function(...args) {
+        const msg = args.join(' ');
+        // Suppress GameLoader course_not_found and course_res_load_error reports
+        if (msg.includes('course_not_found') || msg.includes('course_res_load_error') || msg.includes('初始化Native异常')) {
+          console.warn('[forge] suppressed GameLoader error in editor mode:', msg);
+          return;
+        }
+        _origConsoleError.apply(console, args);
+      };
+    </script>
+    <!-- 完整的 Laya 引擎（包含所有 3D 和物理组件）-->
+    <script src="/libs/GameLoader.max.js"></script>
+    <!-- SDK Baiya 组件库 -->
+    <script src="/libs/sdk_baiya_base.js"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

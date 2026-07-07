@@ -1,0 +1,11 @@
+{
+	"NET_NOT_GOOD": "网络状态不佳",
+	"NET_BAD": "网络状态极差，请注意检查网络设置",
+	"NET_CONNECTED": "网络已连接成功",
+	"NET_CONNECTING": "正在努力连接中……",
+	"OTHER_ONE_LOGIN": "账号已在其他地方登录",
+  "CANT_ENTER_ROOM_TEACHER": "请点击“上课按钮”上课",
+  "CANT_ENTER_ROOM_STUDENT": "等待老师创建房间",
+  "SUBMIT_FAILED": "网络连接有问题，答案提交失败",
+  "SUBMITING": "提交中，请稍候..."
+}

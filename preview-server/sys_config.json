@@ -1,0 +1,122 @@
+{
+    "version": "1.10.11",
+    "name": "sys_config",
+    "env":3,
+    "error_handle": {
+        "__desc": "异常处理",
+        "cant_operate": {
+            "__desc": "无法操作",
+            "game_view": {
+              "auto_fix": false
+            },
+            "game_view_touch": {
+              "time": 10,
+              "auto_fix": true
+            }
+        }
+    },
+    "sdkReqInfo":{
+        "__desc":"请求SDK后台配置信息",
+        "graySDKId":"439460527761051648",
+        "devSDKUrl":"http://dev-rm-gw.vipthink.cn/api/ur/mobile/sdk-config/info",
+        "uatSDKUrl":"http://uat-rm-gw.vipthink.cn/api/ur/mobile/sdk-config/info",
+        "graySDKUrl":"http://rm-gw.vipthink.cn/api/ur/sdk-config/info",
+        "prodSDKUrl":"http://rm-gw.vipthink.cn/api/ur/mobile/sdk-config/info"
+    },
+    "media": {
+      "blendSoundCourse": []
+    },
+    "res": {
+        "__desc": "资源管理",
+        "loadResMode": 0,
+        "timeToFreeRes": 5
+    },
+	"editorSdk":{
+		"__desc": "编辑器SDK",
+        "course_prefix": "edt_",
+		"url":"share/sdk/wonder_blockly_sdk.js"
+	},
+    "course_path": {
+        "__desc": "课件路径",
+        "common": {
+            "rules": [
+                {
+                    "name": "语文/数学预习",
+                    "type": "ch/math-preview",
+                    "test": "^(?!edt_)\\w+_preview$",
+                    "proj_name_format": "${SCID}_LessonZK",
+                    "config_format": "config_${CID}.json"
+                },
+                {
+                    "name": "语文作业",
+                    "type": "ch-hw",
+                    "test": "^ch_\\w+_hw$",
+                    "proj_name_format": "${CID}_LessonHOMEWORK"
+                },
+                {
+                    "name": "数学作业",
+                    "type": "math-hw",
+                    "test": "^(?!edt_|ch_)\\w+_hw$",
+                    "proj_name_format": "${CID}_LessonHW"
+                },
+                {
+                    "name": "编辑器-正课/作业",
+                    "type": "edt-zk/hw",
+                    "test": "^edt_\\w+_(?!.*preview$).*$",
+                    "proj_name_format": "${CID}_Lesson"
+                },
+                {
+                    "name": "编辑器-预习",
+                    "type": "edt-preview",
+                    "test": "^edt_\\w+_preview$",
+                    "proj_name_format": "${SCID}_Lesson",
+                    "config_format": "config_${CID}.json"
+                }
+            ],
+            "other": {
+                "name": "其他",
+                "type": "other",
+                "proj_name_format": "${SCID}_LessonZK"
+            },
+            "zk": {
+                "name": "正课",
+                "type": "ch/math-zk",
+                "proj_name_format": "${CID}_LessonZK"
+            },
+            "fxk": {
+                "name": "复习课",
+                "type": "fxk",
+                "proj_name_format": "${CID}_LessonFXK"
+            },
+            "sse": {
+                "name": "阶段测评",
+                "type": "sse",
+                "proj_name_format": "${CID}_LessonSSEVALUATION"
+            }
+        },
+        "path_rules": {
+            "other": "lessons/other/${PROJ_NAME}",
+            "^edt_ch": "lessons/combine/wonder_editor/chinese/${PROJ_NAME}",
+            "^edt_\\w": "lessons/combine/wonder_editor/maths/${PROJ_NAME}",
+            "^s${1}_v${2}_yz": "lessons/Math/V${2}/YZ/S${1}/${PROJ_NAME}",
+            "^s${1}_v${2}_ms": "lessons/Math/V${2}/MS/S${1}/${PROJ_NAME}",
+            "^s${1}_${2}_review_": "lessons/Math/REVIEW/${2:uppercase}/S${1}/${PROJ_NAME}",
+            "^s${1}_sse${2}_${3}_": "lessons/Math/SPECIAL_EVALUATION/${3:uppercase}/S${1}/${PROJ_NAME}",
+            "^s${1}_yz": "lessons/Math/V4/YZ/S${1}/${PROJ_NAME}",
+            "^s${1}_v5": "lessons/Math/V5/YZ/S${1}/${PROJ_NAME}",
+            "^s${1}_v6": "lessons/Math/V6/YZ/S${1}/${PROJ_NAME}",
+            "^s${1}_v7": "lessons/Math/V7/YZ/S${1}/${PROJ_NAME}",
+            "^s${1}_v8": "lessons/Math/V8/YZ/S${1}/${PROJ_NAME}",
+            "^L${1}_${2}_review_": "lessons/Math/REVIEW/${2:uppercase}/L${1}/${PROJ_NAME}",
+            "^L${1}_sse${2}_${3}_": "lessons/Math/SPECIAL_EVALUATION/${3:uppercase}/L${1}/${PROJ_NAME}",
+            "^L${1}_v${2}_":"lessons/Math/V${2}/YZ/L${1}/${PROJ_NAME}",
+            "^ch_hdzb_s${1}_": "lessons/Chinese/HDLiveLesson/Setp${1}/${PROJ_NAME}",
+            "^ch_(?:hd)?sea_l${1}_": "lessons/Chinese/Overseas/L${1}/${PROJ_NAME}",
+            "^ch_hdpy_": "lessons/Chinese/PinyinClass/${PROJ_NAME}",
+            "test_": "lessons/${PROJ_NAME}",
+            "yxxj": "lessons/yxxj/${PROJ_NAME}",
+            "^go_s${1}_v${2}_":"lessons/GO/V${2}Lesson/Setp${1}/${PROJ_NAME}",
+            "^pp_op${1}_${2}_":"lessons/PP/OP${1}/${2}/${PROJ_NAME}"
+        }
+    }
+}

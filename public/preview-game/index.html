@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forge 课件预览</title>
+    <style>
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+        #info { position: fixed; top: 10px; left: 10px; color: #666; font: 12px monospace; z-index: 999; }
+    </style>
+</head>
+<body>
+    <div id="info">Loading...</div>
+
+    <script src="/libs/GameLoader.max.js"></script>
+    <script src="/libs/sdk_baiya_base.js"></script>
+
+    <script>
+        var checkReady = setInterval(function() {
+            if (!window.Laya || !window.Laya.stage) return;
+            clearInterval(checkReady);
+            boot();
+        }, 100);
+
+        function boot() {
+            var info = document.getElementById('info');
+            info.textContent = 'Laya ready, initializing sdk_baiya...';
+
+            var Klzz = window.Klzz || window.Laya.Klzz || (window.com && window.com.klzz && window.com.klzz.Klzz);
+            if (Klzz && Klzz.__init__) {
+                var Noop = function() { this.__init__ = function(){}; this.reset = function(){}; };
+                var NoopView = function() {};
+                NoopView.prototype.addChild = function(){};
+                NoopView.prototype.__init__ = function(){};
+                try {
+                    Klzz.__init__(1920, 1080, Noop, Noop, Noop, NoopView);
+                } catch(e) {
+                    info.textContent = 'Klzz.__init__ failed: ' + e.message;
+                }
+            }
+
+            var classmap = window.Laya.__classmap;
+            if (classmap) {
+                var GM = classmap['com.biz.model.GlobalModel'];
+                if (GM && !GM.user) GM.user = { id: 'preview', userType: 1, currentRoomId: '', getLessonData: function(){return {};} };
+                var VM = classmap['com.klzz.ui.ViewManager'];
+                if (VM && !VM._instance) VM._instance = {
+                    handleSync: function(){}, getXpathByComp: function(){return '';},
+                    currPage: { currView: { playSound: function(){} }, status: 'prepared' },
+                    currPageIdx: 0, currSubviewIdx: 0,
+                    root: { getChildByName: function(){return null;} },
+                    on: function(){}, once: function(){}, off: function(){}, event: function(){}, toast: function(){}
+                };
+                var VT = classmap['com.biz.VipThink'];
+                if (VT) VT._config = VT._config || { release: 'dev', onRunner: false, course: '' };
+            }
+
+            Laya.loader.load(
+                [{ url: '/res/atlas/share/comp.atlas', type: 'atlas' }],
+                Laya.Handler.create(null, function() {
+                    info.textContent = 'Atlas loaded, loading lesson...';
+                    loadLesson();
+                })
+            );
+        }
+
+        function loadLesson() {
+            var info = document.getElementById('info');
+            var params = new URLSearchParams(window.location.search);
+            var lesson = params.get('lesson') || 'test_LessonForge';
+            var basePath = '/preview-game/lessons/' + lesson + '/';
+
+            Laya.loader.load(
+                [{ url: basePath + 'finalConfig.json', type: 'json' }],
+                Laya.Handler.create(null, function() {
+                    var config = Laya.loader.getRes(basePath + 'finalConfig.json');
+                    if (!config) { info.textContent = 'Failed to load finalConfig.json'; return; }
+
+                    var jsUrl = basePath + 'LessonForge.js';
+                    Laya.loader.load(
+                        [{ url: jsUrl, type: 'text' }],
+                        Laya.Handler.create(null, function() {
+                            var jsCode = Laya.loader.getRes(jsUrl);
+                            if (!jsCode) { info.textContent = 'Failed to load LessonForge.js'; return; }
+
+                            try {
+                                window.eval(jsCode + '//# sourceURL=LessonForge.js');
+                                info.textContent = 'Lesson loaded! Pages: ' + config.pages.length;
+
+                                if (config.pages.length > 0) {
+                                    var page = config.pages[0];
+                                    var viewPath = page.subviews[0].view;
+                                    var viewCls = Laya.ClassUtils.getClass(viewPath);
+                                    if (viewCls) {
+                                        var view = new viewCls();
+                                        Laya.stage.addChild(view);
+                                        if (view.initView) view.initView(false);
+                                        info.textContent = 'Page 0 rendered!';
+                                    } else {
+                                        info.textContent = 'View class not found: ' + viewPath;
+                                    }
+                                }
+                            } catch(e) {
+                                info.textContent = 'Error: ' + e.message;
+                                console.error(e);
+                            }
+                        })
+                    );
+                })
+            );
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "el-cover-bg",
+    "type": "NewImage",
+    "layaType": "Image",
+    "name": "CoverBg",
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1080,
+    "opacity": 1,
+    "rotation": 0,
+    "actions": [],
+    "props": {
+      "skin": "/builtin/runtime/game/image/img_fm.png"
+    }
+  }
+]

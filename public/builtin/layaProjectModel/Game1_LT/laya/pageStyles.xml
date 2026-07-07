@@ -1,0 +1,12 @@
+<page>
+   <item name="TestView.ui" props="" ifExport="默认" aName=""/>
+   <item name="game_lt/GameKey.scene" props="" ifExport="内嵌模式" aName=""/>
+   <item name="game_lt/GameCover.scene" props="" ifExport="内嵌模式" aName=""/>
+   <item name="game_lt/GameLT1.scene" props="" ifExport="内嵌模式" aName=""/>
+   <item name="game_lt/Game0.scene" props="" ifExport="内嵌模式" aName=""/>
+   <item name="game_lt/GameSWDT.scene" props="" ifExport="内嵌模式" aName=""/>
+   <item name="game_lt/GameLT2.scene" props="" ifExport="内嵌模式" aName=""/>
+   <item name="game_lt/game3.scene" props="" ifExport="内嵌模式" aName=""/>
+   <item name="game_lt/Game4.scene" props="" ifExport="内嵌模式" aName=""/>
+   <item name="game_lt/Game1.scene" props="" ifExport="内嵌模式" aName=""/>
+</page>

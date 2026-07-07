@@ -1,0 +1,18 @@
+
+      {
+        // See https://go.microsoft.com/fwlink/?LinkId=733558
+        // for the documentation about the tasks.json format
+        "version": "0.1.0",
+        "command": "C:/Users/bin_bin.liu/AppData/Local/course_work/esbuild/esbuild.exe",
+        "isShellCommand": false,
+        "args": [
+            "${workspaceRoot}/src/Main.ts",
+            "--outfile=${workspaceRoot}/bin/js/bundle.js",
+            "--bundle",
+            "--sourcemap",
+            "--charset=utf8"
+        ],
+          "showOutput": "always"
+      }
+      
+      
