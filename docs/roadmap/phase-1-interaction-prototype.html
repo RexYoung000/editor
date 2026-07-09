@@ -1,0 +1,2027 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>第一阶段交互原型 - 单页内部子页面管理</title>
+  <style>
+    :root {
+      --bg: #eef2f3;
+      --panel: #ffffff;
+      --soft: #f7f9fb;
+      --line: #d5dde5;
+      --ink: #1e2732;
+      --muted: #697586;
+      --teal: #167f78;
+      --blue: #3d6fb5;
+      --coral: #d7654f;
+      --amber: #bf8427;
+      --green: #5c8a56;
+      --left-panel-width: 560px;
+      --left-list-width: 270px;
+      --radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(90deg, rgba(22, 127, 120, 0.06) 1px, transparent 1px),
+        linear-gradient(rgba(61, 111, 181, 0.05) 1px, transparent 1px),
+        var(--bg);
+      background-size: 48px 48px;
+    }
+
+    button,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) auto;
+      gap: 20px;
+      align-items: center;
+      padding: 16px 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(238, 242, 243, 0.94);
+      backdrop-filter: blur(12px);
+    }
+
+    .title h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .title p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .switcher {
+      display: flex;
+      gap: 8px;
+      padding: 5px;
+      border: 1px solid #c7d4d8;
+      border-radius: 10px;
+      background: #dfe8ea;
+    }
+
+    .mode-button {
+      min-height: 40px;
+      padding: 8px 14px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: #42505f;
+      font-size: 13px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .mode-button.active {
+      background: var(--teal);
+      color: #ffffff;
+      box-shadow: 0 8px 22px rgba(22, 127, 120, 0.25);
+    }
+
+    .stage-note {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.66);
+    }
+
+    .note-card {
+      min-height: 46px;
+      display: flex;
+      align-items: center;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      color: #40505f;
+      font-size: 13px;
+    }
+
+    .workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: var(--left-panel-width) 22px minmax(520px, 1fr) 320px;
+      gap: 10px;
+      min-width: max(1260px, calc(var(--left-panel-width) + 890px));
+      min-height: 700px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+
+    body[data-mode="b"] .workspace {
+      grid-template-columns: var(--left-panel-width) 22px minmax(560px, 1fr) 320px;
+    }
+
+    .panel {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: 0 8px 28px rgba(30, 39, 50, 0.07);
+    }
+
+    .panel-head {
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #f8fafb;
+    }
+
+    .panel-head h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .panel-head span {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .panel-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+
+    .small-button {
+      min-height: 30px;
+      padding: 5px 9px;
+      border: 1px solid #bddbd7;
+      border-radius: 7px;
+      background: #e9f5f3;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .left-panel {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 0;
+    }
+
+    .left-body {
+      position: relative;
+      display: flex;
+      min-height: 0;
+    }
+
+    .left-column,
+    .structure-column {
+      min-width: 0;
+      overflow: auto;
+    }
+
+    .left-column {
+      flex: 0 0 var(--left-list-width);
+      min-width: 150px;
+      border-right: 1px solid var(--line);
+      background: #f8fafb;
+    }
+
+    body[data-mode="b"] .left-column,
+    .left-body.structure-collapsed .left-column {
+      flex: 1 1 auto;
+      max-width: none;
+      border-right: 0;
+    }
+
+    .left-body.list-collapsed .left-column {
+      flex: 0 0 0;
+      min-width: 0;
+      max-width: 0;
+      opacity: 0;
+      overflow: hidden;
+      border-right: 0;
+    }
+
+    .left-list-rail,
+    .structure-rail {
+      display: none;
+      flex: 0 0 42px;
+      width: 42px;
+      min-width: 42px;
+      min-height: 220px;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 900;
+      writing-mode: vertical-rl;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .left-list-rail {
+      border-right: 1px solid #c7d8e4;
+      background: #eef4ff;
+      color: var(--blue);
+    }
+
+    .structure-rail {
+      background: #edf8f6;
+    }
+
+    .left-body.list-collapsed .left-list-rail,
+    .left-body.structure-collapsed .structure-rail {
+      display: flex;
+    }
+
+    .structure-column {
+      flex: 1 1 auto;
+      min-width: 160px;
+      background: #ffffff;
+    }
+
+    body[data-mode="b"] .structure-column,
+    body[data-mode="b"] .internal-resizer,
+    body[data-mode="b"] #structureToggle,
+    .left-body.structure-collapsed .structure-column {
+      display: none;
+    }
+
+    .section-label {
+      padding: 12px 12px 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .tree {
+      display: grid;
+      gap: 6px;
+      padding: 0 8px 10px;
+    }
+
+    .tree-row {
+      width: 100%;
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: #40505f;
+      text-align: left;
+      font-size: 13px;
+    }
+
+    .tree-row.active {
+      border-color: rgba(22, 127, 120, 0.28);
+      background: #e8f4f2;
+      color: var(--teal);
+      font-weight: 850;
+    }
+
+    .tree-row.sub {
+      padding-left: 22px;
+      color: #4f5d6c;
+    }
+
+    .tree-row small {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: var(--line);
+    }
+
+    .tree-row.active .dot {
+      background: var(--teal);
+    }
+
+    .element-list {
+      border-top: 1px solid var(--line);
+      padding-bottom: 10px;
+    }
+
+    .element-item {
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin: 0 8px 6px;
+      padding: 6px 8px;
+      border: 1px solid #e3e9ef;
+      border-radius: 7px;
+      background: #ffffff;
+      color: #4e5b68;
+      font-size: 12px;
+    }
+
+    .element-item.related {
+      border-color: rgba(61, 111, 181, 0.45);
+      background: #eef4ff;
+      color: var(--blue);
+      font-weight: 800;
+    }
+
+    .element-item.overlay {
+      border-color: rgba(215, 101, 79, 0.45);
+      background: #fff1ed;
+      color: var(--coral);
+      font-weight: 800;
+    }
+
+    .structure-intro {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fbf7ee;
+      color: #6e5633;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .add-surface {
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      background: #f7fbfb;
+    }
+
+    .add-surface-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .add-surface-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .add-button,
+    .tab-add-button,
+    .type-choice {
+      min-height: 36px;
+      border: 1px solid #bddbd7;
+      border-radius: 7px;
+      background: #ffffff;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .add-button:hover,
+    .tab-add-button:hover,
+    .type-choice:hover {
+      background: #eaf7f5;
+    }
+
+    .add-feedback {
+      min-height: 36px;
+      padding: 9px 10px;
+      border: 1px solid #c7e2de;
+      border-radius: 8px;
+      background: #edf8f6;
+      color: #42645f;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .structure-actions {
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .node-group {
+      display: grid;
+      gap: 7px;
+    }
+
+    .node-group-title {
+      color: #657383;
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .node-button {
+      width: 100%;
+      min-height: 66px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--ink);
+      text-align: left;
+    }
+
+    .node-button.active {
+      border-color: rgba(22, 127, 120, 0.55);
+      background: #edf8f6;
+      box-shadow: inset 4px 0 0 var(--teal);
+    }
+
+    .node-button strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .node-button span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .node-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .type-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #edf2f7;
+      color: #536274;
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .type-dialog {
+      background: #fff1ed;
+      color: var(--coral);
+    }
+
+    .type-peer {
+      background: #eef4ff;
+      color: var(--blue);
+    }
+
+    .type-main {
+      background: #edf8f6;
+      color: var(--teal);
+    }
+
+    .resizer {
+      position: relative;
+      min-width: 22px;
+      background: transparent;
+      border: 0;
+      cursor: col-resize;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .resizer::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 4px;
+      height: 104px;
+      border-radius: 999px;
+      background: #aebec8;
+      transform: translate(-50%, -50%);
+    }
+
+    .resizer::after {
+      content: "拖动调宽";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 18px;
+      min-height: 72px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.86);
+      color: #6d7b88;
+      font-size: 10px;
+      font-weight: 900;
+      writing-mode: vertical-rl;
+      opacity: 0;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    .resizer:hover,
+    .resizer.dragging {
+      background: #e9f4f3;
+    }
+
+    .resizer:hover::before,
+    .resizer.dragging::before {
+      background: var(--teal);
+    }
+
+    .resizer:hover::after,
+    .resizer.dragging::after {
+      opacity: 1;
+    }
+
+    .internal-resizer {
+      flex: 0 0 22px;
+      width: 22px;
+      min-width: 22px;
+      border-right: 1px solid var(--line);
+      border-radius: 0;
+    }
+
+    .canvas-panel {
+      display: grid;
+      grid-template-rows: auto auto auto 1fr;
+      min-height: 0;
+    }
+
+    .canvas-tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    body[data-mode="b"] .canvas-tools {
+      display: none;
+    }
+
+    .tool-chip {
+      min-height: 30px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #ffffff;
+      color: #4a5968;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .canvas-tabbar {
+      position: relative;
+      display: none;
+      align-items: stretch;
+      gap: 10px;
+      padding: 10px 14px 0;
+      border-bottom: 1px solid var(--line);
+      background: #edf3f5;
+    }
+
+    body[data-mode="b"] .canvas-tabbar {
+      display: flex;
+    }
+
+    .tab-strip {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      min-width: 0;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .top-tab {
+      position: relative;
+      flex: 0 0 auto;
+      min-height: 42px;
+      max-width: 190px;
+      padding: 8px 13px 8px 12px;
+      border: 1px solid #c8d6de;
+      border-bottom-color: #aebfc9;
+      border-radius: 8px 8px 0 0;
+      background: #ffffff;
+      color: #506070;
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .top-tab.active {
+      border-color: var(--teal);
+      border-bottom-color: #ffffff;
+      background: #ffffff;
+      color: var(--teal);
+      box-shadow: inset 0 3px 0 var(--teal);
+    }
+
+    .top-tab[data-kind="dialog"] {
+      border-color: #efc7bd;
+      background: #fff8f5;
+    }
+
+    .top-tab[data-kind="dialog"].active {
+      color: var(--coral);
+      box-shadow: inset 0 3px 0 var(--coral);
+    }
+
+    .tab-kind {
+      display: inline-flex;
+      align-items: center;
+      margin-right: 6px;
+      padding: 1px 5px;
+      border-radius: 999px;
+      background: #edf2f7;
+      color: #647281;
+      font-size: 10px;
+      font-weight: 900;
+    }
+
+    .top-tab[data-kind="dialog"] .tab-kind {
+      background: #ffe7df;
+      color: var(--coral);
+    }
+
+    .top-tab[data-kind="peer"] .tab-kind {
+      background: #e7efff;
+      color: var(--blue);
+    }
+
+    .tab-actions {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding-bottom: 7px;
+      margin-left: auto;
+      flex: 0 0 auto;
+    }
+
+    .tab-add-button {
+      min-width: 42px;
+      padding: 6px 12px;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .add-popover {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 8px);
+      z-index: 40;
+      display: none;
+      width: 260px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      box-shadow: 0 20px 50px rgba(30, 39, 50, 0.18);
+    }
+
+    .add-popover.open {
+      display: grid;
+      gap: 8px;
+    }
+
+    .add-popover strong {
+      font-size: 13px;
+    }
+
+    .add-popover p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .type-choice {
+      text-align: left;
+      padding: 9px 10px;
+      color: #31404e;
+    }
+
+    .mode-summary {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .mode-summary strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 13px;
+    }
+
+    .mode-summary span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .mode-chip {
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: #edf8f6;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .canvas-wrap {
+      display: grid;
+      justify-items: center;
+      align-items: start;
+      padding: 22px;
+      overflow: auto;
+      background:
+        linear-gradient(90deg, rgba(30, 39, 50, 0.06) 1px, transparent 1px),
+        linear-gradient(rgba(30, 39, 50, 0.06) 1px, transparent 1px),
+        #dfe7ea;
+      background-size: 30px 30px;
+    }
+
+    .canvas {
+      position: relative;
+      width: min(100%, 900px);
+      aspect-ratio: 16 / 9;
+      min-height: 360px;
+      overflow: hidden;
+      border: 2px solid #263344;
+      border-radius: 10px;
+      background: #f8fbff;
+      box-shadow: 0 22px 70px rgba(30, 39, 50, 0.16);
+    }
+
+    .lesson-bg {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 18% 18%, rgba(61, 111, 181, 0.16), transparent 26%),
+        linear-gradient(140deg, #fdfefe 0%, #edf5f4 58%, #f7f0df 100%);
+    }
+
+    .focus-banner {
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      z-index: 7;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      max-width: calc(100% - 28px);
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(30, 39, 50, 0.84);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .canvas-state {
+      position: absolute;
+      right: 14px;
+      top: 14px;
+      z-index: 7;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #fffdf6;
+      color: #705b35;
+      font-size: 12px;
+      font-weight: 900;
+      box-shadow: 0 8px 22px rgba(30, 39, 50, 0.12);
+    }
+
+    .page-tabs {
+      position: absolute;
+      left: 7%;
+      top: 12%;
+      z-index: 6;
+      display: inline-flex;
+      overflow: hidden;
+      border: 1px solid rgba(38, 51, 68, 0.16);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 10px 22px rgba(30, 39, 50, 0.1);
+    }
+
+    .page-tabs::after {
+      content: "课件内预览入口，不等于编辑对象切换";
+      position: absolute;
+      left: 0;
+      top: calc(100% + 6px);
+      color: #536274;
+      font-size: 11px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .page-tab {
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 0;
+      border-right: 1px solid rgba(38, 51, 68, 0.12);
+      background: transparent;
+      color: #566474;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .page-tab:last-child {
+      border-right: 0;
+    }
+
+    .page-tab.active {
+      background: var(--blue);
+      color: #ffffff;
+    }
+
+    .question-card {
+      position: absolute;
+      left: 7%;
+      top: 24%;
+      width: 50%;
+      min-height: 30%;
+      padding: 22px;
+      border: 1px solid rgba(38, 51, 68, 0.15);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 14px 35px rgba(38, 51, 68, 0.12);
+    }
+
+    .question-card h3 {
+      margin: 0 0 12px;
+      font-size: clamp(18px, 2vw, 26px);
+      letter-spacing: 0;
+    }
+
+    .question-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: clamp(13px, 1.4vw, 16px);
+      line-height: 1.55;
+    }
+
+    .side-card {
+      position: absolute;
+      right: 7%;
+      top: 24%;
+      width: 28%;
+      min-height: 37%;
+      padding: 18px;
+      border: 1px solid rgba(30, 39, 50, 0.12);
+      border-radius: 8px;
+      background: #fff9e6;
+      color: #5f4d28;
+      line-height: 1.5;
+    }
+
+    .side-card b {
+      display: block;
+      margin-bottom: 10px;
+    }
+
+    .canvas-button {
+      position: absolute;
+      min-width: 124px;
+      min-height: 42px;
+      border: 0;
+      border-radius: 8px;
+      color: #ffffff;
+      font-weight: 900;
+      box-shadow: 0 10px 22px rgba(30, 39, 50, 0.18);
+      transition: transform 120ms ease, filter 120ms ease;
+    }
+
+    .canvas-button:hover,
+    .page-tab:hover,
+    .top-tab:hover {
+      transform: translateY(-1px);
+      filter: brightness(0.98);
+    }
+
+    .btn-a {
+      left: 10%;
+      bottom: 16%;
+      background: var(--teal);
+    }
+
+    .btn-b {
+      left: 29%;
+      bottom: 16%;
+      background: var(--blue);
+    }
+
+    .dialog-layer,
+    .peer-layer {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      background: rgba(23, 31, 42, 0.28);
+    }
+
+    .dialog-layer.active,
+    .peer-layer.active {
+      display: flex;
+    }
+
+    .dialog {
+      width: min(540px, 82%);
+      min-height: 236px;
+      padding: 26px;
+      border: 2px solid var(--coral);
+      border-radius: 10px;
+      background: #ffffff;
+      box-shadow: 18px 18px 0 rgba(30, 39, 50, 0.15);
+    }
+
+    .dialog.a { border-color: var(--teal); }
+    .dialog.b { border-color: var(--blue); }
+
+    .dialog h3,
+    .peer-page h3 {
+      margin: 0 0 10px;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+
+    .dialog p,
+    .peer-page p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .peer-layer {
+      background: rgba(61, 111, 181, 0.08);
+    }
+
+    .peer-page {
+      width: 76%;
+      min-height: 62%;
+      padding: 30px;
+      border: 2px solid var(--blue);
+      border-radius: 10px;
+      background: #f0f7ff;
+      box-shadow: 16px 16px 0 rgba(61, 111, 181, 0.15);
+    }
+
+    .close-dialog {
+      min-height: 38px;
+      padding: 8px 13px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #f6f8f9;
+      color: #3f4c58;
+      font-weight: 850;
+    }
+
+    .inspect-panel {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 0;
+    }
+
+    .inspect-body {
+      display: grid;
+      gap: 14px;
+      padding: 14px;
+      overflow: auto;
+    }
+
+    .current-card {
+      padding: 16px;
+      border: 1px solid #c7e2de;
+      border-radius: var(--radius);
+      background: #eef8f7;
+    }
+
+    .current-card h3 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    .current-card p {
+      margin: 0;
+      color: #486761;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .info-block {
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .info-block h4 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+
+    .info-block ul {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .info-block li {
+      position: relative;
+      padding-left: 16px;
+      color: #4a5968;
+      font-size: 13px;
+    }
+
+    .info-block li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.72em;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--teal);
+    }
+
+    .relation-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .relation-row {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border: 1px solid #dbe3eb;
+      border-radius: 8px;
+      background: #f8fafc;
+      color: #46525f;
+      font-size: 13px;
+    }
+
+    .relation-row.active {
+      border-color: rgba(22, 127, 120, 0.45);
+      background: #edf8f6;
+    }
+
+    .relation-row strong {
+      color: var(--ink);
+    }
+
+    .relation-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .management-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .management-actions button {
+      min-height: 32px;
+      border: 1px solid #d7e0e8;
+      border-radius: 7px;
+      background: #ffffff;
+      color: #4b5967;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .risk {
+      border-color: #efc7bd;
+      background: #fff1ed;
+      color: #76483e;
+      line-height: 1.55;
+    }
+
+    .bottom {
+      display: grid;
+      grid-template-columns: minmax(0, 0.72fr) minmax(300px, 0.38fr);
+      gap: 14px;
+      padding: 0 14px 14px;
+    }
+
+    .notes,
+    .summary {
+      padding: 18px;
+    }
+
+    .notes h2,
+    .summary h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .observation-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .observation {
+      min-height: 72px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+      color: #4b5865;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      resize: vertical;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--ink);
+      line-height: 1.6;
+    }
+
+    .summary {
+      background: #202936;
+      color: #f5f7fa;
+    }
+
+    .summary p {
+      margin: 0 0 12px;
+      color: #cbd5df;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .summary .small {
+      color: #aab7c5;
+      font-size: 12px;
+    }
+
+    @media (max-width: 1180px) {
+      .workspace {
+        min-height: 680px;
+      }
+
+      .bottom {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        grid-template-columns: 1fr;
+      }
+
+      .switcher {
+        width: 100%;
+      }
+
+      .mode-button {
+        flex: 1;
+        white-space: normal;
+      }
+
+      .stage-note,
+      .workspace,
+      body[data-mode="b"] .workspace {
+        grid-template-columns: 1fr;
+        min-width: 0;
+      }
+
+      .stage-note {
+        padding: 10px;
+      }
+
+      .workspace {
+        padding: 10px;
+      }
+
+      .resizer {
+        display: none;
+      }
+
+      .left-body,
+      .left-body.list-collapsed,
+      .left-body.structure-collapsed {
+        display: grid;
+        grid-template-columns: 1fr;
+      }
+
+      .left-list-rail,
+      .structure-rail {
+        display: none !important;
+      }
+
+      .left-column,
+      .left-body.list-collapsed .left-column {
+        max-width: none;
+        opacity: 1;
+        border-right: 0;
+      }
+
+      .structure-column {
+        border-top: 1px solid var(--line);
+      }
+
+      .canvas-wrap {
+        padding: 12px;
+      }
+
+      .canvas {
+        min-height: 380px;
+      }
+
+      .mode-summary {
+        grid-template-columns: 1fr;
+      }
+
+      .question-card {
+        left: 6%;
+        top: 22%;
+        width: 88%;
+      }
+
+      .side-card {
+        display: none;
+      }
+
+      .canvas-state {
+        display: none;
+      }
+
+      .btn-a {
+        left: 8%;
+        bottom: 15%;
+      }
+
+      .btn-b {
+        left: auto;
+        right: 8%;
+        bottom: 15%;
+      }
+
+      .dialog,
+      .peer-page {
+        width: 92%;
+        padding: 20px;
+      }
+
+      .observation-grid,
+      .management-actions {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body data-mode="a">
+  <div class="page">
+    <header class="topbar">
+      <div class="title">
+        <h1>第一阶段交互原型：单页内部子页面管理</h1>
+        <p>独立 HTML 原型，只验证老师操作路径，不接真实数据、不影响导出。</p>
+      </div>
+      <div class="switcher" aria-label="方案切换">
+        <button class="mode-button active" data-mode="a" type="button">方案 A：左侧集中管理</button>
+        <button class="mode-button" data-mode="b" type="button">方案 B：顶部 Tab 工作台</button>
+      </div>
+    </header>
+
+    <div class="stage-note">
+      <div class="note-card">验证对象：主界面、弹窗、同级页面</div>
+      <div class="note-card">核心动作：切换、添加、定位、查看逻辑链</div>
+      <div class="note-card">边界约束：不接真实 subPage，不改导出</div>
+      <div class="note-card">拖拽原则：只调宽，不自动收起</div>
+    </div>
+
+    <section class="workspace" aria-label="原型工作区">
+      <aside class="panel left-panel">
+        <div class="panel-head">
+          <div>
+            <h2 id="leftTitle">关卡与内部结构</h2>
+            <span id="leftHint">A 方案：左侧展开管理主界面、弹窗、同级页面。</span>
+          </div>
+          <div class="panel-actions">
+            <button id="leftListToggle" class="small-button" type="button">收起关卡栏</button>
+            <button id="structureToggle" class="small-button" type="button">收起结构区</button>
+          </div>
+        </div>
+
+        <div id="leftBody" class="left-body">
+          <button id="leftListRail" class="left-list-rail" type="button">展开关卡栏</button>
+
+          <div class="left-column">
+            <div class="section-label">关卡跳转</div>
+            <div class="tree">
+              <button class="tree-row" type="button"><span class="dot"></span>环节一 <small>3 关</small></button>
+              <button class="tree-row active" type="button"><span class="dot"></span>小关卡 1-2 <small>当前</small></button>
+              <button class="tree-row sub" type="button"><span class="dot"></span>小关卡 1-3 <small>练习</small></button>
+            </div>
+
+            <div class="element-list">
+              <div class="section-label" id="elementSectionTitle">当前页元素</div>
+              <div id="elementList"></div>
+            </div>
+          </div>
+
+          <div id="internalResizer" class="resizer internal-resizer" role="separator" aria-label="拖动调整左侧两列宽度"></div>
+          <button id="structureRail" class="structure-rail" type="button">展开结构区</button>
+
+          <div class="structure-column">
+            <div id="structureIntro" class="structure-intro"></div>
+            <div class="add-surface">
+              <div class="add-surface-label">添加内部界面</div>
+              <div class="add-surface-actions">
+                <button class="add-button" data-add-type="dialog" type="button">新增弹窗</button>
+                <button class="add-button" data-add-type="peer" type="button">新增同级页面</button>
+              </div>
+              <div id="addFeedback" class="add-feedback">新增会复制主界面的基础表现，但不会复制按钮触发关系。</div>
+            </div>
+            <div id="structureActions" class="structure-actions"></div>
+          </div>
+        </div>
+      </aside>
+
+      <div id="workspaceResizer" class="resizer" role="separator" aria-label="拖动调整整个左侧栏宽度"></div>
+
+      <section class="panel canvas-panel">
+        <div class="panel-head">
+          <div>
+            <h2>模拟画布</h2>
+            <span id="canvasHint">当前编辑对象：主界面</span>
+          </div>
+          <div class="canvas-tools">
+            <button class="tool-chip" data-view="main" type="button">编辑主界面</button>
+            <button class="tool-chip" data-view="dialogA" type="button">编辑提示弹窗</button>
+            <button class="tool-chip" data-view="dialogB" type="button">编辑解析弹窗</button>
+            <button class="tool-chip" data-view="peer2" type="button">编辑同级页面</button>
+          </div>
+        </div>
+
+        <div class="canvas-tabbar" aria-label="方案 B 顶部 Tab 管理">
+          <div id="tabStrip" class="tab-strip"></div>
+          <div class="tab-actions">
+            <button id="tabAddButton" class="tab-add-button" type="button" aria-label="新增内部界面">+</button>
+            <div id="addPopover" class="add-popover">
+              <strong>新增内部界面</strong>
+              <p>新增后会复制主界面基础表现，触发关系需要单独绑定。</p>
+              <button class="type-choice" data-add-type="peer" type="button">新增同级页面</button>
+              <button class="type-choice" data-add-type="dialog" type="button">新增弹窗</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mode-summary">
+          <div>
+            <strong id="modeSummaryTitle">A 方案：左侧集中展开管理</strong>
+            <span id="modeSummaryText">左侧结构区直接展示主界面、弹窗、同级页面，以及每个节点的轻量触发来源。</span>
+          </div>
+          <div id="modeChip" class="mode-chip">当前：主界面</div>
+        </div>
+
+        <div class="canvas-wrap">
+          <div class="canvas" aria-label="课件画布模拟">
+            <div class="lesson-bg"></div>
+            <div id="focusBanner" class="focus-banner">当前编辑：主界面</div>
+            <div id="canvasState" class="canvas-state">编辑态</div>
+
+            <div class="page-tabs" aria-label="课件内分页预览">
+              <button class="page-tab active" data-preview="main" type="button">第 1 题</button>
+              <button class="page-tab" data-preview="peer2" type="button">第 2 题</button>
+              <button class="page-tab" data-preview="peer3" type="button">第 3 题</button>
+            </div>
+
+            <div class="question-card">
+              <h3 id="questionTitle">例题：观察图形变化</h3>
+              <p id="questionDesc">老师在同一个小关卡内管理题干、提示弹窗、解析弹窗和同级补充页面。</p>
+            </div>
+
+            <button class="canvas-button btn-a" data-preview="dialogA" type="button">按钮 A：提示</button>
+            <button class="canvas-button btn-b" data-preview="dialogB" type="button">按钮 B：解析</button>
+
+            <div class="side-card">
+              <b>当前页辅助区</b>
+              <span id="sideCardText">这里模拟主界面的补充信息。画布按钮用于预览触发效果，不等于切换编辑对象。</span>
+            </div>
+
+            <div id="dialogALayer" class="dialog-layer">
+              <div class="dialog a">
+                <h3>提示弹窗</h3>
+                <p>弹窗以主界面作为底图并叠加遮罩。右侧关系面板会说明它由哪个按钮打开。</p>
+                <button class="close-dialog" data-view="main" type="button">关闭并回到主界面</button>
+              </div>
+            </div>
+
+            <div id="dialogBLayer" class="dialog-layer">
+              <div class="dialog b">
+                <h3>解析弹窗</h3>
+                <p>这是由按钮 B 打开的解析弹窗。当前原型用于验证老师能否快速反查来源按钮。</p>
+                <button class="close-dialog" data-view="main" type="button">关闭并回到主界面</button>
+              </div>
+            </div>
+
+            <div id="peerLayer" class="peer-layer">
+              <div class="peer-page">
+                <h3 id="peerTitle">同级页面 2：第二小题</h3>
+                <p id="peerDesc">它属于当前小关卡内部，不是正式流程里的下一小关卡。</p>
+                <button class="close-dialog" data-view="main" type="button">回到主界面</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel inspect-panel">
+        <div class="panel-head">
+          <div>
+            <h2>逻辑链与当前对象</h2>
+            <span>统一查看触发、返回、反向来源。</span>
+          </div>
+        </div>
+
+        <div class="inspect-body">
+          <div class="current-card">
+            <h3 id="currentTitle">主界面</h3>
+            <p id="currentDesc">当前小关卡默认入口，承载题干、按钮和主要操作。</p>
+          </div>
+
+          <div class="info-block">
+            <h4>当前页元素</h4>
+            <ul id="containsList"></ul>
+          </div>
+
+          <div class="info-block">
+            <h4>打开 / 返回逻辑链</h4>
+            <div id="relationList" class="relation-list"></div>
+          </div>
+
+          <div class="info-block">
+            <h4>基础管理动作占位</h4>
+            <div class="management-actions">
+              <button type="button">重命名</button>
+              <button type="button">复制</button>
+              <button type="button">排序</button>
+              <button type="button">删除</button>
+            </div>
+          </div>
+
+          <div id="modeRisk" class="info-block risk"></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="bottom">
+      <div class="panel notes">
+        <h2>体验结论记录区</h2>
+        <div class="observation-grid">
+          <div class="observation">1. 老师能不能快速知道当前小关卡里有哪些内部页面？</div>
+          <div class="observation">2. 老师能不能区分“编辑对象切换”和“画布按钮预览”？</div>
+          <div class="observation">3. 老师能不能从按钮找到弹窗，也能从弹窗反查按钮？</div>
+          <div class="observation">4. 拖拽调宽是否连续，不再出现吸附式卡顿？</div>
+        </div>
+        <textarea placeholder="这里记录体验结论：例如 A 的关系表达更直观，B 的切换更快，但 Tab 过多时需要观察是否拥挤。"></textarea>
+      </div>
+
+      <div class="panel summary">
+        <h2>原型判断标准</h2>
+        <p>如果老师能在 1 分钟内找到主界面、提示弹窗、解析弹窗、同级页面，并能看清对应触发链路，说明结构表达有效。</p>
+        <p>如果老师把同级页面误认为正式下一关，或把画布按钮误认为编辑切换入口，说明方案仍需调整。</p>
+        <p class="small">下一步：根据体验结果拆正式实现 issue，不直接把原型结构搬进真实项目。</p>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const relationTypes = {
+      open: '按钮打开弹窗',
+      page: '分页切换同级页面',
+      close: '关闭返回主界面'
+    };
+
+    const baseViews = {
+      main: {
+        id: 'main',
+        kind: 'main',
+        tabLabel: '主界面',
+        title: '主界面',
+        desc: '当前小关卡默认入口，承载题干、按钮和主要操作。',
+        contains: ['题干卡片', '课件内分页按钮', '按钮 A：提示', '按钮 B：解析', '主界面辅助区'],
+        copiedFromMain: false
+      },
+      peer2: {
+        id: 'peer2',
+        kind: 'peer',
+        tabLabel: '第二小题',
+        title: '同级页面 2：第二小题',
+        desc: '当前小关卡内部的同级页面，不是正式流程里的下一小关卡。',
+        contains: ['第二小题题干', '第二小题操作区', '分页按钮：第 1/3 题'],
+        copiedFromMain: true
+      },
+      peer3: {
+        id: 'peer3',
+        kind: 'peer',
+        tabLabel: '第三小题',
+        title: '同级页面 3：第三小题',
+        desc: '同一个小关卡里的第三个同级页面，适合一关多题的分页组织。',
+        contains: ['第三小题题干', '第三小题操作区', '分页按钮：第 1/2 题'],
+        copiedFromMain: true
+      },
+      dialogA: {
+        id: 'dialogA',
+        kind: 'dialog',
+        tabLabel: '提示弹窗',
+        title: '提示弹窗',
+        desc: '由按钮 A 打开，以主界面为底图并叠加遮罩。',
+        contains: ['提示标题', '提示说明文字', '关闭按钮'],
+        copiedFromMain: true
+      },
+      dialogB: {
+        id: 'dialogB',
+        kind: 'dialog',
+        tabLabel: '解析弹窗',
+        title: '解析弹窗',
+        desc: '由按钮 B 打开，用来承载解析内容。',
+        contains: ['解析标题', '解析说明文字', '关闭按钮'],
+        copiedFromMain: true
+      }
+    };
+
+    let views = { ...baseViews };
+    let viewOrder = ['main', 'peer2', 'peer3', 'dialogA', 'dialogB'];
+    let currentMode = 'a';
+    let currentView = 'main';
+    let structureExpanded = true;
+    let leftListExpanded = true;
+    let newPeerCount = 3;
+    let newDialogCount = 2;
+    let canvasMode = '编辑态';
+
+    const modeButtons = document.querySelectorAll('[data-mode]');
+    const leftTitle = document.getElementById('leftTitle');
+    const leftHint = document.getElementById('leftHint');
+    const leftBody = document.getElementById('leftBody');
+    const leftListToggle = document.getElementById('leftListToggle');
+    const leftListRail = document.getElementById('leftListRail');
+    const structureToggle = document.getElementById('structureToggle');
+    const structureRail = document.getElementById('structureRail');
+    const workspace = document.querySelector('.workspace');
+    const internalResizer = document.getElementById('internalResizer');
+    const workspaceResizer = document.getElementById('workspaceResizer');
+    const structureIntro = document.getElementById('structureIntro');
+    const structureActions = document.getElementById('structureActions');
+    const addFeedback = document.getElementById('addFeedback');
+    const tabStrip = document.getElementById('tabStrip');
+    const tabAddButton = document.getElementById('tabAddButton');
+    const addPopover = document.getElementById('addPopover');
+    const modeSummaryTitle = document.getElementById('modeSummaryTitle');
+    const modeSummaryText = document.getElementById('modeSummaryText');
+    const modeChip = document.getElementById('modeChip');
+    const elementSectionTitle = document.getElementById('elementSectionTitle');
+    const elementList = document.getElementById('elementList');
+    const canvasHint = document.getElementById('canvasHint');
+    const focusBanner = document.getElementById('focusBanner');
+    const canvasState = document.getElementById('canvasState');
+    const questionTitle = document.getElementById('questionTitle');
+    const questionDesc = document.getElementById('questionDesc');
+    const sideCardText = document.getElementById('sideCardText');
+    const peerTitle = document.getElementById('peerTitle');
+    const peerDesc = document.getElementById('peerDesc');
+    const currentTitle = document.getElementById('currentTitle');
+    const currentDesc = document.getElementById('currentDesc');
+    const containsList = document.getElementById('containsList');
+    const relationList = document.getElementById('relationList');
+    const modeRisk = document.getElementById('modeRisk');
+
+    function kindLabel(kind) {
+      if (kind === 'dialog') return '弹窗';
+      if (kind === 'peer') return '同级';
+      return '主界面';
+    }
+
+    function typeClass(kind) {
+      if (kind === 'dialog') return 'type-dialog';
+      if (kind === 'peer') return 'type-peer';
+      return 'type-main';
+    }
+
+    function getRelations() {
+      const relations = [
+        { type: 'open', from: '按钮 A：提示', to: '提示弹窗', target: 'dialogA', source: 'main' },
+        { type: 'open', from: '按钮 B：解析', to: '解析弹窗', target: 'dialogB', source: 'main' },
+        { type: 'page', from: '分页按钮：第 2 题', to: '同级页面 2', target: 'peer2', source: 'main' },
+        { type: 'page', from: '分页按钮：第 3 题', to: '同级页面 3', target: 'peer3', source: 'main' },
+        { type: 'close', from: '弹窗关闭按钮', to: '主界面', target: 'main', source: 'dialogA' },
+        { type: 'close', from: '弹窗关闭按钮', to: '主界面', target: 'main', source: 'dialogB' },
+        { type: 'close', from: '同级页面返回按钮', to: '主界面', target: 'main', source: 'peer2' },
+        { type: 'close', from: '同级页面返回按钮', to: '主界面', target: 'main', source: 'peer3' }
+      ];
+
+      viewOrder.forEach(id => {
+        const view = views[id];
+        if (!view || !view.created) return;
+        if (view.kind === 'dialog') {
+          relations.push({ type: 'close', from: `${view.title}关闭按钮`, to: '主界面', target: 'main', source: id });
+        }
+        if (view.kind === 'peer') {
+          relations.push({ type: 'close', from: `${view.title}返回按钮`, to: '主界面', target: 'main', source: id });
+        }
+      });
+
+      return relations;
+    }
+
+    function relationSummary(viewId) {
+      if (viewId === 'main') return '默认入口';
+      const relation = getRelations().find(item => item.target === viewId && item.source === 'main');
+      if (relation) return `${relation.from} -> ${relation.to}`;
+      const view = views[viewId];
+      return view && view.created ? '新建后待绑定触发关系' : '待配置';
+    }
+
+    function render() {
+      const view = views[currentView] || views.main;
+      currentView = view.id;
+      document.body.dataset.mode = currentMode;
+
+      modeButtons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === currentMode);
+      });
+
+      leftTitle.textContent = currentMode === 'b' ? '关卡与当前页元素' : '关卡与内部结构';
+      leftHint.textContent = currentMode === 'b'
+        ? 'B 方案：左侧保留关卡跳转和当前 Tab 的元素列表。'
+        : 'A 方案：左侧展开管理主界面、弹窗、同级页面。';
+
+      modeSummaryTitle.textContent = currentMode === 'b'
+        ? 'B 方案：PS 式顶部 Tab 工作台'
+        : 'A 方案：左侧集中展开管理';
+      modeSummaryText.textContent = currentMode === 'b'
+        ? '顶部 Tab 负责切换和新增内部页面；左侧只显示关卡跳转和当前页元素，右侧查看完整逻辑链。'
+        : '左侧结构区直接展示主界面、弹窗、同级页面，以及每个节点的轻量触发来源。';
+      modeChip.textContent = `当前：${view.title}`;
+
+      structureIntro.textContent = 'A 方案把小关卡当作一个文件夹：左侧集中管理主界面、弹窗、同级页面；节点只显示轻量关系，完整逻辑链统一放到右侧。';
+      renderStructure();
+      renderTabs();
+      renderElementList(view);
+      renderCanvas(view);
+      renderInspector(view);
+
+      leftBody.classList.toggle('structure-collapsed', !structureExpanded);
+      leftBody.classList.toggle('list-collapsed', !leftListExpanded);
+      leftListToggle.textContent = leftListExpanded ? '收起关卡栏' : '展开关卡栏';
+      structureToggle.textContent = structureExpanded ? '收起结构区' : '展开结构区';
+    }
+
+    function renderStructure() {
+      const groups = [
+        { title: '主界面', ids: viewOrder.filter(id => views[id].kind === 'main') },
+        { title: '同级页面：当前小关卡内部页面', ids: viewOrder.filter(id => views[id].kind === 'peer') },
+        { title: '弹窗：默认带底图 + 遮罩', ids: viewOrder.filter(id => views[id].kind === 'dialog') }
+      ];
+
+      structureActions.innerHTML = groups.map(group => `
+        <div class="node-group">
+          <div class="node-group-title">${group.title}</div>
+          ${group.ids.map(id => {
+            const item = views[id];
+            return `
+              <button type="button" class="node-button ${id === currentView ? 'active' : ''}" data-view="${id}">
+                <strong>${item.title}</strong>
+                <span>${relationSummary(id)}</span>
+                <div class="node-meta">
+                  <span class="type-tag ${typeClass(item.kind)}">${kindLabel(item.kind)}</span>
+                  ${item.copiedFromMain ? '<span class="type-tag">复制主界面基础表现</span>' : ''}
+                </div>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      `).join('');
+
+      structureActions.querySelectorAll('[data-view]').forEach(btn => {
+        btn.addEventListener('click', () => setView(btn.dataset.view));
+      });
+    }
+
+    function renderTabs() {
+      tabStrip.innerHTML = viewOrder.map(id => {
+        const view = views[id];
+        return `
+          <button class="top-tab ${id === currentView ? 'active' : ''}" data-view="${id}" data-kind="${view.kind}" type="button">
+            <span class="tab-kind">${kindLabel(view.kind)}</span>${view.tabLabel}
+          </button>
+        `;
+      }).join('');
+
+      tabStrip.querySelectorAll('[data-view]').forEach(btn => {
+        btn.addEventListener('click', () => setView(btn.dataset.view));
+      });
+    }
+
+    function renderElementList(view) {
+      elementSectionTitle.textContent = `${view.title}元素`;
+      elementList.innerHTML = view.contains.map(item => {
+        const isRelated = item.includes('按钮') || item.includes('分页') || item.includes('返回') || item.includes('关闭');
+        const isOverlay = view.kind === 'dialog';
+        return `
+          <div class="element-item ${isRelated ? 'related' : ''} ${isOverlay ? 'overlay' : ''}">
+            <span class="dot"></span>
+            <span>${item}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderCanvas(view) {
+      const isDialog = view.kind === 'dialog';
+      const isPeer = view.kind === 'peer';
+      canvasHint.textContent = `当前编辑对象：${view.title}`;
+      focusBanner.textContent = `当前编辑：${view.title}`;
+      canvasState.textContent = canvasMode;
+
+      questionTitle.textContent = isPeer ? view.title : '例题：观察图形变化';
+      questionDesc.textContent = isPeer
+        ? '这是当前小关卡内部的同级页面。它从主界面复制基础表现后继续拓展，不是正式下一关。'
+        : '老师在同一个小关卡内管理题干、提示弹窗、解析弹窗和同级补充页面。';
+      sideCardText.textContent = isDialog
+        ? '弹窗编辑时保留主界面底图和遮罩感，帮助老师判断覆盖关系。'
+        : '画布按钮用于预览触发效果，不等于切换编辑对象。';
+
+      document.getElementById('dialogALayer').classList.toggle('active', currentView === 'dialogA');
+      document.getElementById('dialogBLayer').classList.toggle('active', currentView === 'dialogB' || (isDialog && view.created));
+      document.getElementById('peerLayer').classList.toggle('active', isPeer);
+
+      if (isPeer) {
+        peerTitle.textContent = view.title;
+        peerDesc.textContent = `${view.desc} 新增同级页面会复制主界面基础表现，但触发关系需要单独配置。`;
+      }
+
+      document.querySelectorAll('.page-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.preview === currentView || (isDialog && tab.dataset.preview === 'main'));
+      });
+    }
+
+    function renderInspector(view) {
+      currentTitle.textContent = view.title;
+      currentDesc.textContent = view.desc;
+      containsList.innerHTML = view.contains.map(item => `<li>${item}</li>`).join('');
+
+      const relations = getRelations();
+      const visibleRelations = relations.filter(item =>
+        view.id === 'main' ||
+        item.target === view.id ||
+        item.source === view.id
+      );
+
+      relationList.innerHTML = visibleRelations.map(item => `
+        <div class="relation-row ${item.target === view.id || item.source === view.id ? 'active' : ''}">
+          <div><strong>${item.from}</strong> -> ${item.to}</div>
+          <div class="relation-meta">
+            <span class="type-tag">${relationTypes[item.type]}</span>
+            ${item.target === view.id && view.id !== 'main' ? '<span class="type-tag type-main">反向来源</span>' : ''}
+            ${item.source === view.id && view.id !== 'main' ? '<span class="type-tag type-peer">返回关系</span>' : ''}
+          </div>
+        </div>
+      `).join('');
+
+      if (!visibleRelations.length) {
+        relationList.innerHTML = '<div class="relation-row">新建页面已创建，但还没有绑定触发关系。</div>';
+      }
+
+      modeRisk.textContent = currentMode === 'b'
+        ? 'B 方案风险：Tab 负责编辑对象切换，画布按钮只负责预览触发效果；如果老师混淆这两种动作，需要继续强化提示。'
+        : 'A 方案风险：左侧集中管理很直观，但内部页面变多后容易拥挤，需要观察节点数量上限和折叠方式。';
+    }
+
+    function setView(viewId, nextCanvasMode = '编辑态') {
+      if (!views[viewId]) return;
+      currentView = viewId;
+      canvasMode = nextCanvasMode;
+      addPopover.classList.remove('open');
+      render();
+    }
+
+    function createInternalView(kind) {
+      if (kind === 'peer') {
+        newPeerCount += 1;
+        const id = `peer${newPeerCount}`;
+        views[id] = {
+          id,
+          kind: 'peer',
+          tabLabel: `第 ${newPeerCount} 小题`,
+          title: `同级页面 ${newPeerCount}：新增小题`,
+          desc: '新建的同级页面，属于当前小关卡内部。',
+          contains: ['复制的背景', '复制的基础题干区', '新增页面操作区', '返回主界面按钮'],
+          copiedFromMain: true,
+          created: true
+        };
+        viewOrder.splice(Math.max(1, viewOrder.findIndex(item => views[item].kind === 'dialog')), 0, id);
+        addFeedback.textContent = '已新增同级页面：复制主界面的背景、基础布局和通用元素；按钮触发关系没有自动复制。';
+        setView(id, '编辑态');
+        return;
+      }
+
+      newDialogCount += 1;
+      const id = `dialog${newDialogCount}`;
+      views[id] = {
+        id,
+        kind: 'dialog',
+        tabLabel: `弹窗 ${newDialogCount}`,
+        title: `新增弹窗 ${newDialogCount}`,
+        desc: '新建的弹窗，默认以主界面为底图并叠加遮罩。',
+        contains: ['复制的背景参照', '弹窗标题', '弹窗内容区', '关闭按钮'],
+        copiedFromMain: true,
+        created: true
+      };
+      viewOrder.push(id);
+      addFeedback.textContent = '已新增弹窗：默认带主界面底图和遮罩；来源按钮需要在逻辑链里单独配置。';
+      setView(id, '编辑态');
+    }
+
+    function startHorizontalDrag(event, handle, onMove) {
+      event.preventDefault();
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      const pointerId = event.pointerId;
+      if (pointerId !== undefined && handle.setPointerCapture) {
+        try {
+          handle.setPointerCapture(pointerId);
+        } catch (error) {
+          // 捕获失败时，window 级监听仍可完成拖拽。
+        }
+      }
+
+      let frame = 0;
+      let lastEvent = event;
+
+      function move(moveEvent) {
+        lastEvent = moveEvent;
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          onMove(lastEvent);
+        });
+      }
+
+      function up(upEvent) {
+        if (frame) {
+          cancelAnimationFrame(frame);
+          frame = 0;
+        }
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+
+        if (pointerId !== undefined && handle.releasePointerCapture) {
+          try {
+            handle.releasePointerCapture(pointerId);
+          } catch (error) {
+            // 释放失败不影响拖拽结束。
+          }
+        }
+
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      }
+
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    }
+
+    modeButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentMode = btn.dataset.mode;
+        render();
+      });
+    });
+
+    document.querySelectorAll('[data-view]').forEach(btn => {
+      btn.addEventListener('click', () => setView(btn.dataset.view, '编辑态'));
+    });
+
+    document.querySelectorAll('[data-preview]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setView(btn.dataset.preview, '预览触发效果');
+      });
+    });
+
+    document.querySelectorAll('[data-add-type]').forEach(btn => {
+      btn.addEventListener('click', () => createInternalView(btn.dataset.addType));
+    });
+
+    tabAddButton.addEventListener('click', () => {
+      addPopover.classList.toggle('open');
+    });
+
+    leftListToggle.addEventListener('click', () => {
+      leftListExpanded = !leftListExpanded;
+      render();
+    });
+
+    leftListRail.addEventListener('click', () => {
+      leftListExpanded = true;
+      render();
+    });
+
+    structureToggle.addEventListener('click', () => {
+      structureExpanded = !structureExpanded;
+      render();
+    });
+
+    structureRail.addEventListener('click', () => {
+      structureExpanded = true;
+      render();
+    });
+
+    internalResizer.addEventListener('pointerdown', event => {
+      if (!structureExpanded || currentMode === 'b') return;
+      const bodyRect = leftBody.getBoundingClientRect();
+      const minWidth = 160;
+      const maxWidth = Math.max(minWidth, bodyRect.width - 180);
+
+      startHorizontalDrag(event, internalResizer, moveEvent => {
+        const rawWidth = moveEvent.clientX - bodyRect.left;
+        const nextWidth = Math.min(maxWidth, Math.max(minWidth, rawWidth));
+        leftBody.style.setProperty('--left-list-width', `${Math.round(nextWidth)}px`);
+      });
+    });
+
+    workspaceResizer.addEventListener('pointerdown', event => {
+      const workspaceRect = workspace.getBoundingClientRect();
+      const minWidth = currentMode === 'b' ? 280 : 360;
+      const maxWidth = Math.max(minWidth, Math.min(980, workspaceRect.width - 520));
+
+      startHorizontalDrag(event, workspaceResizer, moveEvent => {
+        const rawWidth = moveEvent.clientX - workspaceRect.left;
+        const nextWidth = Math.min(maxWidth, Math.max(minWidth, rawWidth));
+        workspace.style.setProperty('--left-panel-width', `${Math.round(nextWidth)}px`);
+      });
+    });
+
+    document.addEventListener('click', event => {
+      if (!addPopover.contains(event.target) && event.target !== tabAddButton) {
+        addPopover.classList.remove('open');
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>

@@ -1,0 +1,998 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>编辑器阶段性迭代计划</title>
+  <style>
+    :root {
+      --ink: #22272f;
+      --muted: #667085;
+      --line: #d7dce2;
+      --paper: #fbfaf7;
+      --panel: #ffffff;
+      --panel-soft: #f4f7f8;
+      --teal: #1f8a84;
+      --blue: #3f6fb6;
+      --coral: #d96c54;
+      --amber: #c7962d;
+      --green: #5a8f55;
+      --shadow: 0 20px 70px rgba(34, 39, 47, 0.12);
+      --radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, rgba(31, 138, 132, 0.08) 1px, transparent 1px),
+        linear-gradient(rgba(63, 111, 182, 0.06) 1px, transparent 1px),
+        var(--paper);
+      background-size: 72px 72px;
+      line-height: 1.65;
+    }
+
+    a { color: inherit; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 28px 22px;
+      border-right: 1px solid var(--line);
+      background: rgba(251, 250, 247, 0.92);
+      backdrop-filter: blur(10px);
+      overflow-y: auto;
+    }
+
+    .mark {
+      display: inline-grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border: 2px solid var(--ink);
+      border-radius: 8px;
+      font-weight: 800;
+      letter-spacing: 0;
+      margin-bottom: 18px;
+      background: var(--panel);
+      box-shadow: 6px 6px 0 rgba(31, 138, 132, 0.22);
+    }
+
+    .sidebar h2 {
+      font-size: 15px;
+      margin: 0 0 8px;
+      letter-spacing: 0;
+    }
+
+    .sidebar p {
+      margin: 0 0 22px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .nav {
+      display: grid;
+      gap: 6px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .nav a {
+      display: block;
+      padding: 8px 10px;
+      border-radius: 7px;
+      text-decoration: none;
+      font-size: 13px;
+      color: #3a4452;
+    }
+
+    .nav a:hover,
+    .nav a:focus-visible {
+      outline: none;
+      background: #e9f2f1;
+      color: var(--teal);
+    }
+
+    .source-links {
+      margin-top: 24px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 8px;
+    }
+
+    .source-links a {
+      font-size: 12px;
+      color: var(--muted);
+      text-decoration: none;
+    }
+
+    .source-links a:hover { color: var(--blue); text-decoration: underline; }
+
+    main { min-width: 0; }
+
+    .hero {
+      min-height: 92vh;
+      display: grid;
+      align-items: center;
+      padding: 70px clamp(28px, 6vw, 92px) 52px;
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 88% 12%, rgba(217, 108, 84, 0.13), transparent 26%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(244, 247, 248, 0.45));
+    }
+
+    .hero-inner {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+      gap: clamp(32px, 6vw, 72px);
+      align-items: center;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 18px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 28px;
+      height: 2px;
+      background: var(--teal);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(42px, 7vw, 86px);
+      line-height: 0.98;
+      letter-spacing: 0;
+      max-width: 860px;
+    }
+
+    .hero-copy {
+      max-width: 720px;
+      margin: 24px 0 0;
+      color: #46515f;
+      font-size: clamp(17px, 2vw, 22px);
+      line-height: 1.75;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 36px;
+      padding: 7px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.82);
+      color: #3a4452;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .map {
+      position: relative;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 22px;
+      box-shadow: var(--shadow);
+    }
+
+    .map-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      margin-bottom: 18px;
+      font-weight: 800;
+    }
+
+    .map-title span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .folder-visual {
+      display: grid;
+      gap: 12px;
+      padding: 18px;
+      background: #f7f3e9;
+      border: 1px solid #ddcfae;
+      border-radius: var(--radius);
+    }
+
+    .folder-head {
+      width: 46%;
+      height: 24px;
+      border-radius: 7px 7px 0 0;
+      background: #efd585;
+      border: 1px solid #caa84d;
+      border-bottom: 0;
+    }
+
+    .folder-body {
+      margin-top: -12px;
+      padding: 18px;
+      border-radius: 0 7px 7px 7px;
+      background: #fff4c7;
+      border: 1px solid #caa84d;
+      display: grid;
+      gap: 10px;
+    }
+
+    .node {
+      display: grid;
+      grid-template-columns: 86px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(202, 168, 77, 0.55);
+      font-size: 13px;
+    }
+
+    .node strong { font-size: 12px; color: var(--amber); }
+    .node small { color: #596272; }
+
+    section {
+      padding: 70px clamp(28px, 6vw, 92px);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 0.85fr) minmax(280px, 0.55fr);
+      gap: 32px;
+      align-items: end;
+      margin-bottom: 30px;
+    }
+
+    .kicker {
+      color: var(--coral);
+      font-size: 13px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    .section-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .problem-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .problem {
+      padding: 18px;
+      border-radius: var(--radius);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      min-height: 180px;
+    }
+
+    .problem b {
+      display: block;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+
+    .problem p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--panel);
+    }
+
+    .phase {
+      min-height: 330px;
+      padding: 22px;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .phase:last-child { border-right: 0; }
+    .phase:nth-child(1) { border-top: 5px solid var(--teal); }
+    .phase:nth-child(2) { border-top: 5px solid var(--blue); }
+    .phase:nth-child(3) { border-top: 5px solid var(--amber); }
+    .phase:nth-child(4) { border-top: 5px solid var(--green); }
+
+    .phase-num {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .phase h3 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .phase p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .phase ul,
+    .issue-list,
+    .check-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 9px;
+    }
+
+    .phase li,
+    .issue-list li,
+    .check-list li {
+      position: relative;
+      padding-left: 17px;
+      color: #46515f;
+      font-size: 14px;
+    }
+
+    .phase li::before,
+    .issue-list li::before,
+    .check-list li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.72em;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--teal);
+    }
+
+    .focus-band {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(360px, 0.65fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    .workflow {
+      background: var(--ink);
+      color: #f5f7fa;
+      border-radius: var(--radius);
+      padding: 24px;
+      min-height: 100%;
+      box-shadow: var(--shadow);
+    }
+
+    .workflow h3 {
+      margin: 0 0 18px;
+      font-size: 24px;
+    }
+
+    .flow-steps {
+      display: grid;
+      gap: 12px;
+    }
+
+    .flow-step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 12px;
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .flow-step span {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 7px;
+      background: #f4c95d;
+      color: #1f2329;
+      font-weight: 900;
+    }
+
+    .flow-step b { display: block; margin-bottom: 3px; }
+    .flow-step small { color: #cbd5df; }
+
+    .compare {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .compare-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+
+    .compare-card h3 {
+      margin: 0 0 10px;
+      font-size: 20px;
+    }
+
+    .compare-card p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tagline {
+      display: inline-flex;
+      padding: 4px 8px;
+      margin-bottom: 12px;
+      border-radius: 999px;
+      background: #e9f2f1;
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .detail {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .detail h3 {
+      margin: 0 0 12px;
+      font-size: 22px;
+    }
+
+    .detail p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .backlog {
+      display: grid;
+      grid-template-columns: minmax(0, 0.72fr) minmax(300px, 0.48fr);
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .trigger-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .trigger-table th,
+    .trigger-table td {
+      padding: 13px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      vertical-align: top;
+    }
+
+    .trigger-table th {
+      color: var(--muted);
+      font-size: 12px;
+      background: var(--panel-soft);
+    }
+
+    .trigger-table tr:last-child td { border-bottom: 0; }
+
+    .issue-board {
+      display: grid;
+      grid-template-columns: minmax(0, 0.7fr) minmax(300px, 0.4fr);
+      gap: 20px;
+    }
+
+    .callout {
+      border-radius: var(--radius);
+      border: 1px solid #e8c9bf;
+      background: #fff2ed;
+      padding: 22px;
+    }
+
+    .callout h3 {
+      margin: 0 0 10px;
+      color: #9d3f2c;
+      font-size: 22px;
+    }
+
+    .callout p {
+      margin: 0;
+      color: #6e514a;
+      font-size: 14px;
+    }
+
+    .footer {
+      padding: 36px clamp(28px, 6vw, 92px);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 1080px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .nav {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      .hero-inner,
+      .section-head,
+      .focus-band,
+      .backlog,
+      .issue-board {
+        grid-template-columns: 1fr;
+      }
+      .roadmap {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .phase:nth-child(2) { border-right: 0; }
+      .phase:nth-child(1),
+      .phase:nth-child(2) { border-bottom: 1px solid var(--line); }
+    }
+
+    @media (max-width: 720px) {
+      .hero { min-height: auto; padding-top: 42px; }
+      .hero-inner { grid-template-columns: 1fr; }
+      .map { padding: 16px; }
+      section { padding: 46px 20px; }
+      .nav { grid-template-columns: 1fr 1fr; }
+      .problem-grid,
+      .roadmap,
+      .compare,
+      .split {
+        grid-template-columns: 1fr;
+      }
+      .phase {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        min-height: auto;
+      }
+      .phase:last-child { border-bottom: 0; }
+      .trigger-table { display: block; overflow-x: auto; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .layout { display: block; }
+      .sidebar { display: none; }
+      .hero { min-height: auto; }
+      section, .hero { break-inside: avoid; }
+      .map, .workflow, .detail, .problem, .compare-card, .trigger-table { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="mark">迭</div>
+      <h2>编辑器阶段性迭代计划</h2>
+      <p>给内部沟通、issue 编排和阶段验收使用的一页式路线总览。</p>
+      <ul class="nav">
+        <li><a href="#overview">总览</a></li>
+        <li><a href="#why">为什么做</a></li>
+        <li><a href="#roadmap">四阶段路线</a></li>
+        <li><a href="#phase-one">第一阶段重点</a></li>
+        <li><a href="#later">后续阶段</a></li>
+        <li><a href="#resource">资源库后备</a></li>
+        <li><a href="#issues">Issue 编排</a></li>
+      </ul>
+      <div class="source-links">
+        <a href="./editor-iteration-roadmap.md">总路线文档</a>
+        <a href="./phase-1-interaction-management.md">第一阶段文档</a>
+        <a href="./phase-2-component-taxonomy.md">第二阶段文档</a>
+        <a href="./phase-3-preset-templates.md">第三阶段文档</a>
+        <a href="./resource-library-separation-backlog.md">资源库后备方案</a>
+      </div>
+    </aside>
+
+    <main>
+      <header id="overview" class="hero">
+        <div class="hero-inner">
+          <div>
+            <div class="eyebrow">2026-07-08 / 计划浏览版</div>
+            <h1>让老师更顺手地制作豌豆思维课件</h1>
+            <p class="hero-copy">
+              当前编辑器已经具备基础制作能力，下一阶段重点不是继续堆功能，而是把复杂小关卡里的层级、弹窗、组件和模板整理成老师能理解、能快速操作的工作流。
+            </p>
+            <div class="hero-actions">
+              <span class="pill">当前主线：编辑体验</span>
+              <span class="pill">第一阶段：先做原型对比</span>
+              <span class="pill">资源库分离：暂缓进入后备</span>
+            </div>
+          </div>
+
+          <div class="map" aria-label="小关卡文件夹示意">
+            <div class="map-title">
+              <strong>小关卡不是一张平面图</strong>
+              <span>目标结构</span>
+            </div>
+            <div class="folder-visual">
+              <div class="folder-head"></div>
+              <div class="folder-body">
+                <div class="node">
+                  <strong>主界面</strong>
+                  <small>题干、核心操作区、主要按钮</small>
+                </div>
+                <div class="node">
+                  <strong>弹窗 A</strong>
+                  <small>由按钮 A 打开，支持快速定位和关闭链路</small>
+                </div>
+                <div class="node">
+                  <strong>弹窗 B</strong>
+                  <small>独立编辑，不再靠手动隐藏一堆元素</small>
+                </div>
+                <div class="node">
+                  <strong>同级页面</strong>
+                  <small>用于题内切换，仍属于当前小关卡</small>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section id="why">
+        <div class="section-head">
+          <div>
+            <div class="kicker">为什么要先做交互体验</div>
+            <h2>现在的主要问题不是不能做，而是做起来太绕。</h2>
+          </div>
+          <p class="section-note">
+            老师面对的是课件结构和教学内容，不应该被层级、父容器、显隐状态和元素命名拖住。
+          </p>
+        </div>
+
+        <div class="problem-grid">
+          <div class="problem">
+            <b>复杂内容堆在同一画布</b>
+            <p>主界面、弹窗、二级界面、按钮状态都混在一起，内容越多越难判断当前正在编辑哪一层。</p>
+          </div>
+          <div class="problem">
+            <b>元素列表只表达层级</b>
+            <p>老师能看到父子关系，但看不出“哪个按钮打开哪个弹窗”“哪个区域属于哪个内部界面”。</p>
+          </div>
+          <div class="problem">
+            <b>后续组件和模板会放大混乱</b>
+            <p>如果不先整理小关卡内部结构，组件分类和模板越丰富，老师越容易迷失。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="roadmap">
+        <div class="section-head">
+          <div>
+            <div class="kicker">四阶段路线</div>
+            <h2>先把编辑结构理顺，再做组件、模板和后续优化。</h2>
+          </div>
+          <p class="section-note">
+            阶段之间有明确依赖：第一阶段解决操作混乱，第二阶段收敛组件，第三阶段沉淀模板，第四阶段持续处理反馈。
+          </p>
+        </div>
+
+        <div class="roadmap">
+          <article class="phase">
+            <div class="phase-num">PHASE 01</div>
+            <h3>交互与层级管理</h3>
+            <p>解决小关卡内部多界面、多弹窗、多层级内容难管理的问题。</p>
+            <ul>
+              <li>小关卡作为文件夹</li>
+              <li>主界面、弹窗、二级界面可索引</li>
+              <li>先做可点击原型对比</li>
+              <li>暂不直接改正式导出逻辑</li>
+            </ul>
+          </article>
+
+          <article class="phase">
+            <div class="phase-num">PHASE 02</div>
+            <h3>组件归类与信息管理</h3>
+            <p>把组件体系收敛到豌豆思维，让老师只看到当前业务线需要的内容。</p>
+            <ul>
+              <li>隐藏无关业务线表达</li>
+              <li>按 S1-S9 组织组件</li>
+              <li>建立高频组件清单</li>
+              <li>字段后续按真实需求增删</li>
+            </ul>
+          </article>
+
+          <article class="phase">
+            <div class="phase-num">PHASE 03</div>
+            <h3>组合预设模板</h3>
+            <p>把高频课件结构沉淀成模板，让老师一键添加后快速改图、改文字、改按钮。</p>
+            <ul>
+              <li>优先整理真实高频场景</li>
+              <li>模板可继续编辑</li>
+              <li>少量高质量模板先行</li>
+              <li>和组件分类逐步联动</li>
+            </ul>
+          </article>
+
+          <article class="phase">
+            <div class="phase-num">PHASE 04</div>
+            <h3>后续优化需求</h3>
+            <p>在前三阶段建立稳定体验基础后，持续处理真实使用反馈。</p>
+            <ul>
+              <li>右键菜单</li>
+              <li>智能参考线</li>
+              <li>批量操作</li>
+              <li>事件动作配置优化</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="phase-one">
+        <div class="section-head">
+          <div>
+            <div class="kicker">第一阶段重点</div>
+            <h2>先验证“小关卡内部多界面”到底怎样管才顺手。</h2>
+          </div>
+          <p class="section-note">
+            本阶段先做可点击原型，不直接改正式数据结构。验证清楚后，再拆正式实现 issue。
+          </p>
+        </div>
+
+        <div class="focus-band">
+          <div>
+            <div class="compare">
+              <article class="compare-card">
+                <span class="tagline">方案 A</span>
+                <h3>小关卡内部界面节点</h3>
+                <p>小关卡仍是预览和导出的基本单元，内部新增主界面、弹窗、二级界面等节点管理。</p>
+                <ul class="check-list">
+                  <li>更保护现有导出逻辑</li>
+                  <li>更贴近“小关卡是文件夹”的理解</li>
+                  <li>适合作为正式实现方向重点验证</li>
+                </ul>
+              </article>
+
+              <article class="compare-card">
+                <span class="tagline">方案 B</span>
+                <h3>内部页面列表</h3>
+                <p>把内部界面做成类似小页面的展开列表，让老师像管理页面一样管理弹窗和二级界面。</p>
+                <ul class="check-list">
+                  <li>视觉上接近现有页面列表</li>
+                  <li>上手可能更快</li>
+                  <li>需要避免和正式小关卡导出概念混淆</li>
+                </ul>
+              </article>
+            </div>
+
+            <div class="callout" style="margin-top: 20px;">
+              <h3>关键风险：不要提前混用 subPage</h3>
+              <p>
+                当前导出会把一个关卡下的多个小关卡导出为多个 subview。如果把弹窗和二级界面直接复用为现有小关卡，预览和导出可能把它们理解成课件流程步骤，而不是当前题内的界面状态。
+              </p>
+            </div>
+          </div>
+
+          <aside class="workflow">
+            <h3>原型验证路径</h3>
+            <div class="flow-steps">
+              <div class="flow-step">
+                <span>1</span>
+                <div>
+                  <b>进入小关卡</b>
+                  <small>看到主界面，以及当前小关卡内部有哪些弹窗和二级界面。</small>
+                </div>
+              </div>
+              <div class="flow-step">
+                <span>2</span>
+                <div>
+                  <b>打开结构管理区</b>
+                  <small>左侧栏向右展开，显示当前小关卡内部结构和链路。</small>
+                </div>
+              </div>
+              <div class="flow-step">
+                <span>3</span>
+                <div>
+                  <b>切换到弹窗 A</b>
+                  <small>画布聚焦弹窗内容，减少手动隐藏其他元素。</small>
+                </div>
+              </div>
+              <div class="flow-step">
+                <span>4</span>
+                <div>
+                  <b>查看按钮链路</b>
+                  <small>能看出按钮 A 打开弹窗 A，关闭按钮回到主界面。</small>
+                </div>
+              </div>
+              <div class="flow-step">
+                <span>5</span>
+                <div>
+                  <b>形成正式方向</b>
+                  <small>确定后再进入真实编辑器实现，不把原型验证和正式数据改造混在一起。</small>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="later">
+        <div class="section-head">
+          <div>
+            <div class="kicker">后续阶段</div>
+            <h2>组件和模板要建立在清晰结构之上。</h2>
+          </div>
+          <p class="section-note">
+            第二、三阶段不是不重要，而是要等第一阶段把编辑结构理顺后，才能发挥真正价值。
+          </p>
+        </div>
+
+        <div class="split">
+          <article class="detail">
+            <h3>第二阶段：豌豆思维组件归类</h3>
+            <p>把组件入口收敛到当前业务线，按 S1-S9 管理，让老师更快找到适合当前课件阶段的组件。</p>
+            <ul class="issue-list">
+              <li>梳理当前组件中哪些属于豌豆思维</li>
+              <li>隐藏当前不需要展示给老师的其他业务线组件</li>
+              <li>设计组件区的 S1-S9 筛选体验</li>
+              <li>建立高频组件和待隐藏组件清单</li>
+            </ul>
+          </article>
+
+          <article class="detail">
+            <h3>第三阶段：组合预设模板</h3>
+            <p>把高频页面结构和交互组合沉淀成模板，老师一键添加后直接改图、改文本、增删按钮。</p>
+            <ul class="issue-list">
+              <li>梳理老师最高频使用的 5 个课件结构</li>
+              <li>定义首批组合预设模板清单</li>
+              <li>制作单题讲解、练习题、二级弹窗模板</li>
+              <li>验证模板是否方便继续编辑</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="resource">
+        <div class="section-head">
+          <div>
+            <div class="kicker">资源库分离</div>
+            <h2>先记录为后备方案，不进入当前短期主线。</h2>
+          </div>
+          <p class="section-note">
+            当前短期重点是编辑体验。等素材规模、组件分类或模板体系真正需要时，再启动资源库分离。
+          </p>
+        </div>
+
+        <div class="backlog">
+          <table class="trigger-table">
+            <thead>
+              <tr>
+                <th>触发条件</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>项目仓库明显变重</td>
+                <td>大量素材进入 `public/builtin/library` 后，拉取代码和切换分支都会变慢。</td>
+              </tr>
+              <tr>
+                <td>多人共享同一套素材</td>
+                <td>代码仓库不适合承担长期资源服务器职责，需要独立维护资源目录。</td>
+              </tr>
+              <tr>
+                <td>S1-S9 分类依赖大量素材</td>
+                <td>当组件和模板强依赖大量图片、音频、视频、Spine 时，再做分离更合适。</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="detail">
+            <h3>未来方向</h3>
+            <p>优先考虑稳定服务器目录，或从 SVN 同步到资源服务器。长期再考虑独立资源服务。</p>
+            <ul class="check-list">
+              <li>编辑器浏览远程资源目录</li>
+              <li>选中资源后进入课件本地目录</li>
+              <li>远程断开后已用资源不受影响</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="issues">
+        <div class="section-head">
+          <div>
+            <div class="kicker">Issue 编排方式</div>
+            <h2>后续任务按老师能感受到的变化拆。</h2>
+          </div>
+          <p class="section-note">
+            不按代码文件拆，不用技术名词当标题。每个 issue 都要说清为什么做、老师看到什么、不包含什么、怎么验收。
+          </p>
+        </div>
+
+        <div class="issue-board">
+          <div class="detail">
+            <h3>推荐 issue 标题</h3>
+            <ul class="issue-list">
+              <li>支持在小关卡内快速切换弹窗界面</li>
+              <li>支持查看按钮会打开哪个二级界面</li>
+              <li>支持按 S1-S9 筛选豌豆思维组件</li>
+              <li>支持一键添加常用练习题模板</li>
+            </ul>
+          </div>
+
+          <div class="callout">
+            <h3>第一阶段先拆原型</h3>
+            <p>
+              第一阶段正式实现任务要等原型对比结论出来后再拆。现在先验证老师完成“打开弹窗、编辑弹窗、返回主界面、查看链路”的路径是否更顺。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        来源：docs/roadmap 下 5 份阶段性迭代文档。此页面用于浏览和介绍，不替代详细 Markdown 文档。
+      </footer>
+    </main>
+  </div>
+</body>
+</html>
