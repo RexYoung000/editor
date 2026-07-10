@@ -663,7 +663,7 @@
             </p>
             <div class="hero-actions">
               <span class="pill">当前主线：编辑体验</span>
-              <span class="pill">第一阶段：方案 A MVP 实施</span>
+              <span class="pill">第一阶段：三套平等方案体验</span>
               <span class="pill">资源库分离：暂缓进入后备</span>
             </div>
           </div>
@@ -690,7 +690,7 @@
                 </div>
                 <div class="node">
                   <strong>同级页面</strong>
-                  <small>用于题内切换，仍属于当前小关卡</small>
+                  <small>只负责承载内容；页面跳转由具体普通按钮的事件链接负责</small>
                 </div>
               </div>
             </div>
@@ -800,26 +800,37 @@
 
         <div class="focus-band">
           <div>
-            <div class="compare">
+            <div class="compare" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
               <article class="compare-card">
-                <span class="tagline">方案 A MVP</span>
-                <h3>内部界面管理模板</h3>
-                <p>从添加大关卡进入模板弹窗，选择内部界面管理模板后，在当前小关卡内管理主界面、同级界面和弹窗。</p>
+                <span class="tagline">方案一</span>
+                <h3>内嵌精简管理</h3>
+                <p>内部页面直接展开在小关卡下面，可像 PPT 一样复制到下方并拖到其他兼容小关卡。</p>
                 <ul class="check-list">
-                  <li>通过新增模板 ID 隔离试验范围</li>
-                  <li>结构入口放在左侧列表，不占用右侧属性区</li>
-                  <li>覆盖新增、删除、复制、粘贴和事件待绑定</li>
+                  <li>不增加额外面板</li>
+                  <li>属性与交互使用页签分开</li>
+                  <li>验证现有结构做减法是否足够</li>
                 </ul>
               </article>
 
               <article class="compare-card">
-                <span class="tagline">边界</span>
-                <h3>只做原型和文档</h3>
-                <p>阶段一先验证完整操作路径，不改真实编辑器的数据结构、后端逻辑、导出逻辑或正式组件属性区。</p>
+                <span class="tagline">方案二</span>
+                <h3>侧边管理抽屉</h3>
+                <p>在关卡列表和画布之间展开专用抽屉，集中管理页面、组件、跨关卡放置和待处理问题。</p>
                 <ul class="check-list">
-                  <li>主界面固定存在且不可删除</li>
-                  <li>同级界面是题内切换，不出现遮罩</li>
-                  <li>弹窗使用派生底板、遮罩和上层内容</li>
+                  <li>保留完整工作台上下文</li>
+                  <li>问题直接提供修复入口</li>
+                  <li>验证专用空间是否更平衡</li>
+                </ul>
+              </article>
+
+              <article class="compare-card">
+                <span class="tagline">方案三</span>
+                <h3>专注工作区</h3>
+                <p>进入当前小关卡的独立编辑环境；拖拽时临时显示其他关卡作为放置目标。</p>
+                <ul class="check-list">
+                  <li>界面与元素分时查看</li>
+                  <li>画布获得主要空间</li>
+                  <li>验证专注模式是否适合复杂课件</li>
                 </ul>
               </article>
             </div>
@@ -845,22 +856,22 @@
               <div class="flow-step">
                 <span>2</span>
                 <div>
-                  <b>展开结构入口</b>
-                  <small>点击左侧当前小关卡内的箭头图标，显示当前小关卡内部结构。</small>
+                  <b>分别体验三种工作方式</b>
+                  <small>使用内嵌列表、侧边抽屉和专注工作区完成相同操作。</small>
                 </div>
               </div>
               <div class="flow-step">
                 <span>3</span>
                 <div>
                   <b>管理三类界面</b>
-                  <small>主界面不可删除；同级界面和弹窗可新增、删除、复制、粘贴。</small>
+                  <small>主界面不可删除；同级页面和弹窗可复制、拖拽，并能跨兼容小关卡移动。</small>
                 </div>
               </div>
               <div class="flow-step">
                 <span>4</span>
                 <div>
-                  <b>配置事件入口</b>
-                  <small>右侧仍显示组件属性和事件设置，并标出需要重新绑定的事件。</small>
+                  <b>定位并修复交互关系</b>
+                  <small>选中具体按钮配置页面跳转，并从待处理状态修复移动后的弹窗入口。</small>
                 </div>
               </div>
               <div class="flow-step">
@@ -983,7 +994,7 @@
           <div class="callout">
             <h3>第一阶段先做 MVP 原型</h3>
             <p>
-              第一阶段正式实现任务要等 MVP 原型验收后再拆。现在先验证老师完成“添加大关卡、选择内部界面管理模板、管理同级界面和弹窗、查看待绑定事件”的路径是否更顺。
+              第一阶段正式实现任务要等三套 MVP 原型体验后再拆。现在分别验证内嵌精简、侧边抽屉和专注工作区，观察哪一种更适合老师管理复杂小关卡。
             </p>
           </div>
         </div>
