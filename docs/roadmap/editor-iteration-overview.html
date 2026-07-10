@@ -663,7 +663,7 @@
             </p>
             <div class="hero-actions">
               <span class="pill">当前主线：编辑体验</span>
-              <span class="pill">第一阶段：先做原型对比</span>
+              <span class="pill">第一阶段：方案 A MVP 实施</span>
               <span class="pill">资源库分离：暂缓进入后备</span>
             </div>
           </div>
@@ -682,7 +682,7 @@
                 </div>
                 <div class="node">
                   <strong>弹窗 A</strong>
-                  <small>由按钮 A 打开，支持快速定位和关闭链路</small>
+                  <small>由按钮 A 打开，支持快速定位、关闭和事件设置</small>
                 </div>
                 <div class="node">
                   <strong>弹窗 B</strong>
@@ -744,7 +744,7 @@
             <ul>
               <li>小关卡作为文件夹</li>
               <li>主界面、弹窗、二级界面可索引</li>
-              <li>先做可点击原型对比</li>
+              <li>先做可测试 MVP 原型</li>
               <li>暂不直接改正式导出逻辑</li>
             </ul>
           </article>
@@ -794,7 +794,7 @@
             <h2>先验证“小关卡内部多界面”到底怎样管才顺手。</h2>
           </div>
           <p class="section-note">
-            本阶段先做可点击原型，不直接改正式数据结构。验证清楚后，再拆正式实现 issue。
+            本阶段先做可测试 MVP 原型，不直接改正式数据结构。验证清楚后，再拆正式实现 issue。
           </p>
         </div>
 
@@ -802,24 +802,24 @@
           <div>
             <div class="compare">
               <article class="compare-card">
-                <span class="tagline">方案 A</span>
-                <h3>小关卡内部界面节点</h3>
-                <p>小关卡仍是预览和导出的基本单元，内部新增主界面、弹窗、二级界面等节点管理。</p>
+                <span class="tagline">方案 A MVP</span>
+                <h3>内部界面管理模板</h3>
+                <p>从添加大关卡进入模板弹窗，选择内部界面管理模板后，在当前小关卡内管理主界面、同级界面和弹窗。</p>
                 <ul class="check-list">
-                  <li>更保护现有导出逻辑</li>
-                  <li>更贴近“小关卡是文件夹”的理解</li>
-                  <li>适合作为正式实现方向重点验证</li>
+                  <li>通过新增模板 ID 隔离试验范围</li>
+                  <li>结构入口放在左侧列表，不占用右侧属性区</li>
+                  <li>覆盖新增、删除、复制、粘贴和事件待绑定</li>
                 </ul>
               </article>
 
               <article class="compare-card">
-                <span class="tagline">方案 B</span>
-                <h3>内部页面列表</h3>
-                <p>把内部界面做成类似小页面的展开列表，让老师像管理页面一样管理弹窗和二级界面。</p>
+                <span class="tagline">边界</span>
+                <h3>只做原型和文档</h3>
+                <p>阶段一先验证完整操作路径，不改真实编辑器的数据结构、后端逻辑、导出逻辑或正式组件属性区。</p>
                 <ul class="check-list">
-                  <li>视觉上接近现有页面列表</li>
-                  <li>上手可能更快</li>
-                  <li>需要避免和正式小关卡导出概念混淆</li>
+                  <li>主界面固定存在且不可删除</li>
+                  <li>同级界面是题内切换，不出现遮罩</li>
+                  <li>弹窗使用派生底板、遮罩和上层内容</li>
                 </ul>
               </article>
             </div>
@@ -838,29 +838,29 @@
               <div class="flow-step">
                 <span>1</span>
                 <div>
-                  <b>进入小关卡</b>
-                  <small>看到主界面，以及当前小关卡内部有哪些弹窗和二级界面。</small>
+                  <b>添加大关卡</b>
+                  <small>打开模板弹窗，在预设模板中选择内部界面管理模板。</small>
                 </div>
               </div>
               <div class="flow-step">
                 <span>2</span>
                 <div>
-                  <b>打开结构管理区</b>
-                  <small>左侧栏向右展开，显示当前小关卡内部结构和链路。</small>
+                  <b>展开结构入口</b>
+                  <small>点击左侧当前小关卡内的箭头图标，显示当前小关卡内部结构。</small>
                 </div>
               </div>
               <div class="flow-step">
                 <span>3</span>
                 <div>
-                  <b>切换到弹窗 A</b>
-                  <small>画布聚焦弹窗内容，减少手动隐藏其他元素。</small>
+                  <b>管理三类界面</b>
+                  <small>主界面不可删除；同级界面和弹窗可新增、删除、复制、粘贴。</small>
                 </div>
               </div>
               <div class="flow-step">
                 <span>4</span>
                 <div>
-                  <b>查看按钮链路</b>
-                  <small>能看出按钮 A 打开弹窗 A，关闭按钮回到主界面。</small>
+                  <b>配置事件入口</b>
+                  <small>右侧仍显示组件属性和事件设置，并标出需要重新绑定的事件。</small>
                 </div>
               </div>
               <div class="flow-step">
@@ -981,9 +981,9 @@
           </div>
 
           <div class="callout">
-            <h3>第一阶段先拆原型</h3>
+            <h3>第一阶段先做 MVP 原型</h3>
             <p>
-              第一阶段正式实现任务要等原型对比结论出来后再拆。现在先验证老师完成“打开弹窗、编辑弹窗、返回主界面、查看链路”的路径是否更顺。
+              第一阶段正式实现任务要等 MVP 原型验收后再拆。现在先验证老师完成“添加大关卡、选择内部界面管理模板、管理同级界面和弹窗、查看待绑定事件”的路径是否更顺。
             </p>
           </div>
         </div>
