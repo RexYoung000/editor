@@ -9,6 +9,9 @@
   let pressState = null;
   let dragState = null;
   let suppressClickUntil = 0;
+  let autoScrollRaf = 0;
+  let autoScrollPoint = null;
+  let pendingScrollTarget = null;
 
   const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -42,7 +45,7 @@
     return {
       inline: '内部页面直接展开，适合像 PPT 一样快速拖放。',
       drawer: '内部页面集中在抽屉，拖动时左侧关卡成为放置目标。',
-      focus: '专注编辑当前小关卡，拖动时临时显示跨关卡目标。',
+      focus: '专注编辑当前小关卡，拖动时在左侧底部显示跨关卡目标。',
     }[scheme];
   }
 
@@ -67,6 +70,22 @@
     return '普通';
   }
 
+  function requestScrollTo(target) {
+    pendingScrollTarget = target;
+  }
+
+  function applyPendingScroll() {
+    if (!pendingScrollTarget || !root) return;
+    const el = root.querySelector(`[data-scroll-target="${pendingScrollTarget}"]`);
+    pendingScrollTarget = null;
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function undoButton() {
+    return `<button class="top-button ghost" data-action="undo-last" type="button" ${state.undoSnapshot ? '' : 'disabled'}>撤销</button>`;
+  }
+
   function topbar() {
     const subPage = activeSubPage();
     const stage = activeStage();
@@ -77,6 +96,7 @@
           <div class="breadcrumb"><span>图形变化课程</span><b>›</b><span>${esc(stage?.title || '关卡')}</span><b>›</b><span>${esc(Core.subPageLabel(state, subPage.id))}</span><b>›</b><span>${esc(currentView()?.title || '主界面')}</span></div>
           <div class="top-spacer"></div>
           ${pendingBadge()}
+          ${undoButton()}
           <button class="top-button ${state.mode === 'run' ? 'active' : 'primary'}" data-action="toggle-run" type="button">${state.mode === 'run' ? '退出试运行' : '试运行当前界面'}</button>
           <button class="top-button" data-action="reset-scheme" type="button">重新开始</button>
         </header>`;
@@ -88,6 +108,7 @@
         <span class="mode-badge">${Core.SCHEME_LABELS[scheme]}</span>
         <div class="top-spacer"></div>
         ${pendingBadge()}
+        ${undoButton()}
         <button class="top-button" data-action="open-template" data-purpose="stage" type="button">新增大关卡</button>
         <button class="top-button ${state.mode === 'run' ? 'active' : 'primary'}" data-action="toggle-run" type="button" ${subPage ? '' : 'disabled'}>${state.mode === 'run' ? '退出试运行' : '试运行当前界面'}</button>
         <button class="top-button" data-action="reset-scheme" type="button">重新开始</button>
@@ -103,7 +124,7 @@
     return `
       <section class="panel panel-column stage-panel">
         <div class="panel-head"><div><h2>关卡</h2><p>页面可跨大关卡移动到兼容的小关卡</p></div></div>
-        <div class="scroll stage-list">${state.stages.map((stage, index) => stageCard(stage, index)).join('')}</div>
+        <div class="scroll stage-list" data-scroll-key="stage-list">${state.stages.map((stage, index) => stageCard(stage, index)).join('')}</div>
       </section>`;
   }
 
@@ -145,29 +166,39 @@
     const pending = Core.pendingIssues(state, subPageId).length;
     const isDragging = dragState?.type === 'subpage' && dragState.id === subPageId;
     const compatibleTarget = dragState?.type === 'view' && Core.canMoveViewToSubPage(state, dragState.id, subPageId);
-    const incompatibleTarget = dragState?.type === 'view' && !compatibleTarget;
-    const internalVisible = subPage.kind === 'managed' && (scheme === 'inline' && expanded || dragState?.type === 'view' && compatibleTarget && scheme !== 'focus');
+    const incompatibleTarget = Boolean(dragState?.type === 'view' && !compatibleTarget);
+    const internalVisible = subPage.kind === 'managed' && (
+      (scheme === 'inline' && expanded)
+      || (dragState?.type === 'view' && compatibleTarget && scheme === 'inline')
+    );
+    let hint = '';
+    if (pending) hint = ` · ${pending} 项待处理`;
+    else if (incompatibleTarget && subPage.kind !== 'managed') hint = ' · 不接收内部页面';
+    else if (incompatibleTarget) hint = ' · 模板不同';
     return `
       <div class="subpage-block ${active ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${compatibleTarget ? 'compatible-target' : ''} ${incompatibleTarget ? 'incompatible-target' : ''}"
-        data-subpage-drop-row="${esc(subPageId)}" data-stage="${esc(stage.id)}" data-index="${index}">
+        data-subpage-drop-row="${esc(subPageId)}" data-stage="${esc(stage.id)}" data-index="${index}" data-scroll-target="subpage:${esc(subPageId)}">
         <div class="subpage-row">
-          <button class="drag-handle" data-subpage-drag="${esc(subPageId)}" type="button" aria-label="长按拖拽小关卡">⠿</button>
+          <button class="drag-handle" data-subpage-drag="${esc(subPageId)}" type="button" aria-label="拖拽小关卡">⠿</button>
           ${subPage.kind === 'managed' ? `<button class="icon-quiet" data-action="toggle-subpage" data-subpage="${esc(subPageId)}" type="button" aria-label="${expanded ? '收起' : '展开'}内部页面">${expanded ? '⌄' : '›'}</button>` : '<span class="icon-quiet">•</span>'}
           <button class="view-select subpage-main" data-action="select-subpage" data-subpage="${esc(subPageId)}" type="button">
             <strong>${esc(Core.subPageLabel(state, subPageId))}</strong>
-            <small>${esc(subPageTypeLabel(subPage))} · 模板 ${esc(subPage.templateId)}${pending ? ` · ${pending} 项待处理` : ''}</small>
+            <small>${esc(subPageTypeLabel(subPage))}${hint}</small>
           </button>
           ${scheme === 'drawer' && subPage.kind === 'managed' ? `<button class="drawer-open" data-action="open-drawer" data-subpage="${esc(subPageId)}" type="button">内部页面</button>` : ''}
-          ${scheme === 'focus' && subPage.kind === 'managed' ? `<button class="drawer-open" data-action="enter-focus" data-subpage="${esc(subPageId)}" type="button">专注编辑</button>` : scheme === 'drawer' && subPage.kind === 'managed' ? '' : `<span class="count-pill ${pending ? 'warn' : ''}">${subPage.viewOrder.length} 页</span>`}
+          ${scheme === 'focus' && subPage.kind === 'managed' ? `<button class="drawer-open" data-action="enter-focus" data-subpage="${esc(subPageId)}" type="button">专注编辑</button>` : `<span class="count-pill ${pending ? 'warn' : ''}">${subPage.viewOrder.length} 页</span>`}
         </div>
         ${internalVisible ? internalPageSection(subPage, 'inline') : ''}
-        ${dragState?.type === 'view' && scheme !== 'inline' ? pageDropZone(subPage) : ''}
+        ${dragState?.type === 'view' && scheme === 'drawer' ? pageDropZone(subPage) : ''}
       </div>`;
   }
 
   function pageDropZone(subPage) {
     const compatible = Core.canMoveViewToSubPage(state, dragState.id, subPage.id);
-    if (!compatible) return '<div class="compact-drop-zone invalid">模板不兼容，不能放入</div>';
+    if (!compatible) {
+      const reason = subPage.kind !== 'managed' ? '普通/视频关卡不接收内部页面' : '模板不同，不能放入';
+      return `<div class="compact-drop-zone invalid">${reason}</div>`;
+    }
     const label = dragState.targetSubPageId === subPage.id ? '松开放入这个小关卡' : '拖到这里移动页面';
     return `<div class="compact-drop-zone ${dragState.targetSubPageId === subPage.id ? 'active' : ''}" data-page-drop-zone="${esc(subPage.id)}">${label}</div>`;
   }
@@ -199,8 +230,8 @@
     const baseLabel = view.kind === 'dialog' ? `<small>底板：${esc(Core.subPageLabel(state, subPage.id))} 主界面</small>` : '';
     return `
       ${pageDropPlaceholder(subPage.id, index)}
-      <div class="view-row ${active ? 'active' : ''} ${dragging ? 'dragging' : ''}" data-page-drop-view="${esc(viewId)}" data-subpage="${esc(subPage.id)}" data-index="${index}">
-        ${view.kind === 'main' ? '<span class="view-lock" title="主界面固定">◆</span>' : `<button class="page-drag-handle" data-page-drag="${esc(viewId)}" type="button" aria-label="长按拖拽页面">⠿</button>`}
+      <div class="view-row ${active ? 'active' : ''} ${dragging ? 'dragging' : ''}" data-page-drop-view="${esc(viewId)}" data-subpage="${esc(subPage.id)}" data-index="${index}" data-scroll-target="view:${esc(viewId)}">
+        ${view.kind === 'main' ? '<span class="view-lock" title="主界面固定">◆</span>' : `<button class="page-drag-handle" data-page-drag="${esc(viewId)}" type="button" aria-label="拖拽页面">⠿</button>`}
         <button class="view-select" data-action="select-view" data-view="${esc(viewId)}" type="button">
           <span class="view-title"><span class="type-dot ${view.kind}"></span><span><strong>${esc(view.title)}</strong>${baseLabel}</span></span>
         </button>
@@ -220,7 +251,7 @@
     return `
       <section class="panel panel-column elements-panel">
         <div class="panel-head"><div><h2>元素</h2><p>${subPage ? `${esc(Core.subPageLabel(state, subPage.id))} · ${esc(view?.title || '')}` : '未选择小关卡'}</p></div></div>
-        <div class="scroll"><div class="elements-list">${elements.map((element) => elementRow(element)).join('') || '<div class="empty-mini">当前页面没有组件</div>'}</div></div>
+        <div class="scroll" data-scroll-key="elements-list"><div class="elements-list">${elements.map((element) => elementRow(element)).join('') || '<div class="empty-mini">当前页面没有组件</div>'}</div></div>
       </section>`;
   }
 
@@ -239,17 +270,17 @@
       return `
         <section class="panel drawer-panel simple">
           <div class="panel-head"><div><h2>${esc(Core.subPageLabel(state, subPage.id))}</h2><p>${esc(subPageTypeLabel(subPage))}小关卡组件</p></div><button class="drawer-close" data-action="close-drawer" type="button">收起</button></div>
-          <div class="scroll"><div class="elements-list">${Core.viewElements(state, subPage.mainViewId).map(elementRow).join('')}</div></div>
+          <div class="scroll" data-scroll-key="drawer-main"><div class="elements-list">${Core.viewElements(state, subPage.mainViewId).map(elementRow).join('')}</div></div>
         </section>`;
     }
     const tabs = [['views', '页面'], ['elements', '元素'], ['issues', `待处理 ${Core.pendingIssues(state, subPage.id).length}`]];
     let content;
-    if (state.drawerTab === 'elements') content = `<div class="scroll">${drawerElementsContent(subPage)}</div>`;
-    else if (state.drawerTab === 'issues') content = `<div class="scroll issues-list">${issuesContent(subPage.id)}</div>`;
-    else content = `<div class="scroll drawer-view-content">${internalPageSection(subPage, 'drawer')}</div>`;
+    if (state.drawerTab === 'elements') content = `<div class="scroll" data-scroll-key="drawer-elements">${drawerElementsContent(subPage)}</div>`;
+    else if (state.drawerTab === 'issues') content = `<div class="scroll issues-list" data-scroll-key="drawer-issues">${issuesContent(subPage.id)}</div>`;
+    else content = `<div class="scroll drawer-view-content" data-scroll-key="drawer-views">${internalPageSection(subPage, 'drawer')}</div>`;
     return `
       <section class="panel drawer-panel">
-        <div class="panel-head"><div><h2>${esc(Core.subPageLabel(state, subPage.id))}</h2><p>内部页面管理</p></div><button class="drawer-close" data-action="close-drawer" type="button">收起</button></div>
+        <div class="panel-head"><div><h2>${esc(Core.subPageLabel(state, subPage.id))}</h2><p>内部页面管理 · ${subPage.viewOrder.length} 页</p></div><button class="drawer-close" data-action="close-drawer" type="button">收起</button></div>
         <div class="drawer-tabs">${tabs.map(([id, label]) => `<button class="drawer-tab ${state.drawerTab === id ? 'active' : ''}" data-action="drawer-tab" data-tab="${id}" type="button">${label}</button>`).join('')}</div>
         ${content}
       </section>`;
@@ -261,18 +292,36 @@
     return `<div class="filter-line"><span>当前：${esc(view?.title || '主界面')}</span><button data-action="drawer-tab" data-tab="views" type="button">切换页面</button></div><div class="elements-list">${elements.map(elementRow).join('')}</div>`;
   }
 
+  function focusCrossTargetsHtml() {
+    if (!(scheme === 'focus' && state.focusActive && dragState?.type === 'view')) return '';
+    const currentId = state.activeSubPageId;
+    const cards = state.stages.flatMap((stage, stageIndex) => stage.subPageIds.map((subPageId, subIndex) => {
+      if (subPageId === currentId) return '';
+      const compatible = Core.canMoveViewToSubPage(state, dragState.id, subPageId);
+      const reason = compatible ? '可放置' : (Core.getSubPage(state, subPageId)?.kind !== 'managed' ? '不接收' : '模板不同');
+      return `<div class="focus-drop-target ${compatible ? '' : 'invalid'} ${dragState.targetSubPageId === subPageId ? 'active' : ''}" ${compatible ? `data-page-drop-zone="${esc(subPageId)}"` : ''}><span>关卡 ${stageIndex + 1} / 小关卡 ${stageIndex + 1}-${subIndex + 1}</span><small>${reason}</small></div>`;
+    })).join('');
+    return `
+      <div class="focus-cross-targets" data-scroll-key="focus-cross">
+        <strong>移动到其他小关卡</strong>
+        <p>本关内排序请在上方列表完成；这里只放跨关卡目标。</p>
+        ${cards || '<div class="empty-mini">暂无其他可放置小关卡</div>'}
+      </div>`;
+  }
+
   function focusNavigator() {
     const subPage = activeSubPage();
     if (!subPage) return '';
     const tabs = [['views', '页面'], ['elements', '元素']];
     const content = state.focusTab === 'elements'
-      ? `<div class="scroll">${drawerElementsContent(subPage)}</div>`
-      : `<div class="scroll drawer-view-content">${internalPageSection(subPage, 'focus')}</div>`;
+      ? `<div class="scroll" data-scroll-key="focus-elements">${drawerElementsContent(subPage)}</div>`
+      : `<div class="scroll drawer-view-content" data-scroll-key="focus-views">${internalPageSection(subPage, 'focus')}</div>`;
     return `
-      <section class="panel drawer-panel">
+      <section class="panel drawer-panel focus-navigator">
         <div class="panel-head"><div><h2>${esc(Core.subPageLabel(state, subPage.id))}</h2><p>只显示当前小关卡内容</p></div></div>
         <div class="focus-tabs">${tabs.map(([id, label]) => `<button class="focus-tab ${state.focusTab === id ? 'active' : ''}" data-action="focus-tab" data-tab="${id}" type="button">${label}</button>`).join('')}<button class="focus-tab" data-action="open-issues" type="button">待处理 ${Core.pendingIssues(state, subPage.id).length}</button></div>
         ${content}
+        ${focusCrossTargetsHtml()}
       </section>`;
   }
 
@@ -381,6 +430,10 @@
   }
 
   function relationInspector(view, element) {
+    if (element?.type === '按钮' && element.role !== 'close') {
+      const relation = Core.relationForElement(state, element.id);
+      return `<div class="relation-detail ${relation?.status === 'pending' ? 'warn' : ''}"><strong>${relation?.status === 'ok' ? '已配置' : '待处理'}</strong><span>${esc(relation?.text || '当前按钮还没有配置点击事件。')}</span><button data-action="configure-event" data-element="${esc(element.id)}" type="button" style="margin-top:8px;justify-self:start;padding:4px 7px;border:1px solid currentColor;border-radius:5px;background:#fff;color:inherit;font-size:8px;font-weight:900;">${element.targetView ? '修改目标' : '配置目标'}</button></div>`;
+    }
     const relations = element ? [Core.relationForElement(state, element.id)].filter(Boolean) : Core.relationsForView(state, view?.id);
     if (!relations.length) return '<div class="empty-state"><div><h2>没有交互关系</h2><p>选中具体按钮后，可以配置页面跳转或打开弹窗。</p></div></div>';
     return relations.map((relation) => `<div class="relation-detail ${relation.status === 'pending' ? 'warn' : ''}"><strong>${relation.status === 'ok' ? '已配置' : '待处理'}</strong><span>${esc(relation.text)}</span></div>`).join('');
@@ -400,12 +453,30 @@
     return `<main class="workspace focus-entry-layout">${stagePanel()}${canvasPanel()}${inspectorPanel()}</main>`;
   }
 
+  function captureScrollPositions() {
+    const map = {};
+    if (!root) return map;
+    root.querySelectorAll('[data-scroll-key]').forEach((element) => {
+      map[element.dataset.scrollKey] = element.scrollTop;
+    });
+    return map;
+  }
+
+  function restoreScrollPositions(map) {
+    if (!root) return;
+    root.querySelectorAll('[data-scroll-key]').forEach((element) => {
+      const key = element.dataset.scrollKey;
+      if (map[key] != null) element.scrollTop = map[key];
+    });
+  }
+
   function render() {
-    const scrollPositions = root ? [...root.querySelectorAll('.scroll')].map((element) => element.scrollTop) : [];
+    const scrollMap = captureScrollPositions();
     const workspace = scheme === 'inline' ? inlineWorkspace() : scheme === 'drawer' ? drawerWorkspace() : focusWorkspace();
     root.innerHTML = `<div class="prototype-app">${topbar()}${workspace}</div>${menuHtml()}${modalHtml()}${dragOverlayHtml()}<div id="toast" class="toast" hidden></div>`;
-    [...root.querySelectorAll('.scroll')].forEach((element, index) => { element.scrollTop = scrollPositions[index] || 0; });
+    restoreScrollPositions(scrollMap);
     updateDragGhost();
+    applyPendingScroll();
   }
 
   function menuHtml() {
@@ -420,7 +491,7 @@
     if (modal.type === 'template') {
       const selected = modal.selected || '';
       return modalShell('选择大关卡模板', `<div class="template-grid">
-        <button class="template-card ${selected === 'internal' ? 'selected' : ''}" data-action="select-template" data-template="internal" type="button"><strong>内部界面管理模板</strong><span>模板 ID：${Core.INTERNAL_TEMPLATE_ID}。页面可在同模板小关卡之间移动。</span></button>
+        <button class="template-card ${selected === 'internal' ? 'selected' : ''}" data-action="select-template" data-template="internal" type="button"><strong>内部界面管理模板</strong><span>适合内部页面、弹窗管理。同类型小关卡之间可互相移动页面。</span></button>
         <button class="template-card ${selected === 'blank' ? 'selected' : ''}" data-action="select-template" data-template="blank" type="button"><strong>空白关卡</strong><span>普通小关卡，可以选择和编辑自己的组件。</span></button>
         <button class="template-card ${selected === 'video' ? 'selected' : ''}" data-action="select-template" data-template="video" type="button"><strong>视频关卡</strong><span>视频小关卡拥有独立组件，不接收内部页面。</span></button>
       </div>`, `<button class="modal-button" data-action="close-modal" type="button">取消</button><button class="modal-button primary" data-action="confirm-template" type="button" ${selected ? '' : 'disabled'}>确认创建</button>`);
@@ -466,19 +537,27 @@
       : dragState.type === 'subpage' && dragState.targetStageId
         ? Core.getStage(state, dragState.targetStageId)?.title
         : '寻找放置位置';
-    const focusTargets = scheme === 'focus' && dragState.type === 'view'
-      ? `<div class="focus-drop-overlay"><strong>移动到其他小关卡</strong>${state.stages.flatMap((stage, stageIndex) => stage.subPageIds.map((subPageId, subIndex) => {
-        const compatible = Core.canMoveViewToSubPage(state, dragState.id, subPageId);
-        return `<div class="focus-drop-target ${compatible ? '' : 'invalid'} ${dragState.targetSubPageId === subPageId ? 'active' : ''}" ${compatible ? `data-page-drop-zone="${esc(subPageId)}"` : ''}><span>关卡 ${stageIndex + 1} / 小关卡 ${stageIndex + 1}-${subIndex + 1}</span><small>${compatible ? '可放置' : '模板不兼容'}</small></div>`;
-      })).join('')}</div>`
-      : '';
-    return `${focusTargets}<div id="dragGhost" class="drag-ghost ${dragState.valid ? 'valid' : ''}" style="left:${dragState.x + 16}px;top:${dragState.y + 14}px"><strong>${esc(sourceLabel)}</strong><span>${esc(targetLabel || '寻找放置位置')}</span></div>`;
+    return `<div id="dragGhost" class="drag-ghost ${dragState.valid ? 'valid' : ''}" style="left:${dragState.x + 16}px;top:${dragState.y + 14}px"><strong>${esc(sourceLabel)}</strong><span>${esc(targetLabel || '寻找放置位置')}</span></div>`;
   }
 
   function openMenu(button, viewId) {
     const rect = button.getBoundingClientRect();
     menu = { viewId, x: Math.min(window.innerWidth - 164, rect.right - 154), y: Math.min(window.innerHeight - 150, rect.bottom + 4) };
     render();
+  }
+
+  function activateSubPageWithUi(subPageId) {
+    Core.activateSubPage(state, subPageId);
+    const subPage = Core.getSubPage(state, subPageId);
+    if (scheme === 'drawer') {
+      state.drawerOpen = true;
+      state.drawerTab = subPage?.kind === 'managed' ? 'views' : state.drawerTab;
+    }
+    if (scheme === 'inline' && subPage?.kind === 'managed') {
+      // 展开当前，折叠其他托管小关卡，控制密度
+      state.expandedSubPageIds = [subPageId];
+    }
+    requestScrollTo(`subpage:${subPageId}`);
   }
 
   function handleAction(action, target) {
@@ -492,66 +571,200 @@
       if (purpose === 'initial' && selected === 'internal' && Core.getStage(state, 'stage-managed')?.placeholder) result = Core.createInitialManaged(state);
       else result = Core.createLargeStage(state, selected);
       modal = null;
+      if (result?.id && result.subPageIds) requestScrollTo(`subpage:${result.subPageIds[0]}`);
       update();
       showToast(result ? '已创建独立小关卡。可以新增页面并拖动到其他兼容小关卡。' : '未能创建关卡。', result ? 'info' : 'error');
       return;
     }
     if (action === 'close-modal') { modal = null; render(); return; }
     if (action === 'backdrop' && target.classList.contains('modal-backdrop')) { modal = null; render(); return; }
-    if (action === 'reset-scheme') { localStorage.removeItem(`forge-phase1-${scheme}`); state = Core.baseState(); menu = null; modal = null; dragState = null; render(); showToast('当前方案已重新开始。'); return; }
-    if (action === 'add-subpage') { const subPage = Core.addSubPage(state, target.dataset.stage); update(); showToast(`已新增${Core.subPageLabel(state, subPage.id)}。`); return; }
+    if (action === 'reset-scheme') {
+      localStorage.removeItem(`forge-phase1-${scheme}`);
+      state = Core.baseState();
+      menu = null;
+      modal = null;
+      dragState = null;
+      stopAutoScroll();
+      render();
+      showToast('当前方案已重新开始。');
+      return;
+    }
+    if (action === 'add-subpage') {
+      const subPage = Core.addSubPage(state, target.dataset.stage);
+      if (subPage) {
+        activateSubPageWithUi(subPage.id);
+        update();
+        showToast(`已新增${Core.subPageLabel(state, subPage.id)}。`);
+      }
+      return;
+    }
     if (action === 'toggle-subpage') {
       const id = target.dataset.subpage;
-      state.expandedSubPageIds = state.expandedSubPageIds.includes(id) ? state.expandedSubPageIds.filter((item) => item !== id) : [...state.expandedSubPageIds, id];
-      update(); return;
+      if (state.expandedSubPageIds.includes(id)) {
+        state.expandedSubPageIds = state.expandedSubPageIds.filter((item) => item !== id);
+      } else if (scheme === 'inline') {
+        state.expandedSubPageIds = [id];
+      } else {
+        state.expandedSubPageIds = [...state.expandedSubPageIds, id];
+      }
+      requestScrollTo(`subpage:${id}`);
+      update();
+      return;
     }
-    if (action === 'select-subpage') { Core.activateSubPage(state, target.dataset.subpage); update(); return; }
-    if (action === 'select-view') { Core.activateView(state, target.dataset.view); update(); return; }
-    if (action === 'select-element') { Core.selectElement(state, target.dataset.element); state.inspectorTab = 'properties'; if (modal?.type === 'issues') modal = null; update(); return; }
-    if (action === 'open-drawer') { Core.activateSubPage(state, target.dataset.subpage); state.drawerOpen = true; update(); return; }
+    if (action === 'select-subpage') {
+      activateSubPageWithUi(target.dataset.subpage);
+      update();
+      return;
+    }
+    if (action === 'select-view') {
+      Core.activateView(state, target.dataset.view);
+      requestScrollTo(`view:${target.dataset.view}`);
+      update();
+      return;
+    }
+    if (action === 'select-element') {
+      Core.selectElement(state, target.dataset.element);
+      state.inspectorTab = 'properties';
+      if (modal?.type === 'issues') modal = null;
+      update();
+      return;
+    }
+    if (action === 'open-drawer') {
+      activateSubPageWithUi(target.dataset.subpage);
+      state.drawerOpen = true;
+      update();
+      return;
+    }
     if (action === 'close-drawer') { state.drawerOpen = false; update(); return; }
     if (action === 'drawer-tab') { state.drawerTab = target.dataset.tab; update(); return; }
     if (action === 'focus-tab') { state.focusTab = target.dataset.tab; update(); return; }
-    if (action === 'enter-focus') { Core.activateSubPage(state, target.dataset.subpage); state.focusActive = true; update(); return; }
+    if (action === 'enter-focus') {
+      Core.activateSubPage(state, target.dataset.subpage);
+      state.focusActive = true;
+      state.focusTab = 'views';
+      update();
+      return;
+    }
     if (action === 'exit-focus') { state.focusActive = false; update(); showToast('已返回工作台，当前位置已保留。'); return; }
-    if (action === 'open-add-view') { Core.activateSubPage(state, target.dataset.subpage || state.activeSubPageId); modal = { type: 'add-view' }; render(); return; }
-    if (action === 'add-view') { const id = Core.addView(state, target.dataset.kind); modal = { type: 'rename', viewId: id, value: Core.getView(state, id)?.title || '' }; update(); return; }
-    if (action === 'confirm-rename') { const input = document.getElementById('renameInput'); Core.renameView(state, target.dataset.view, input?.value || ''); modal = null; update(); showToast('页面名称已更新。'); return; }
+    if (action === 'open-add-view') {
+      activateSubPageWithUi(target.dataset.subpage || state.activeSubPageId);
+      modal = { type: 'add-view' };
+      render();
+      return;
+    }
+    if (action === 'add-view') {
+      const id = Core.addView(state, target.dataset.kind);
+      requestScrollTo(`view:${id}`);
+      modal = { type: 'rename', viewId: id, value: Core.getView(state, id)?.title || '' };
+      update();
+      return;
+    }
+    if (action === 'confirm-rename') {
+      const input = document.getElementById('renameInput');
+      Core.renameView(state, target.dataset.view, input?.value || '');
+      modal = null;
+      update();
+      showToast('页面名称已更新。');
+      return;
+    }
     if (action === 'view-more') { openMenu(target, target.dataset.view); return; }
     if (action === 'duplicate-view') {
-      const id = Core.duplicateView(state, target.dataset.view); menu = null; update();
+      const id = Core.duplicateView(state, target.dataset.view);
+      menu = null;
+      if (id) requestScrollTo(`view:${id}`);
+      update();
       if (id) showToast(`已在下方生成“${Core.getView(state, id).title}”。`, 'info', true);
       return;
     }
-    if (action === 'rename-view') { const view = Core.getView(state, target.dataset.view); menu = null; modal = { type: 'rename', viewId: view.id, value: view.title }; render(); return; }
+    if (action === 'rename-view') {
+      const view = Core.getView(state, target.dataset.view);
+      menu = null;
+      modal = { type: 'rename', viewId: view.id, value: view.title };
+      render();
+      return;
+    }
     if (action === 'confirm-delete') { menu = null; modal = { type: 'delete', viewId: target.dataset.view }; render(); return; }
-    if (action === 'delete-view') { const view = Core.deleteView(state, target.dataset.view); modal = null; update(); if (view) showToast(`已删除“${view.title}”。`, 'warn', true); return; }
-    if (action === 'undo-last') { const restored = Core.undo(state); if (restored) { state = restored; update(); showToast('已撤销上一步操作。'); } return; }
+    if (action === 'delete-view') {
+      const view = Core.deleteView(state, target.dataset.view);
+      modal = null;
+      update();
+      if (view) showToast(`已删除“${view.title}”。`, 'warn', true);
+      return;
+    }
+    if (action === 'undo-last') {
+      const restored = Core.undo(state);
+      if (restored) {
+        state = restored;
+        update();
+        showToast('已撤销上一步操作。');
+      }
+      return;
+    }
     if (action === 'open-component') { modal = { type: 'component' }; render(); return; }
-    if (action === 'add-component') { const id = Core.addComponent(state, target.dataset.kind); modal = null; update(); if (id) showToast('组件已添加，可在右侧配置属性和事件。'); return; }
+    if (action === 'add-component') {
+      const id = Core.addComponent(state, target.dataset.kind);
+      modal = null;
+      update();
+      if (id) showToast('组件已添加，可在右侧配置属性和事件。');
+      return;
+    }
     if (action === 'canvas-element') {
       const elementId = target.dataset.element;
       if (state.mode === 'run') {
-        const result = Core.runClickElement(state, elementId); update();
+        const result = Core.runClickElement(state, elementId);
+        update();
         if (!result.ok) showToast('这个按钮还没有配置点击事件。', 'warn');
         else if (result.action === 'jump') showToast(`已跳转到“${result.target.title}”。`);
         return;
       }
       if (state.bindingDialogId) {
         const dialog = Core.getView(state, state.bindingDialogId);
-        if (Core.bindDialogTrigger(state, state.bindingDialogId, elementId)) { update(); showToast(`已建立关系：点击这个按钮打开“${dialog.title}”。`); }
-        else showToast('请选择同一小关卡中的普通按钮。', 'warn');
+        if (Core.bindDialogTrigger(state, state.bindingDialogId, elementId)) {
+          update();
+          showToast(`已建立关系：点击这个按钮打开“${dialog.title}”。`);
+        } else showToast('请选择同一小关卡中的普通按钮。', 'warn');
         return;
       }
-      Core.selectElement(state, elementId); state.inspectorTab = 'properties'; update(); return;
+      Core.selectElement(state, elementId);
+      state.inspectorTab = 'properties';
+      update();
+      return;
     }
     if (action === 'configure-event') { modal = { type: 'event', elementId: target.dataset.element }; render(); return; }
-    if (action === 'save-event-target') { Core.configureButtonEvent(state, target.dataset.element, target.dataset.view); modal = null; update(); showToast('按钮事件链接已保存。'); return; }
-    if (action === 'clear-event') { Core.clearButtonEvent(state, target.dataset.element); modal = null; update(); showToast('按钮事件已清除。'); return; }
-    if (action === 'start-binding') { const view = Core.getView(state, target.dataset.view); Core.activateSubPage(state, view.subPageId); state.currentViewId = Core.getSubPage(state, view.subPageId).mainViewId; state.bindingDialogId = view.id; modal = null; if (scheme === 'drawer') state.drawerTab = 'elements'; if (scheme === 'focus') state.focusTab = 'elements'; update(); showToast('请在画布中选择一个按钮。'); return; }
+    if (action === 'save-event-target') {
+      Core.configureButtonEvent(state, target.dataset.element, target.dataset.view);
+      modal = null;
+      update();
+      showToast('按钮事件链接已保存。');
+      return;
+    }
+    if (action === 'clear-event') {
+      Core.clearButtonEvent(state, target.dataset.element);
+      modal = null;
+      update();
+      showToast('按钮事件已清除。');
+      return;
+    }
+    if (action === 'start-binding') {
+      const view = Core.getView(state, target.dataset.view);
+      Core.activateSubPage(state, view.subPageId);
+      state.currentViewId = Core.getSubPage(state, view.subPageId).mainViewId;
+      state.bindingDialogId = view.id;
+      modal = null;
+      if (scheme === 'drawer') state.drawerTab = 'elements';
+      if (scheme === 'focus') state.focusTab = 'elements';
+      update();
+      showToast('请在画布中选择一个按钮。');
+      return;
+    }
     if (action === 'cancel-binding') { state.bindingDialogId = null; update(); showToast('已取消选择。'); return; }
     if (action === 'open-issues') { modal = { type: 'issues', subPageId: state.focusActive ? state.activeSubPageId : null }; render(); return; }
-    if (action === 'toggle-run') { if (state.mode === 'run') Core.stopRun(state); else Core.startRun(state); update(); return; }
+    if (action === 'toggle-run') {
+      if (state.mode === 'run') Core.stopRun(state);
+      else Core.startRun(state);
+      update();
+      return;
+    }
     if (action === 'inspector-tab') { state.inspectorTab = target.dataset.tab; update(); return; }
   }
 
@@ -573,22 +786,47 @@
     event.preventDefault();
     const type = pageHandle ? 'view' : 'subpage';
     const id = pageHandle ? pageHandle.dataset.pageDrag : subPageHandle.dataset.subpageDrag;
-    pressState = { type, id, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, timer: null };
+    pressState = {
+      type,
+      id,
+      startX: event.clientX,
+      startY: event.clientY,
+      x: event.clientX,
+      y: event.clientY,
+      handle,
+      timer: null,
+    };
     handle.classList.add('pressing');
-    pressState.timer = window.setTimeout(() => beginDrag(handle), 180);
+    // 仍保留短延迟作为兜底：按住不动也能进入拖拽
+    pressState.timer = window.setTimeout(() => beginDrag(), 160);
   }
 
-  function beginDrag(handle) {
-    if (!pressState) return;
-    dragState = { type: pressState.type, id: pressState.id, x: pressState.x, y: pressState.y, valid: false, targetSubPageId: null, targetStageId: null, targetIndex: null };
-    handle.classList.remove('pressing');
+  function beginDrag() {
+    if (!pressState || dragState) return;
+    const handle = pressState.handle;
+    dragState = {
+      type: pressState.type,
+      id: pressState.id,
+      x: pressState.x,
+      y: pressState.y,
+      valid: false,
+      targetSubPageId: null,
+      targetStageId: null,
+      targetIndex: null,
+    };
+    if (handle) handle.classList.remove('pressing');
+    window.clearTimeout(pressState.timer);
+    pressState = null;
     if (dragState.type === 'view') {
       const view = Core.getView(state, dragState.id);
-      if (view && !state.expandedSubPageIds.includes(view.subPageId)) state.expandedSubPageIds.push(view.subPageId);
+      if (view && scheme === 'inline' && !state.expandedSubPageIds.includes(view.subPageId)) {
+        state.expandedSubPageIds = [view.subPageId];
+      }
     }
     suppressClickUntil = Date.now() + 500;
     render();
     updateDragTarget(dragState.x, dragState.y);
+    startAutoScrollLoop();
   }
 
   function pointerMoveHandler(event) {
@@ -597,15 +835,16 @@
       pressState.x = event.clientX;
       pressState.y = event.clientY;
       const distance = Math.hypot(event.clientX - pressState.startX, event.clientY - pressState.startY);
-      if (distance > 7) cancelPress();
+      // 移动超过阈值即开始拖，不再取消
+      if (distance > 4) beginDrag();
       return;
     }
     event.preventDefault();
     dragState.x = event.clientX;
     dragState.y = event.clientY;
+    autoScrollPoint = { x: event.clientX, y: event.clientY };
     updateDragTarget(event.clientX, event.clientY);
     updateDragGhost();
-    autoScroll(event.clientX, event.clientY);
   }
 
   function updateDragTarget(x, y) {
@@ -621,10 +860,20 @@
         const rect = row.getBoundingClientRect();
         const baseIndex = Number(row.dataset.index);
         const targetIndex = y < rect.top + rect.height / 2 ? baseIndex : baseIndex + 1;
-        next = { valid: Core.canMoveViewToSubPage(state, dragState.id, row.dataset.subpage), targetSubPageId: row.dataset.subpage, targetStageId: null, targetIndex: Math.max(1, targetIndex) };
+        next = {
+          valid: Core.canMoveViewToSubPage(state, dragState.id, row.dataset.subpage),
+          targetSubPageId: row.dataset.subpage,
+          targetStageId: null,
+          targetIndex: Math.max(1, targetIndex),
+        };
       } else if (zone) {
         const subPage = Core.getSubPage(state, zone.dataset.pageDropZone);
-        next = { valid: Core.canMoveViewToSubPage(state, dragState.id, subPage?.id), targetSubPageId: subPage?.id || null, targetStageId: null, targetIndex: subPage?.viewOrder.length || null };
+        next = {
+          valid: Core.canMoveViewToSubPage(state, dragState.id, subPage?.id),
+          targetSubPageId: subPage?.id || null,
+          targetStageId: null,
+          targetIndex: subPage?.viewOrder.length || null,
+        };
       }
     } else {
       const row = hovered?.closest('[data-subpage-drop-row]');
@@ -632,13 +881,26 @@
       if (row) {
         const rect = row.getBoundingClientRect();
         const baseIndex = Number(row.dataset.index);
-        next = { valid: true, targetStageId: row.dataset.stage, targetIndex: y < rect.top + rect.height / 2 ? baseIndex : baseIndex + 1, targetSubPageId: null };
+        next = {
+          valid: true,
+          targetStageId: row.dataset.stage,
+          targetIndex: y < rect.top + rect.height / 2 ? baseIndex : baseIndex + 1,
+          targetSubPageId: null,
+        };
       } else if (stageZone) {
         const stage = Core.getStage(state, stageZone.dataset.subpageDropStage);
-        next = { valid: Boolean(stage && !stage.placeholder), targetStageId: stage?.id || null, targetIndex: stage?.subPageIds.length || 0, targetSubPageId: null };
+        next = {
+          valid: Boolean(stage && !stage.placeholder),
+          targetStageId: stage?.id || null,
+          targetIndex: stage?.subPageIds.length || 0,
+          targetSubPageId: null,
+        };
       }
     }
-    const changed = next.valid !== dragState.valid || next.targetSubPageId !== dragState.targetSubPageId || next.targetStageId !== dragState.targetStageId || next.targetIndex !== dragState.targetIndex;
+    const changed = next.valid !== dragState.valid
+      || next.targetSubPageId !== dragState.targetSubPageId
+      || next.targetStageId !== dragState.targetStageId
+      || next.targetIndex !== dragState.targetIndex;
     Object.assign(dragState, next);
     if (changed) render();
   }
@@ -649,24 +911,65 @@
     if (!ghost) return;
     ghost.style.left = `${dragState.x + 16}px`;
     ghost.style.top = `${dragState.y + 14}px`;
+    ghost.classList.toggle('valid', Boolean(dragState.valid));
+    const sourceLabel = dragState.type === 'view' ? Core.getView(state, dragState.id)?.title : Core.subPageLabel(state, dragState.id);
+    const targetLabel = dragState.type === 'view' && dragState.targetSubPageId
+      ? Core.subPageLabel(state, dragState.targetSubPageId)
+      : dragState.type === 'subpage' && dragState.targetStageId
+        ? Core.getStage(state, dragState.targetStageId)?.title
+        : '寻找放置位置';
+    ghost.innerHTML = `<strong>${esc(sourceLabel)}</strong><span>${esc(targetLabel || '寻找放置位置')}</span>`;
   }
 
-  function autoScroll(x, y) {
-    const scroll = document.elementFromPoint(x, y)?.closest('.scroll');
-    if (!scroll) return;
-    const rect = scroll.getBoundingClientRect();
-    if (y < rect.top + 34) scroll.scrollTop -= 12;
-    else if (y > rect.bottom - 34) scroll.scrollTop += 12;
+  function startAutoScrollLoop() {
+    stopAutoScroll();
+    const tick = () => {
+      if (!dragState || !autoScrollPoint) {
+        autoScrollRaf = 0;
+        return;
+      }
+      const { x, y } = autoScrollPoint;
+      const ghost = document.getElementById('dragGhost');
+      if (ghost) ghost.style.pointerEvents = 'none';
+      const hovered = document.elementFromPoint(x, y);
+      const scroll = hovered?.closest('.scroll');
+      if (scroll) {
+        const rect = scroll.getBoundingClientRect();
+        const edge = 40;
+        let delta = 0;
+        if (y < rect.top + edge) delta = -Math.max(8, (edge - (y - rect.top)) * 0.6);
+        else if (y > rect.bottom - edge) delta = Math.max(8, (edge - (rect.bottom - y)) * 0.6);
+        if (delta) {
+          scroll.scrollTop += delta;
+          updateDragTarget(x, y);
+        }
+      }
+      autoScrollRaf = window.requestAnimationFrame(tick);
+    };
+    autoScrollRaf = window.requestAnimationFrame(tick);
+  }
+
+  function stopAutoScroll() {
+    if (autoScrollRaf) window.cancelAnimationFrame(autoScrollRaf);
+    autoScrollRaf = 0;
+    autoScrollPoint = null;
   }
 
   function pointerUpHandler() {
-    if (pressState && !dragState) { cancelPress(); return; }
+    if (pressState && !dragState) {
+      cancelPress();
+      return;
+    }
     if (!dragState) return;
     const completed = dragState.valid;
     if (completed && dragState.type === 'view') {
       const result = Core.moveView(state, dragState.id, dragState.targetSubPageId, dragState.targetIndex);
       if (result) {
-        const details = [result.backgroundChanged ? '弹窗底板已改为目标主界面' : '', result.changedRelations ? `${result.changedRelations} 条关系进入待处理` : ''].filter(Boolean).join('，');
+        const details = [
+          result.backgroundChanged ? '弹窗底板已改为目标主界面' : '',
+          result.changedRelations ? `${result.changedRelations} 条关系进入待处理` : '',
+        ].filter(Boolean).join('，');
+        requestScrollTo(`view:${result.view.id}`);
         persist();
         clearDrag();
         render();
@@ -677,6 +980,7 @@
     if (completed && dragState.type === 'subpage') {
       const movedId = dragState.id;
       if (Core.moveSubPage(state, movedId, dragState.targetStageId, dragState.targetIndex)) {
+        requestScrollTo(`subpage:${movedId}`);
         persist();
         clearDrag();
         render();
@@ -686,7 +990,7 @@
     }
     clearDrag();
     render();
-    showToast('未放置到有效位置，内容保持不变。', 'warn');
+    showToast(completed ? '未放置到有效位置，内容保持不变。' : '未放置到有效位置，内容保持不变。', 'warn');
   }
 
   function cancelPress() {
@@ -698,16 +1002,26 @@
 
   function clearDrag() {
     cancelPress();
+    stopAutoScroll();
     dragState = null;
     suppressClickUntil = Date.now() + 250;
   }
 
   function keyHandler(event) {
     if (event.key !== 'Escape') return;
-    if (dragState || pressState) { clearDrag(); render(); showToast('已取消拖拽。'); return; }
+    if (dragState || pressState) {
+      clearDrag();
+      render();
+      showToast('已取消拖拽。');
+      return;
+    }
     if (modal) { modal = null; render(); return; }
     if (menu) { menu = null; render(); return; }
-    if (state.bindingDialogId) { state.bindingDialogId = null; update(); showToast('已取消选择。'); }
+    if (state.bindingDialogId) {
+      state.bindingDialogId = null;
+      update();
+      showToast('已取消选择。');
+    }
   }
 
   function mount(nextScheme) {
@@ -722,7 +1036,12 @@
     document.addEventListener('keydown', keyHandler);
     window.addEventListener('message', (event) => {
       if (event.data?.type === 'forge-phase1-reset') {
-        state = Core.baseState(); menu = null; modal = null; clearDrag(); render(); showToast('三个方案已全部重置。');
+        state = Core.baseState();
+        menu = null;
+        modal = null;
+        clearDrag();
+        render();
+        showToast('三个方案已全部重置。');
       }
     });
     render();

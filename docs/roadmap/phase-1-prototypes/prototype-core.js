@@ -1,5 +1,5 @@
 (function () {
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const INTERNAL_TEMPLATE_ID = 'internal-interface-v1';
 
   const SCHEME_LABELS = {
@@ -69,11 +69,52 @@
     return subPage;
   }
 
+  function seedManagedDemo(state, subPage) {
+    const peerId = nextId(state, 'view');
+    const dialogId = nextId(state, 'view');
+    state.views[peerId] = {
+      id: peerId,
+      subPageId: subPage.id,
+      kind: 'peer',
+      title: '第 2 题',
+      description: '当前小关卡内的同级内容页面。',
+      baseMainViewId: subPage.mainViewId,
+    };
+    state.elements[peerId] = [
+      { id: nextId(state, 'element'), label: '第 2 题题干', type: '文本' },
+      { id: nextId(state, 'element'), label: '返回主界面', type: '按钮', role: 'navigation', eventType: 'jump', targetView: subPage.mainViewId },
+      { id: nextId(state, 'element'), label: '第 2 题内容', type: '图片' },
+    ];
+    state.views[dialogId] = {
+      id: dialogId,
+      subPageId: subPage.id,
+      kind: 'dialog',
+      title: '提示弹窗',
+      description: '弹窗内容保持独立，底板来自所属小关卡的主界面。',
+      baseMainViewId: subPage.mainViewId,
+    };
+    state.elements[dialogId] = [
+      { id: nextId(state, 'element'), label: '弹窗标题', type: '文本' },
+      { id: nextId(state, 'element'), label: '弹窗内容', type: '文本' },
+      { id: nextId(state, 'element'), label: '关闭弹窗', type: '按钮', role: 'close', eventType: 'closeDialog', targetView: null },
+    ];
+    subPage.viewOrder.push(peerId, dialogId);
+
+    // 预配“第 2 题”跳转；保留“提示按钮”未配置，用于演示待处理引导
+    const mainElements = state.elements[subPage.mainViewId] || [];
+    const jumpButton = mainElements.find((element) => element.label === '第 2 题');
+    if (jumpButton) {
+      jumpButton.eventType = 'jump';
+      jumpButton.targetView = peerId;
+    }
+    return { peerId, dialogId };
+  }
+
   function baseState() {
     const state = {
       schemaVersion: SCHEMA_VERSION,
       nextId: 100,
-      created: false,
+      created: true,
       stages: [],
       subPages: {},
       views: {},
@@ -109,13 +150,24 @@
       title: '图形变化',
       kind: 'managed',
       templateId: INTERNAL_TEMPLATE_ID,
-      placeholder: true,
+      placeholder: false,
       subPageIds: [],
     };
     state.stages.push(normalStage, managedStage);
-    const normalSubPage = addSubPageRecord(state, normalStage, 'normal', normalStage.templateId);
-    state.activeSubPageId = normalSubPage.id;
-    state.currentViewId = normalSubPage.mainViewId;
+    addSubPageRecord(state, normalStage, 'normal', normalStage.templateId);
+    const managedSubPage = addSubPageRecord(state, managedStage, 'managed', managedStage.templateId);
+    seedManagedDemo(state, managedSubPage);
+
+    // 再给一个空的兼容小关卡，方便直接体验跨关卡拖入
+    const extraManaged = addSubPageRecord(state, managedStage, 'managed', managedStage.templateId);
+
+    state.activeSubPageId = managedSubPage.id;
+    state.currentViewId = managedSubPage.mainViewId;
+    state.expandedSubPageIds = [managedSubPage.id];
+    state.drawerOpen = true;
+    state.drawerTab = 'views';
+    // 避免未使用变量被压缩工具误伤；extraManaged 用于样例数据本身
+    void extraManaged;
     return state;
   }
 
