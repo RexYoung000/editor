@@ -140,6 +140,153 @@
     return `<div class="resize-handle" data-resize-target="${target}" role="separator" aria-orientation="vertical" aria-label="${labels[target] || '调节面板宽度'}" title="${labels[target] || '拖拽调节宽度'}" tabindex="0"></div>`;
   }
 
+  // 落点粘滞：相邻 1 格抖动直接忽略，需越过中性区后由调用方给出新 index
+  function stabilizeTargetIndex(rawIndex, subPageId, forceSwitch = false) {
+    if (!dragState || dragState.targetSubPageId !== subPageId || dragState.targetIndex == null) return rawIndex;
+    const prev = dragState.targetIndex;
+    if (rawIndex === prev) return prev;
+    if (!forceSwitch && Math.abs(rawIndex - prev) === 1) return prev;
+    return rawIndex;
+  }
+
+  function pickScrollContainer(x, y) {
+    // 优先当前 hover；失败则按「离指针最近的可滚列表」兜底，解决拖出边界后无法自动滚
+    const ghost = document.getElementById('dragGhost');
+    if (ghost) ghost.style.pointerEvents = 'none';
+    const hovered = document.elementFromPoint(x, y);
+    const direct = hovered?.closest?.('.scroll');
+    if (direct) return direct;
+    if (!root) return null;
+    const scrolls = [...root.querySelectorAll('.scroll')];
+    if (!scrolls.length) return null;
+    let best = null;
+    let bestScore = Infinity;
+    for (const el of scrolls) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 8 || rect.height < 8) continue;
+      // 指针在容器水平范围内时优先
+      const inX = x >= rect.left - 24 && x <= rect.right + 24;
+      const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+      const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+      const score = (inX ? 0 : 1000) + dy + dx * 0.25;
+      if (score < bestScore) {
+        bestScore = score;
+        best = el;
+      }
+    }
+    return best;
+  }
+
+  function resolveViewDropAtPoint(x, y) {
+    const ghost = document.getElementById('dragGhost');
+    if (ghost) ghost.style.pointerEvents = 'none';
+    // 采样多个点，降低「刚好落在细缝/占位条」时的抖动
+    const samples = [
+      [x, y],
+      [x, y - 10],
+      [x, y + 10],
+      [x - 8, y],
+      [x + 8, y],
+    ];
+    for (const [sx, sy] of samples) {
+      const el = document.elementFromPoint(sx, sy);
+      if (!el) continue;
+      const row = el.closest?.('[data-page-drop-view]');
+      if (row) {
+        const rect = row.getBoundingClientRect();
+        // 中性区：中间 40% 保持原 index；上下 30% 才切换，减少边界闪烁
+        const rel = (sy - rect.top) / Math.max(rect.height, 1);
+        const baseIndex = Number(row.dataset.index);
+        let targetIndex;
+        let forceSwitch = false;
+        if (rel < 0.30) { targetIndex = baseIndex; forceSwitch = true; }
+        else if (rel > 0.70) { targetIndex = baseIndex + 1; forceSwitch = true; }
+        else {
+          targetIndex = dragState?.targetSubPageId === row.dataset.subpage && dragState.targetIndex != null
+            ? dragState.targetIndex
+            : (rel < 0.5 ? baseIndex : baseIndex + 1);
+        }
+        targetIndex = stabilizeTargetIndex(targetIndex, row.dataset.subpage, forceSwitch);
+        const check = Core.canInsertViewAt(state, dragState.id, row.dataset.subpage, targetIndex);
+        return {
+          valid: check.ok,
+          reason: check.reason,
+          targetSubPageId: row.dataset.subpage,
+          targetStageId: null,
+          targetIndex,
+        };
+      }
+      const zone = el.closest?.('[data-page-drop-zone]');
+      if (zone) {
+        const subPageId = zone.dataset.pageDropZone;
+        const appendIndex = Core.defaultAppendIndex(state, dragState.id, subPageId);
+        const check = Core.canInsertViewAt(state, dragState.id, subPageId, appendIndex);
+        return {
+          valid: check.ok,
+          reason: check.reason || Core.getMoveBlockReason(state, dragState.id, subPageId),
+          targetSubPageId: subPageId || null,
+          targetStageId: null,
+          targetIndex: appendIndex,
+        };
+      }
+      const subBlock = el.closest?.('[data-subpage-drop-row]');
+      if (subBlock) {
+        const subPageId = subBlock.dataset.subpageDropRow;
+        const appendIndex = Core.defaultAppendIndex(state, dragState.id, subPageId);
+        const check = Core.canInsertViewAt(state, dragState.id, subPageId, appendIndex);
+        return {
+          valid: check.ok,
+          reason: check.reason || Core.getMoveBlockReason(state, dragState.id, subPageId),
+          targetSubPageId: subPageId,
+          targetStageId: null,
+          targetIndex: appendIndex,
+        };
+      }
+    }
+    return { valid: false, reason: null, targetSubPageId: null, targetStageId: null, targetIndex: null };
+  }
+
+  function resolveSubPageDropAtPoint(x, y) {
+    const ghost = document.getElementById('dragGhost');
+    if (ghost) ghost.style.pointerEvents = 'none';
+    const samples = [[x, y], [x, y - 12], [x, y + 12]];
+    for (const [sx, sy] of samples) {
+      const el = document.elementFromPoint(sx, sy);
+      if (!el) continue;
+      const row = el.closest?.('[data-subpage-drop-row]');
+      if (row) {
+        const rect = row.getBoundingClientRect();
+        const rel = (sy - rect.top) / Math.max(rect.height, 1);
+        const baseIndex = Number(row.dataset.index);
+        let targetIndex;
+        if (rel < 0.35) targetIndex = baseIndex;
+        else if (rel > 0.65) targetIndex = baseIndex + 1;
+        else targetIndex = dragState?.targetStageId === row.dataset.stage && dragState.targetIndex != null
+          ? dragState.targetIndex
+          : (rel < 0.5 ? baseIndex : baseIndex + 1);
+        return {
+          valid: true,
+          reason: null,
+          targetStageId: row.dataset.stage,
+          targetIndex,
+          targetSubPageId: null,
+        };
+      }
+      const stageZone = el.closest?.('[data-subpage-drop-stage]');
+      if (stageZone) {
+        const stage = Core.getStage(state, stageZone.dataset.subpageDropStage);
+        return {
+          valid: Boolean(stage && !stage.placeholder),
+          reason: null,
+          targetStageId: stage?.id || null,
+          targetIndex: stage?.subPageIds.length || 0,
+          targetSubPageId: null,
+        };
+      }
+    }
+    return { valid: false, reason: null, targetSubPageId: null, targetStageId: null, targetIndex: null };
+  }
+
   function undoButton() {
     return `<button class="top-button ghost" data-action="undo-last" type="button" ${state.undoSnapshot ? '' : 'disabled'}>撤销</button>`;
   }
@@ -974,84 +1121,137 @@
     updateDragGhost();
   }
 
-  function updateDragTarget(x, y) {
+  function updateDragTarget(x, y, options = {}) {
     if (!dragState) return;
-    const ghost = document.getElementById('dragGhost');
-    if (ghost) ghost.style.pointerEvents = 'none';
-    const hovered = document.elementFromPoint(x, y);
-    let next = { valid: false, reason: null, targetSubPageId: null, targetStageId: null, targetIndex: null };
-    if (dragState.type === 'view') {
-      const row = hovered?.closest('[data-page-drop-view]');
-      const zone = hovered?.closest('[data-page-drop-zone]');
-      if (row) {
-        const rect = row.getBoundingClientRect();
-        const baseIndex = Number(row.dataset.index);
-        const targetIndex = y < rect.top + rect.height / 2 ? baseIndex : baseIndex + 1;
-        const check = Core.canInsertViewAt(state, dragState.id, row.dataset.subpage, targetIndex);
-        next = {
-          valid: check.ok,
-          reason: check.reason,
-          targetSubPageId: row.dataset.subpage,
-          targetStageId: null,
-          // 保持原始 index，和列表占位渲染一致；真正插入时再 resolve
-          targetIndex,
-        };
-      } else if (zone) {
-        const subPageId = zone.dataset.pageDropZone;
-        const appendIndex = Core.defaultAppendIndex(state, dragState.id, subPageId);
-        const check = Core.canInsertViewAt(state, dragState.id, subPageId, appendIndex);
-        next = {
-          valid: check.ok,
-          reason: check.reason || Core.getMoveBlockReason(state, dragState.id, subPageId),
-          targetSubPageId: subPageId || null,
-          targetStageId: null,
-          targetIndex: appendIndex,
-        };
-      } else {
-        // 悬停在小关卡行上时先锁定目标，便于方案一只展开当前瞄准关卡
-        const subBlock = hovered?.closest('[data-subpage-drop-row]');
-        if (subBlock) {
-          const subPageId = subBlock.dataset.subpageDropRow;
-          const appendIndex = Core.defaultAppendIndex(state, dragState.id, subPageId);
-          const check = Core.canInsertViewAt(state, dragState.id, subPageId, appendIndex);
-          next = {
-            valid: check.ok,
-            reason: check.reason || Core.getMoveBlockReason(state, dragState.id, subPageId),
-            targetSubPageId: subPageId,
-            targetStageId: null,
-            targetIndex: appendIndex,
-          };
-        }
-      }
-    } else {
-      const row = hovered?.closest('[data-subpage-drop-row]');
-      const stageZone = hovered?.closest('[data-subpage-drop-stage]');
-      if (row) {
-        const rect = row.getBoundingClientRect();
-        const baseIndex = Number(row.dataset.index);
-        next = {
-          valid: true,
-          targetStageId: row.dataset.stage,
-          targetIndex: y < rect.top + rect.height / 2 ? baseIndex : baseIndex + 1,
-          targetSubPageId: null,
-        };
-      } else if (stageZone) {
-        const stage = Core.getStage(state, stageZone.dataset.subpageDropStage);
-        next = {
-          valid: Boolean(stage && !stage.placeholder),
-          targetStageId: stage?.id || null,
-          targetIndex: stage?.subPageIds.length || 0,
-          targetSubPageId: null,
-        };
-      }
+    const { force = false } = options;
+    const prevTarget = dragState.targetSubPageId || dragState.targetStageId || null;
+    const next = dragState.type === 'view'
+      ? resolveViewDropAtPoint(x, y)
+      : resolveSubPageDropAtPoint(x, y);
+    // 短暂丢失 hit-test（滚出缝隙/指针在空白）时保留上一个有效目标，避免预览闪没
+    if (!next.targetSubPageId && !next.targetStageId && (dragState.targetSubPageId || dragState.targetStageId)) {
+      if (!force) return;
     }
     const changed = next.valid !== dragState.valid
       || next.reason !== dragState.reason
       || next.targetSubPageId !== dragState.targetSubPageId
       || next.targetStageId !== dragState.targetStageId
       || next.targetIndex !== dragState.targetIndex;
+    if (!changed && !force) return;
     Object.assign(dragState, next);
-    if (changed) render();
+    const nextTarget = dragState.targetSubPageId || dragState.targetStageId || null;
+    const targetSwitched = prevTarget !== nextTarget;
+    // 目标切换可能要展开/收起列表，直接全量 render；同目标内只局部补丁，避免闪烁
+    if (targetSwitched || !patchDragPreview()) render();
+    else updateDragGhost();
+  }
+
+  function clearDragPreviewMarks(scope) {
+    scope.querySelectorAll('.drop-placeholder').forEach((el) => el.remove());
+    scope.querySelectorAll('.drop-target').forEach((el) => el.classList.remove('drop-target'));
+    scope.querySelectorAll('.compatible-target').forEach((el) => el.classList.remove('compatible-target'));
+    scope.querySelectorAll('.incompatible-target').forEach((el) => el.classList.remove('incompatible-target'));
+    scope.querySelectorAll('.compact-drop-zone.active, .compact-drop-zone.invalid').forEach((el) => {
+      el.classList.remove('active', 'invalid');
+    });
+    scope.querySelectorAll('.focus-drop-card.active, .focus-drop-target.active').forEach((el) => el.classList.remove('active'));
+    scope.querySelectorAll('.view-row.dragging, .subpage-block.dragging').forEach((el) => el.classList.remove('dragging'));
+  }
+
+  function insertPlaceholderBefore(node, label) {
+    if (!node || !node.parentElement) return;
+    const ph = document.createElement('div');
+    ph.className = 'drop-placeholder page-placeholder';
+    ph.innerHTML = `<span>${esc(label)}</span>`;
+    node.parentElement.insertBefore(ph, node);
+  }
+
+  function patchDragPreview() {
+    if (!root || !dragState) return false;
+    // 方案一：目标小关卡内部列表未展开时，交给 render
+    if (dragState.type === 'view' && scheme === 'inline' && dragState.targetSubPageId) {
+      const block = root.querySelector(`[data-subpage-drop-row="${dragState.targetSubPageId}"]`);
+      if (!block?.querySelector('.internal-section')) return false;
+    }
+    // 方案三：跨关目标卡片需要展开结构时，交给 render
+    if (dragState.type === 'view' && scheme === 'focus' && state.focusActive) {
+      const targetId = dragState.targetSubPageId;
+      if (targetId && targetId !== state.activeSubPageId) {
+        const card = root.querySelector(`.focus-drop-target[data-page-drop-zone="${targetId}"]`)?.closest('.focus-drop-card');
+        if (card && !card.querySelector('.internal-section')) return false;
+      }
+    }
+
+    clearDragPreviewMarks(root);
+    if (dragState.type === 'view') {
+      const source = root.querySelector(`[data-page-drop-view="${dragState.id}"]`);
+      if (source) source.classList.add('dragging');
+      root.querySelectorAll('[data-subpage-drop-row]').forEach((block) => {
+        const id = block.dataset.subpageDropRow;
+        const reason = Core.getMoveBlockReason(state, dragState.id, id);
+        if (!reason) block.classList.add('compatible-target');
+        else block.classList.add('incompatible-target');
+        if (id === dragState.targetSubPageId && !reason) block.classList.add('drop-target');
+      });
+      root.querySelectorAll('[data-page-drop-zone]').forEach((zone) => {
+        const id = zone.dataset.pageDropZone;
+        if (!id) return;
+        if (zone.classList.contains('compact-drop-zone') || zone.classList.contains('focus-drop-target')) {
+          const reason = Core.getMoveBlockReason(state, dragState.id, id);
+          if (id === dragState.targetSubPageId) {
+            zone.classList.add(reason || !dragState.valid ? 'invalid' : 'active');
+            zone.closest('.focus-drop-card')?.classList.add('active');
+          }
+        }
+      });
+      if (dragState.valid && dragState.targetSubPageId != null && dragState.targetIndex != null) {
+        const rows = [...root.querySelectorAll(`[data-page-drop-view][data-subpage="${dragState.targetSubPageId}"]`)];
+        const label = '放到这里';
+        if (!rows.length) {
+          const zone = root.querySelector(`[data-page-drop-zone="${dragState.targetSubPageId}"]`);
+          if (zone && !zone.querySelector('.drop-placeholder')) {
+            const ph = document.createElement('div');
+            ph.className = 'drop-placeholder page-placeholder';
+            ph.innerHTML = `<span>${esc(label)}</span>`;
+            zone.appendChild(ph);
+          }
+        } else {
+          // targetIndex 是插入点：插在第 n 个 row 前；若 n>=len 插到最后
+          const ordered = rows.sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+          const idx = Number(dragState.targetIndex);
+          const before = ordered.find((row) => Number(row.dataset.index) >= idx);
+          if (before) insertPlaceholderBefore(before, label);
+          else {
+            const last = ordered[ordered.length - 1];
+            if (last?.parentElement) {
+              const ph = document.createElement('div');
+              ph.className = 'drop-placeholder page-placeholder';
+              ph.innerHTML = `<span>${esc(label)}</span>`;
+              last.parentElement.appendChild(ph);
+            }
+          }
+        }
+      }
+    } else {
+      const sourceBlock = root.querySelector(`[data-subpage-drop-row="${dragState.id}"]`);
+      if (sourceBlock) sourceBlock.classList.add('dragging');
+      if (dragState.valid && dragState.targetStageId != null && dragState.targetIndex != null) {
+        const rows = [...root.querySelectorAll(`[data-subpage-drop-row][data-stage="${dragState.targetStageId}"]`)];
+        const ordered = rows.sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+        const idx = Number(dragState.targetIndex);
+        const before = ordered.find((row) => Number(row.dataset.index) >= idx);
+        const ph = document.createElement('div');
+        ph.className = 'drop-placeholder subpage-placeholder';
+        ph.innerHTML = '<span>放置小关卡到这里</span>';
+        if (before?.parentElement) before.parentElement.insertBefore(ph, before);
+        else {
+          const list = root.querySelector(`[data-subpage-drop-stage="${dragState.targetStageId}"] .subpage-list`);
+          if (list) list.appendChild(ph);
+        }
+      }
+    }
+    updateDragGhost();
+    return true;
   }
 
   function updateDragGhost() {
@@ -1085,19 +1285,26 @@
         return;
       }
       const { x, y } = autoScrollPoint;
-      const ghost = document.getElementById('dragGhost');
-      if (ghost) ghost.style.pointerEvents = 'none';
-      const hovered = document.elementFromPoint(x, y);
-      const scroll = hovered?.closest('.scroll');
+      const scroll = pickScrollContainer(x, y);
       if (scroll) {
         const rect = scroll.getBoundingClientRect();
-        const edge = 40;
+        const edge = 64;
         let delta = 0;
-        if (y < rect.top + edge) delta = -Math.max(8, (edge - (y - rect.top)) * 0.6);
-        else if (y > rect.bottom - edge) delta = Math.max(8, (edge - (rect.bottom - y)) * 0.6);
+        // 指针在容器内靠近边缘，或已经越出上下边界时都持续滚动
+        if (y <= rect.top + edge) {
+          const dist = Math.max(4, rect.top + edge - y);
+          delta = -Math.min(36, 10 + dist * 0.55);
+        } else if (y >= rect.bottom - edge) {
+          const dist = Math.max(4, y - (rect.bottom - edge));
+          delta = Math.min(36, 10 + dist * 0.55);
+        }
         if (delta) {
+          const prev = scroll.scrollTop;
           scroll.scrollTop += delta;
-          updateDragTarget(x, y);
+          if (scroll.scrollTop !== prev) {
+            // 滚动后强制刷新落点，保证越界内容可被滚入并放置
+            updateDragTarget(x, y, { force: true });
+          }
         }
       }
       autoScrollRaf = window.requestAnimationFrame(tick);
