@@ -141,7 +141,10 @@
     document.getElementById('aboutButton').addEventListener('click', () => { about.hidden = !about.hidden; });
     document.getElementById('aboutClose').addEventListener('click', () => { about.hidden = true; });
     document.getElementById('resetAllButton').addEventListener('click', () => {
-      ['inline', 'drawer', 'focus'].forEach((scheme) => localStorage.removeItem(`forge-phase1-${scheme}`));
+      ['inline', 'drawer', 'focus'].forEach((scheme) => {
+        localStorage.removeItem(`forge-phase1-${scheme}`);
+        localStorage.removeItem(`forge-phase1-layout-${scheme}`);
+      });
       frame.contentWindow?.postMessage({ type: 'forge-phase1-reset' }, '*');
     });
     document.addEventListener('keydown', (event) => {

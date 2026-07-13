@@ -144,6 +144,22 @@
     return `<button class="top-button ghost" data-action="undo-last" type="button" ${state.undoSnapshot ? '' : 'disabled'}>撤销</button>`;
   }
 
+  function schemeSwitcher() {
+    const items = [
+      { id: 'inline', short: '方案一', title: '内嵌精简', href: './inline.html' },
+      { id: 'drawer', short: '方案二', title: '侧边抽屉', href: './drawer.html' },
+      { id: 'focus', short: '方案三', title: '专注工作区', href: './focus.html' },
+    ];
+    return `
+      <nav class="scheme-switcher" aria-label="三套方案快速切换">
+        ${items.map((item) => `
+          <a class="scheme-switch ${item.id === scheme ? 'active' : ''}" href="${item.href}" title="${esc(item.title)}" ${item.id === scheme ? 'aria-current="page"' : ''}>
+            <strong>${item.short}</strong><span>${esc(item.title)}</span>
+          </a>`).join('')}
+        <a class="scheme-switch compare-link" href="../phase-1-interaction-prototype.html#${scheme}" title="打开对比总览页">总览</a>
+      </nav>`;
+  }
+
   function topbar() {
     const subPage = activeSubPage();
     const stage = activeStage();
@@ -152,6 +168,7 @@
         <header class="editor-topbar focus-topbar">
           <button class="top-button" data-action="exit-focus" type="button">← 返回工作台</button>
           <div class="breadcrumb"><span>图形变化课程</span><b>›</b><span>${esc(stage?.title || '关卡')}</span><b>›</b><span>${esc(Core.subPageLabel(state, subPage.id))}</span><b>›</b><span>${esc(currentView()?.title || '主界面')}</span></div>
+          ${schemeSwitcher()}
           <div class="top-spacer"></div>
           ${pendingBadge()}
           ${undoButton()}
@@ -163,7 +180,7 @@
       <header class="editor-topbar">
         <div class="brand"><span class="brand-mark"></span><span>豌豆课件编辑器</span></div>
         <span class="course-name">图形变化课程</span>
-        <span class="mode-badge">${Core.SCHEME_LABELS[scheme]}</span>
+        ${schemeSwitcher()}
         <div class="top-spacer"></div>
         ${pendingBadge()}
         ${undoButton()}
