@@ -12,6 +12,21 @@
   let autoScrollRaf = 0;
   let autoScrollPoint = null;
   let pendingScrollTarget = null;
+  let layoutState = null;
+  let panelResize = null;
+
+  const LAYOUT_DEFAULTS = {
+    inline: { left: 300, inspector: 280 },
+    drawer: { stage: 238, drawer: 280, inspector: 270 },
+    focus: { left: 290, inspector: 286 },
+  };
+
+  const LAYOUT_LIMITS = {
+    left: { min: 200, max: 460 },
+    stage: { min: 180, max: 360 },
+    drawer: { min: 200, max: 420 },
+    inspector: { min: 220, max: 420 },
+  };
 
   const esc = (value) => String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -80,6 +95,49 @@
     pendingScrollTarget = null;
     if (!el) return;
     el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  function layoutStorageKey() {
+    return `forge-phase1-layout-${scheme}`;
+  }
+
+  function loadLayoutState() {
+    const defaults = { ...LAYOUT_DEFAULTS[scheme] };
+    try {
+      const saved = JSON.parse(localStorage.getItem(layoutStorageKey()) || 'null');
+      if (!saved || typeof saved !== 'object') return defaults;
+      return { ...defaults, ...saved };
+    } catch {
+      return defaults;
+    }
+  }
+
+  function saveLayoutState() {
+    if (!layoutState || !scheme) return;
+    localStorage.setItem(layoutStorageKey(), JSON.stringify(layoutState));
+  }
+
+  function clampLayoutValue(key, value) {
+    const limit = LAYOUT_LIMITS[key] || { min: 180, max: 480 };
+    return Math.round(Math.max(limit.min, Math.min(limit.max, value)));
+  }
+
+  function workspaceStyleAttr() {
+    if (!layoutState) return '';
+    if (scheme === 'drawer') {
+      return `style="--stage-width:${layoutState.stage}px;--drawer-width:${layoutState.drawer}px;--inspector-width:${layoutState.inspector}px"`;
+    }
+    return `style="--left-width:${layoutState.left}px;--inspector-width:${layoutState.inspector}px"`;
+  }
+
+  function resizeHandle(target) {
+    const labels = {
+      left: '拖拽调节左侧栏宽度，双击恢复默认',
+      stage: '拖拽调节关卡栏宽度，双击恢复默认',
+      drawer: '拖拽调节抽屉宽度，双击恢复默认',
+      inspector: '拖拽调节属性栏宽度，双击恢复默认',
+    };
+    return `<div class="resize-handle" data-resize-target="${target}" role="separator" aria-orientation="vertical" aria-label="${labels[target] || '调节面板宽度'}" title="${labels[target] || '拖拽调节宽度'}" tabindex="0"></div>`;
   }
 
   function undoButton() {
@@ -440,17 +498,22 @@
   }
 
   function inlineWorkspace() {
-    return `<main class="workspace inline-layout"><div class="left-stack">${stagePanel()}${elementsPanel()}</div>${canvasPanel()}${inspectorPanel()}</main>`;
+    return `<main class="workspace inline-layout" ${workspaceStyleAttr()}><div class="left-stack">${stagePanel()}${elementsPanel()}</div>${resizeHandle('left')}${canvasPanel()}${resizeHandle('inspector')}${inspectorPanel()}</main>`;
   }
 
   function drawerWorkspace() {
     const closed = !state.drawerOpen;
-    return `<main class="workspace drawer-layout ${closed ? 'drawer-closed' : ''}">${stagePanel()}${closed ? '' : drawerPanel()}${canvasPanel()}${inspectorPanel()}</main>`;
+    if (closed) {
+      return `<main class="workspace drawer-layout drawer-closed" ${workspaceStyleAttr()}>${stagePanel()}${resizeHandle('stage')}${canvasPanel()}${resizeHandle('inspector')}${inspectorPanel()}</main>`;
+    }
+    return `<main class="workspace drawer-layout" ${workspaceStyleAttr()}>${stagePanel()}${resizeHandle('stage')}${drawerPanel()}${resizeHandle('drawer')}${canvasPanel()}${resizeHandle('inspector')}${inspectorPanel()}</main>`;
   }
 
   function focusWorkspace() {
-    if (state.focusActive && activeSubPage()?.kind === 'managed') return `<main class="workspace focus-layout">${focusNavigator()}${canvasPanel()}${inspectorPanel()}</main>`;
-    return `<main class="workspace focus-entry-layout">${stagePanel()}${canvasPanel()}${inspectorPanel()}</main>`;
+    if (state.focusActive && activeSubPage()?.kind === 'managed') {
+      return `<main class="workspace focus-layout" ${workspaceStyleAttr()}>${focusNavigator()}${resizeHandle('left')}${canvasPanel()}${resizeHandle('inspector')}${inspectorPanel()}</main>`;
+    }
+    return `<main class="workspace focus-entry-layout" ${workspaceStyleAttr()}>${stagePanel()}${resizeHandle('left')}${canvasPanel()}${resizeHandle('inspector')}${inspectorPanel()}</main>`;
   }
 
   function captureScrollPositions() {
@@ -1009,6 +1072,10 @@
 
   function keyHandler(event) {
     if (event.key !== 'Escape') return;
+    if (panelResize) {
+      endPanelResize(false);
+      return;
+    }
     if (dragState || pressState) {
       clearDrag();
       render();
@@ -1024,15 +1091,102 @@
     }
   }
 
+  function beginPanelResize(target, handle, clientX, pointerId) {
+    if (!layoutState || !LAYOUT_LIMITS[target] || layoutState[target] == null) return;
+    panelResize = {
+      target,
+      startX: clientX,
+      startWidth: layoutState[target],
+      handle,
+    };
+    if (panelResize.handle) panelResize.handle.classList.add('active');
+    document.body.classList.add('is-panel-resizing');
+    if (pointerId != null && handle?.setPointerCapture) {
+      try { handle.setPointerCapture(pointerId); } catch {}
+    }
+  }
+
+  function applyPanelResize(clientX) {
+    if (!panelResize || !layoutState) return;
+    const delta = clientX - panelResize.startX;
+    // 左侧栏向右拖变宽；属性栏向右拖变窄（以右边缘为锚）
+    const next = panelResize.target === 'inspector'
+      ? panelResize.startWidth - delta
+      : panelResize.startWidth + delta;
+    layoutState[panelResize.target] = clampLayoutValue(panelResize.target, next);
+    const workspace = root?.querySelector('.workspace');
+    if (!workspace) return;
+    if (panelResize.target === 'left') workspace.style.setProperty('--left-width', `${layoutState.left}px`);
+    if (panelResize.target === 'stage') workspace.style.setProperty('--stage-width', `${layoutState.stage}px`);
+    if (panelResize.target === 'drawer') workspace.style.setProperty('--drawer-width', `${layoutState.drawer}px`);
+    if (panelResize.target === 'inspector') workspace.style.setProperty('--inspector-width', `${layoutState.inspector}px`);
+  }
+
+  function endPanelResize(persist = true) {
+    if (!panelResize) return;
+    if (panelResize.handle) panelResize.handle.classList.remove('active');
+    document.body.classList.remove('is-panel-resizing');
+    panelResize = null;
+    if (persist) {
+      saveLayoutState();
+    }
+  }
+
+  function resetPanelWidth(target) {
+    const defaults = LAYOUT_DEFAULTS[scheme];
+    if (!defaults || defaults[target] == null || !layoutState) return;
+    layoutState[target] = defaults[target];
+    saveLayoutState();
+    render();
+    const names = { left: '左侧栏', stage: '关卡栏', drawer: '抽屉', inspector: '属性栏' };
+    showToast(`${names[target] || '面板'}宽度已恢复默认。`);
+  }
+
+  function resizePointerDownHandler(event) {
+    if (event.button !== 0) return;
+    const handle = event.target.closest('[data-resize-target]');
+    if (!handle || !root.contains(handle)) return;
+    // 避免与页面拖拽冲突
+    if (dragState || pressState) return;
+    event.preventDefault();
+    event.stopPropagation();
+    beginPanelResize(handle.dataset.resizeTarget, handle, event.clientX, event.pointerId);
+  }
+
+  function resizePointerMoveHandler(event) {
+    if (!panelResize) return;
+    event.preventDefault();
+    applyPanelResize(event.clientX);
+  }
+
+  function resizePointerUpHandler() {
+    if (!panelResize) return;
+    endPanelResize(true);
+  }
+
+  function resizeDblClickHandler(event) {
+    const handle = event.target.closest('[data-resize-target]');
+    if (!handle || !root.contains(handle)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resetPanelWidth(handle.dataset.resizeTarget);
+  }
+
   function mount(nextScheme) {
     scheme = nextScheme;
     root = document.getElementById('prototypeRoot');
     state = Core.load(scheme);
+    layoutState = loadLayoutState();
     root.addEventListener('click', clickHandler);
     root.addEventListener('pointerdown', pointerDownHandler);
+    root.addEventListener('pointerdown', resizePointerDownHandler, true);
+    root.addEventListener('dblclick', resizeDblClickHandler, true);
     document.addEventListener('pointermove', pointerMoveHandler, { passive: false });
+    document.addEventListener('pointermove', resizePointerMoveHandler, { passive: false });
     document.addEventListener('pointerup', pointerUpHandler);
+    document.addEventListener('pointerup', resizePointerUpHandler);
     document.addEventListener('pointercancel', pointerUpHandler);
+    document.addEventListener('pointercancel', resizePointerUpHandler);
     document.addEventListener('keydown', keyHandler);
     window.addEventListener('message', (event) => {
       if (event.data?.type === 'forge-phase1-reset') {
