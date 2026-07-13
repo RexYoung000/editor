@@ -223,16 +223,17 @@
     const expanded = state.expandedSubPageIds.includes(subPageId);
     const pending = Core.pendingIssues(state, subPageId).length;
     const isDragging = dragState?.type === 'subpage' && dragState.id === subPageId;
-    const compatibleTarget = dragState?.type === 'view' && Core.canMoveViewToSubPage(state, dragState.id, subPageId);
-    const incompatibleTarget = Boolean(dragState?.type === 'view' && !compatibleTarget);
+    const blockReason = dragState?.type === 'view' ? Core.getMoveBlockReason(state, dragState.id, subPageId) : null;
+    const compatibleTarget = dragState?.type === 'view' && !blockReason;
+    const incompatibleTarget = Boolean(dragState?.type === 'view' && blockReason);
+    // 拖拽页面时，兼容目标展开内部列表，支持跨关指定落点
     const internalVisible = subPage.kind === 'managed' && (
       (scheme === 'inline' && expanded)
-      || (dragState?.type === 'view' && compatibleTarget && scheme === 'inline')
+      || (dragState?.type === 'view' && compatibleTarget)
     );
     let hint = '';
     if (pending) hint = ` · ${pending} 项待处理`;
-    else if (incompatibleTarget && subPage.kind !== 'managed') hint = ' · 不接收内部页面';
-    else if (incompatibleTarget) hint = ' · 模板不同';
+    else if (incompatibleTarget) hint = ` · ${blockReason}`;
     return `
       <div class="subpage-block ${active ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${compatibleTarget ? 'compatible-target' : ''} ${incompatibleTarget ? 'incompatible-target' : ''}"
         data-subpage-drop-row="${esc(subPageId)}" data-stage="${esc(stage.id)}" data-index="${index}" data-scroll-target="subpage:${esc(subPageId)}">
@@ -247,28 +248,37 @@
           ${scheme === 'focus' && subPage.kind === 'managed' ? `<button class="drawer-open" data-action="enter-focus" data-subpage="${esc(subPageId)}" type="button">专注编辑</button>` : `<span class="count-pill ${pending ? 'warn' : ''}">${subPage.viewOrder.length} 页</span>`}
         </div>
         ${internalVisible ? internalPageSection(subPage, 'inline') : ''}
-        ${dragState?.type === 'view' && scheme === 'drawer' ? pageDropZone(subPage) : ''}
+        ${dragState?.type === 'view' && incompatibleTarget ? pageDropZone(subPage) : ''}
       </div>`;
   }
 
   function pageDropZone(subPage) {
-    const compatible = Core.canMoveViewToSubPage(state, dragState.id, subPage.id);
-    if (!compatible) {
-      const reason = subPage.kind !== 'managed' ? '普通/视频关卡不接收内部页面' : '模板不同，不能放入';
-      return `<div class="compact-drop-zone invalid">${reason}</div>`;
+    const reason = Core.getMoveBlockReason(state, dragState.id, subPage.id);
+    if (reason) {
+      return `<div class="compact-drop-zone invalid">${esc(reason)}</div>`;
     }
-    const label = dragState.targetSubPageId === subPage.id ? '松开放入这个小关卡' : '拖到这里移动页面';
-    return `<div class="compact-drop-zone ${dragState.targetSubPageId === subPage.id ? 'active' : ''}" data-page-drop-zone="${esc(subPage.id)}">${label}</div>`;
+    // 兼容目标已展开内部列表，这里只作兜底提示
+    const active = dragState.targetSubPageId === subPage.id && dragState.valid;
+    const label = active ? '松开放入高亮位置' : '展开后可拖到具体页面位置';
+    return `<div class="compact-drop-zone ${active ? 'active' : ''}" data-page-drop-zone="${esc(subPage.id)}">${label}</div>`;
   }
 
   function internalPageSection(subPage, context) {
     const contentIds = subPage.viewOrder.filter((id) => state.views[id]?.kind !== 'dialog');
     const dialogIds = subPage.viewOrder.filter((id) => state.views[id]?.kind === 'dialog');
+    const dragView = dragState?.type === 'view' ? Core.getView(state, dragState.id) : null;
+    const dragGroup = dragView ? Core.viewGroupOf(dragView) : null;
+    const contentEndIndex = contentIds.length ? subPage.viewOrder.indexOf(contentIds[contentIds.length - 1]) + 1 : 1;
+    const dialogEndIndex = subPage.viewOrder.length;
+    const showContentEnd = dragGroup === 'content';
+    const showDialogEnd = dragGroup === 'dialog';
     return `
-      <div class="internal-section" data-page-drop-zone="${esc(subPage.id)}">
+      <div class="internal-section" data-page-drop-zone="${esc(subPage.id)}" data-page-drop-group="${esc(dragGroup || '')}">
         ${viewGroup('内容页面', contentIds, subPage, context)}
+        ${showContentEnd ? pageDropPlaceholder(subPage.id, contentEndIndex, '放入内容区末尾') : ''}
         ${viewGroup('弹窗', dialogIds, subPage, context)}
-        ${pageDropPlaceholder(subPage.id, subPage.viewOrder.length)}
+        ${showDialogEnd ? pageDropPlaceholder(subPage.id, dialogEndIndex, '放入弹窗区末尾') : ''}
+        ${!dragGroup ? pageDropPlaceholder(subPage.id, subPage.viewOrder.length) : ''}
         <button class="add-view" data-action="open-add-view" data-subpage="${esc(subPage.id)}" type="button">＋ 新增内部页面</button>
       </div>`;
   }
@@ -288,7 +298,7 @@
     const baseLabel = view.kind === 'dialog' ? `<small>底板：${esc(Core.subPageLabel(state, subPage.id))} 主界面</small>` : '';
     return `
       ${pageDropPlaceholder(subPage.id, index)}
-      <div class="view-row ${active ? 'active' : ''} ${dragging ? 'dragging' : ''}" data-page-drop-view="${esc(viewId)}" data-subpage="${esc(subPage.id)}" data-index="${index}" data-scroll-target="view:${esc(viewId)}">
+      <div class="view-row ${active ? 'active' : ''} ${dragging ? 'dragging' : ''}" data-page-drop-view="${esc(viewId)}" data-subpage="${esc(subPage.id)}" data-index="${index}" data-view-group="${esc(Core.viewGroupOf(view))}" data-scroll-target="view:${esc(viewId)}">
         ${view.kind === 'main' ? '<span class="view-lock" title="主界面固定">◆</span>' : `<button class="page-drag-handle" data-page-drag="${esc(viewId)}" type="button" aria-label="拖拽页面">⠿</button>`}
         <button class="view-select" data-action="select-view" data-view="${esc(viewId)}" type="button">
           <span class="view-title"><span class="type-dot ${view.kind}"></span><span><strong>${esc(view.title)}</strong>${baseLabel}</span></span>
@@ -297,9 +307,9 @@
       </div>`;
   }
 
-  function pageDropPlaceholder(subPageId, index) {
+  function pageDropPlaceholder(subPageId, index, label = '页面将放置在这里') {
     if (!dragState || dragState.type !== 'view' || !dragState.valid || dragState.targetSubPageId !== subPageId || dragState.targetIndex !== index) return '';
-    return '<div class="drop-placeholder page-placeholder"><span>页面将放置在这里</span></div>';
+    return `<div class="drop-placeholder page-placeholder"><span>${esc(label)}</span></div>`;
   }
 
   function elementsPanel() {
@@ -355,14 +365,27 @@
     const currentId = state.activeSubPageId;
     const cards = state.stages.flatMap((stage, stageIndex) => stage.subPageIds.map((subPageId, subIndex) => {
       if (subPageId === currentId) return '';
-      const compatible = Core.canMoveViewToSubPage(state, dragState.id, subPageId);
-      const reason = compatible ? '可放置' : (Core.getSubPage(state, subPageId)?.kind !== 'managed' ? '不接收' : '模板不同');
-      return `<div class="focus-drop-target ${compatible ? '' : 'invalid'} ${dragState.targetSubPageId === subPageId ? 'active' : ''}" ${compatible ? `data-page-drop-zone="${esc(subPageId)}"` : ''}><span>关卡 ${stageIndex + 1} / 小关卡 ${stageIndex + 1}-${subIndex + 1}</span><small>${reason}</small></div>`;
+      const subPage = Core.getSubPage(state, subPageId);
+      if (!subPage) return '';
+      const blockReason = Core.getMoveBlockReason(state, dragState.id, subPageId);
+      const compatible = !blockReason;
+      const active = dragState.targetSubPageId === subPageId;
+      if (!compatible) {
+        return `<div class="focus-drop-target invalid"><span>关卡 ${stageIndex + 1} / ${esc(Core.subPageLabel(state, subPageId))}</span><small>${esc(blockReason)}</small></div>`;
+      }
+      return `
+        <div class="focus-drop-card ${active ? 'active' : ''}">
+          <div class="focus-drop-target ${active ? 'active' : ''}" data-page-drop-zone="${esc(subPageId)}">
+            <span>关卡 ${stageIndex + 1} / ${esc(Core.subPageLabel(state, subPageId))}</span>
+            <small>拖到下方具体位置</small>
+          </div>
+          ${internalPageSection(subPage, 'focus-cross')}
+        </div>`;
     })).join('');
     return `
       <div class="focus-cross-targets" data-scroll-key="focus-cross">
         <strong>移动到其他小关卡</strong>
-        <p>本关内排序请在上方列表完成；这里只放跨关卡目标。</p>
+        <p>本关内排序用上方列表；跨关请拖到目标关内的具体位置。</p>
         ${cards || '<div class="empty-mini">暂无其他可放置小关卡</div>'}
       </div>`;
   }
@@ -873,6 +896,7 @@
       x: pressState.x,
       y: pressState.y,
       valid: false,
+      reason: null,
       targetSubPageId: null,
       targetStageId: null,
       targetIndex: null,
@@ -915,7 +939,7 @@
     const ghost = document.getElementById('dragGhost');
     if (ghost) ghost.style.pointerEvents = 'none';
     const hovered = document.elementFromPoint(x, y);
-    let next = { valid: false, targetSubPageId: null, targetStageId: null, targetIndex: null };
+    let next = { valid: false, reason: null, targetSubPageId: null, targetStageId: null, targetIndex: null };
     if (dragState.type === 'view') {
       const row = hovered?.closest('[data-page-drop-view]');
       const zone = hovered?.closest('[data-page-drop-zone]');
@@ -923,19 +947,25 @@
         const rect = row.getBoundingClientRect();
         const baseIndex = Number(row.dataset.index);
         const targetIndex = y < rect.top + rect.height / 2 ? baseIndex : baseIndex + 1;
+        const check = Core.canInsertViewAt(state, dragState.id, row.dataset.subpage, targetIndex);
         next = {
-          valid: Core.canMoveViewToSubPage(state, dragState.id, row.dataset.subpage),
+          valid: check.ok,
+          reason: check.reason,
           targetSubPageId: row.dataset.subpage,
           targetStageId: null,
-          targetIndex: Math.max(1, targetIndex),
+          // 保持原始 index，和列表占位渲染一致；真正插入时再 resolve
+          targetIndex,
         };
       } else if (zone) {
-        const subPage = Core.getSubPage(state, zone.dataset.pageDropZone);
+        const subPageId = zone.dataset.pageDropZone;
+        const appendIndex = Core.defaultAppendIndex(state, dragState.id, subPageId);
+        const check = Core.canInsertViewAt(state, dragState.id, subPageId, appendIndex);
         next = {
-          valid: Core.canMoveViewToSubPage(state, dragState.id, subPage?.id),
-          targetSubPageId: subPage?.id || null,
+          valid: check.ok,
+          reason: check.reason || Core.getMoveBlockReason(state, dragState.id, subPageId),
+          targetSubPageId: subPageId || null,
           targetStageId: null,
-          targetIndex: subPage?.viewOrder.length || null,
+          targetIndex: appendIndex,
         };
       }
     } else {
@@ -961,6 +991,7 @@
       }
     }
     const changed = next.valid !== dragState.valid
+      || next.reason !== dragState.reason
       || next.targetSubPageId !== dragState.targetSubPageId
       || next.targetStageId !== dragState.targetStageId
       || next.targetIndex !== dragState.targetIndex;
@@ -976,11 +1007,18 @@
     ghost.style.top = `${dragState.y + 14}px`;
     ghost.classList.toggle('valid', Boolean(dragState.valid));
     const sourceLabel = dragState.type === 'view' ? Core.getView(state, dragState.id)?.title : Core.subPageLabel(state, dragState.id);
-    const targetLabel = dragState.type === 'view' && dragState.targetSubPageId
-      ? Core.subPageLabel(state, dragState.targetSubPageId)
-      : dragState.type === 'subpage' && dragState.targetStageId
-        ? Core.getStage(state, dragState.targetStageId)?.title
-        : '寻找放置位置';
+    let targetLabel = '寻找放置位置';
+    if (dragState.type === 'view') {
+      if (dragState.valid && dragState.targetSubPageId) {
+        targetLabel = `${Core.subPageLabel(state, dragState.targetSubPageId)} · 指定位置`;
+      } else if (dragState.reason) {
+        targetLabel = dragState.reason;
+      } else if (dragState.targetSubPageId) {
+        targetLabel = Core.getMoveBlockReason(state, dragState.id, dragState.targetSubPageId) || '不能放在这里';
+      }
+    } else if (dragState.type === 'subpage' && dragState.targetStageId) {
+      targetLabel = Core.getStage(state, dragState.targetStageId)?.title || targetLabel;
+    }
     ghost.innerHTML = `<strong>${esc(sourceLabel)}</strong><span>${esc(targetLabel || '寻找放置位置')}</span>`;
   }
 
@@ -1036,7 +1074,7 @@
         persist();
         clearDrag();
         render();
-        showToast(`页面已移动到${Core.subPageLabel(state, result.view.subPageId)}${details ? `；${details}` : ''}。`, details ? 'warn' : 'info', true);
+        showToast(`页面已移动到${Core.subPageLabel(state, result.view.subPageId)}（位置 ${result.insertIndex + 1}）${details ? `；${details}` : ''}。`, details ? 'warn' : 'info', true);
         return;
       }
     }
@@ -1051,9 +1089,10 @@
         return;
       }
     }
+    const failReason = dragState.reason || '未放置到有效位置，内容保持不变。';
     clearDrag();
     render();
-    showToast(completed ? '未放置到有效位置，内容保持不变。' : '未放置到有效位置，内容保持不变。', 'warn');
+    showToast(failReason, 'warn');
   }
 
   function cancelPress() {

@@ -450,31 +450,121 @@
     return changed;
   }
 
-  function canMoveViewToSubPage(state, viewId, targetSubPageId) {
+  function viewGroupOf(view) {
+    if (!view || view.kind === 'main') return 'main';
+    return view.kind === 'dialog' ? 'dialog' : 'content';
+  }
+
+  // 返回插入点合法区间 [min, max]（max 为可插在末尾的 index）
+  // excludeViewId：预览/同列表重排时先排除被拖项，避免边界抖动
+  function getInsertBounds(state, subPageId, group, excludeViewId = null) {
+    const subPage = getSubPage(state, subPageId);
+    if (!subPage) return { min: 0, max: 0 };
+    const order = subPage.viewOrder.filter((id) => id !== excludeViewId);
+    if (group === 'dialog') {
+      const firstDialog = order.findIndex((id) => state.views[id]?.kind === 'dialog');
+      const min = firstDialog < 0 ? order.length : firstDialog;
+      return { min, max: order.length };
+    }
+    // content：主界面固定第 0 位，内容页插在主界面后、弹窗前
+    const firstDialog = order.findIndex((id) => state.views[id]?.kind === 'dialog');
+    const max = firstDialog < 0 ? order.length : firstDialog;
+    return { min: 1, max: Math.max(1, max) };
+  }
+
+  function mapIndexAfterExclude(order, index, excludeViewId) {
+    if (!excludeViewId) return index;
+    const excludeIndex = order.indexOf(excludeViewId);
+    if (excludeIndex < 0) return index;
+    return index > excludeIndex ? index - 1 : index;
+  }
+
+  function getMoveBlockReason(state, viewId, targetSubPageId) {
     const view = getView(state, viewId);
     const source = view ? getSubPage(state, view.subPageId) : null;
     const target = getSubPage(state, targetSubPageId);
-    if (!view || view.kind === 'main' || !source || !target) return false;
-    return source.kind === 'managed' && target.kind === 'managed' && source.templateId === target.templateId;
+    if (!view) return '页面不存在';
+    if (view.kind === 'main') return '主界面不能移动';
+    if (!source || !target) return '目标不存在';
+    if (source.kind !== 'managed') return '当前页面不属于内部界面小关卡';
+    if (target.kind !== 'managed') return '普通/视频关卡不接收内部页面';
+    if (source.templateId !== target.templateId) return '模板不同，不能移入';
+    return null;
+  }
+
+  function canMoveViewToSubPage(state, viewId, targetSubPageId) {
+    return !getMoveBlockReason(state, viewId, targetSubPageId);
+  }
+
+  function resolveInsertIndex(state, viewId, targetSubPageId, rawIndex) {
+    const view = getView(state, viewId);
+    const targetSubPage = getSubPage(state, targetSubPageId);
+    if (!view || !targetSubPage) return null;
+    const group = viewGroupOf(view);
+    if (group === 'main') return null;
+    const sourceSubPage = getSubPage(state, view.subPageId);
+    const sameList = sourceSubPage && sourceSubPage.id === targetSubPageId;
+    const order = targetSubPage.viewOrder;
+    let index = Number(rawIndex);
+    if (!Number.isFinite(index)) index = order.length;
+    // 把“落在某行”的 index 映射到排除自身后的坐标系
+    if (sameList) index = mapIndexAfterExclude(order, index, viewId);
+    const bounds = getInsertBounds(state, targetSubPageId, group, sameList ? viewId : null);
+    if (index < bounds.min || index > bounds.max) return null;
+    return Math.max(bounds.min, Math.min(bounds.max, index));
+  }
+
+  function canInsertViewAt(state, viewId, targetSubPageId, rawIndex) {
+    const block = getMoveBlockReason(state, viewId, targetSubPageId);
+    if (block) return { ok: false, reason: block, index: null };
+    const view = getView(state, viewId);
+    const group = viewGroupOf(view);
+    const index = resolveInsertIndex(state, viewId, targetSubPageId, rawIndex);
+    if (index == null) {
+      return {
+        ok: false,
+        reason: group === 'dialog' ? '弹窗只能放在弹窗区域' : '内容页只能放在内容页面区域',
+        index: null,
+      };
+    }
+    return { ok: true, reason: null, index };
+  }
+
+  // 返回“原始 viewOrder 坐标系”下的组末尾插入点，便于 UI 占位与 hit-test 对齐
+  function defaultAppendIndex(state, viewId, targetSubPageId) {
+    const view = getView(state, viewId);
+    const subPage = getSubPage(state, targetSubPageId);
+    if (!view || !subPage) return 0;
+    const group = viewGroupOf(view);
+    if (group === 'main') return 0;
+    if (group === 'dialog') return subPage.viewOrder.length;
+    const firstDialog = subPage.viewOrder.findIndex((id) => state.views[id]?.kind === 'dialog');
+    return firstDialog < 0 ? subPage.viewOrder.length : firstDialog;
   }
 
   function moveView(state, viewId, targetSubPageId, targetIndex) {
-    if (!canMoveViewToSubPage(state, viewId, targetSubPageId)) return null;
+    const check = canInsertViewAt(state, viewId, targetSubPageId, targetIndex);
+    if (!check.ok) return null;
     const view = getView(state, viewId);
     const sourceSubPage = getSubPage(state, view.subPageId);
     const targetSubPage = getSubPage(state, targetSubPageId);
     const sourceIndex = sourceSubPage.viewOrder.indexOf(viewId);
     rememberUndo(state, '移动页面');
     sourceSubPage.viewOrder.splice(sourceIndex, 1);
-    let insertIndex = Math.max(1, Math.min(Number(targetIndex), targetSubPage.viewOrder.length));
-    if (sourceSubPage.id === targetSubPage.id && sourceIndex < insertIndex) insertIndex -= 1;
+    // check.index 已是排除自身后的插入点
+    const insertIndex = Math.max(0, Math.min(check.index, targetSubPage.viewOrder.length));
     targetSubPage.viewOrder.splice(insertIndex, 0, viewId);
     const sourceSubPageId = view.subPageId;
     view.subPageId = targetSubPageId;
     if (view.kind === 'dialog') view.baseMainViewId = targetSubPage.mainViewId;
     const changedRelations = clearCrossSubPageRelations(state, viewId, sourceSubPageId, targetSubPageId);
     activateView(state, viewId);
-    return { view, changedRelations, backgroundChanged: view.kind === 'dialog' && sourceSubPageId !== targetSubPageId };
+    return {
+      view,
+      changedRelations,
+      backgroundChanged: view.kind === 'dialog' && sourceSubPageId !== targetSubPageId,
+      insertIndex,
+    };
   }
 
   function deleteView(state, viewId) {
@@ -657,7 +747,13 @@
     addView,
     renameView,
     duplicateView,
+    viewGroupOf,
+    getInsertBounds,
+    getMoveBlockReason,
     canMoveViewToSubPage,
+    canInsertViewAt,
+    resolveInsertIndex,
+    defaultAppendIndex,
     moveView,
     deleteView,
     addComponent,

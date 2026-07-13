@@ -320,14 +320,18 @@ body.is-panel-resizing .panel {
 .drag-ghost strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .drag-ghost span { overflow: hidden; color: #718093; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 /* 方案三：跨关卡目标挂在左侧导航底部，不遮挡本关页面列表 */
-.focus-cross-targets { max-height: 38%; min-height: 0; overflow: auto; border-top: 1px solid var(--line); background: #f7fafb; padding: 8px; }
+.focus-cross-targets { max-height: 42%; min-height: 0; overflow: auto; border-top: 1px solid var(--line); background: #f7fafb; padding: 8px; }
 .focus-cross-targets > strong { display: block; margin: 0 0 7px; font-size: 10px; color: #334556; }
 .focus-cross-targets > p { margin: 0 0 8px; color: #7a8898; font-size: 8px; line-height: 1.4; }
-.focus-drop-target { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 6px; padding: 8px; border: 1px dashed #9dbab6; border-radius: 7px; background: #f1faf8; color: #456b67; font-size: 8px; }
+.focus-drop-card { margin-bottom: 8px; padding: 6px; border: 1px solid #d5e0e7; border-radius: 8px; background: #fff; }
+.focus-drop-card.active { border-color: rgba(23,127,120,.45); box-shadow: 0 0 0 3px rgba(23,127,120,.08); }
+.focus-drop-card .internal-section { margin: 6px 0 0; padding: 6px; border-left: 0; background: #f8fbfc; }
+.focus-drop-target { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 0; padding: 8px; border: 1px dashed #9dbab6; border-radius: 7px; background: #f1faf8; color: #456b67; font-size: 8px; }
 .focus-drop-target small { color: var(--teal); white-space: nowrap; }
 .focus-drop-target.active { border-style: solid; border-color: var(--teal); background: #dff4f1; box-shadow: 0 0 0 3px rgba(23,127,120,.11); }
-.focus-drop-target.invalid { border-color: #d5c9c4; background: #f8f4f2; color: #9a8279; opacity: .64; }
+.focus-drop-target.invalid { border-color: #d5c9c4; background: #f8f4f2; color: #9a8279; opacity: .9; margin-bottom: 6px; }
 .focus-drop-target.invalid small { color: #a47769; }
+.compact-drop-zone.invalid { font-weight: 700; }
 .top-button.ghost { border-color: #5b6b7e; background: transparent; color: #d7e0ea; }
 .top-button.ghost:disabled { opacity: .35; }
 
