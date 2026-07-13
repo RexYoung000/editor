@@ -186,9 +186,11 @@ body.is-panel-resizing .panel {
 .subpage-block { margin: 6px; border: 1px solid transparent; border-radius: 7px; transition: border-color .16s ease, background .16s ease, opacity .16s ease, transform .16s ease, box-shadow .16s ease; }
 .subpage-block.active { border-color: rgba(23,127,120,.46); background: var(--teal-soft); box-shadow: inset 3px 0 0 var(--teal); }
 .subpage-block.dragging { opacity: .25; transform: scale(.985); }
-.subpage-block.compatible-target { border-color: rgba(23,127,120,.5); background: #f1fbf9; }
-.subpage-block.incompatible-target { opacity: .58; }
+.subpage-block.compatible-target { border-color: rgba(23,127,120,.28); background: #f7fbfa; }
+.subpage-block.compatible-target.drop-target { border-color: rgba(23,127,120,.62); background: #eef9f6; box-shadow: inset 3px 0 0 var(--teal); }
+.subpage-block.incompatible-target { opacity: .72; }
 .subpage-row { min-height: 48px; display: grid; grid-template-columns: auto auto minmax(0,1fr) auto; align-items: center; gap: 5px; padding: 6px; }
+.icon-quiet.spacer { visibility: hidden; pointer-events: none; }
 .subpage-main { min-width: 0; }
 .subpage-main strong, .subpage-main small { display: block; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .subpage-main strong { color: #253448; font-size: 10px; }
@@ -227,14 +229,16 @@ body.is-panel-resizing .panel {
 .add-view { width: 100%; min-height: 30px; margin-top: 6px; overflow: hidden; border: 1px dashed #aebbc8; border-radius: 6px; background: transparent; color: #597087; font-size: 9px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
 .add-view:hover { border-color: var(--teal); color: var(--teal); background: #f1faf8; }
 
-.drop-placeholder { min-height: 38px; display: grid; place-items: center; margin: 4px 5px; border: 1px dashed #2b948c; border-radius: 7px; background: rgba(234,247,245,.9); color: var(--teal); animation: placeholder-in .14s ease-out; }
-.drop-placeholder span { font-size: 8px; font-weight: 900; }
-.subpage-placeholder { min-height: 50px; margin: 5px 6px; }
-.page-placeholder { margin: 3px 0; }
-.compact-drop-zone { margin: 0 6px 6px 54px; padding: 8px; border: 1px dashed #9eb8b5; border-radius: 6px; background: #f3faf9; color: #53736f; font-size: 8px; text-align: center; }
+.drop-placeholder { min-height: 28px; display: grid; place-items: center; margin: 2px 4px; border: 1px dashed rgba(43,148,140,.7); border-radius: 6px; background: rgba(234,247,245,.72); color: var(--teal); }
+.drop-placeholder span { font-size: 8px; font-weight: 800; }
+.subpage-placeholder { min-height: 40px; margin: 4px 6px; }
+.page-placeholder { margin: 2px 0; min-height: 24px; }
+.internal-section.drag-preview { background: #f5faf9; }
+.internal-section.drag-preview .view-row:not(.dragging) { opacity: .92; }
+.internal-section.drag-preview .more-button { display: none; }
+.compact-drop-zone { margin: 0 6px 6px 34px; padding: 7px; border: 1px dashed #9eb8b5; border-radius: 6px; background: #f3faf9; color: #53736f; font-size: 8px; text-align: center; }
 .compact-drop-zone.active { border-color: var(--teal); background: #dff4f1; color: var(--teal); font-weight: 900; }
-.compact-drop-zone.invalid { border-color: #d7c8c3; background: #faf5f3; color: #a07467; }
-@keyframes placeholder-in { from { min-height: 8px; opacity: 0; } to { opacity: 1; } }
+.compact-drop-zone.invalid { border-color: #d7c8c3; background: #faf5f3; color: #a07467; font-weight: 700; }
 
 .elements-list { padding: 7px; display: grid; gap: 4px; }
 .element-row { width: 100%; min-height: 34px; display: grid; grid-template-columns: 22px minmax(0,1fr) auto; align-items: center; gap: 5px; padding: 5px 7px; overflow: hidden; border: 1px solid transparent; border-radius: 6px; background: #fff; color: #45566a; text-align: left; }
@@ -247,7 +251,8 @@ body.is-panel-resizing .panel {
 
 .drawer-panel { min-height: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
 .drawer-panel.simple { grid-template-rows: auto minmax(0, 1fr); }
-.drawer-panel.focus-navigator { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+/* 方案三：本关列表与跨关投放区分栏，跨关区独立滚动，避免底部被裁切 */
+.drawer-panel.focus-navigator { grid-template-rows: auto auto minmax(0, 1fr) minmax(140px, 34%); }
 .drawer-close { flex: 0 0 auto; padding: 4px 6px; border: 1px solid #c7d2dc; border-radius: 5px; background: #fff; color: #64748b; font-size: 8px; }
 .drawer-tabs, .focus-tabs { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); border-bottom: 1px solid var(--line); background: #f7f9fb; }
 .focus-tabs { grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -360,18 +365,25 @@ body.is-panel-resizing .panel {
 .drag-ghost strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .drag-ghost span { overflow: hidden; color: #718093; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 /* 方案三：跨关卡目标挂在左侧导航底部，不遮挡本关页面列表 */
-.focus-cross-targets { max-height: 42%; min-height: 0; overflow: auto; border-top: 1px solid var(--line); background: #f7fafb; padding: 8px; }
-.focus-cross-targets > strong { display: block; margin: 0 0 7px; font-size: 10px; color: #334556; }
+.focus-cross-targets {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--line);
+  background: #f7fafb;
+  padding: 8px;
+}
+.focus-cross-targets > strong { display: block; margin: 0 0 6px; font-size: 10px; color: #334556; }
 .focus-cross-targets > p { margin: 0 0 8px; color: #7a8898; font-size: 8px; line-height: 1.4; }
-.focus-drop-card { margin-bottom: 8px; padding: 6px; border: 1px solid #d5e0e7; border-radius: 8px; background: #fff; }
-.focus-drop-card.active { border-color: rgba(23,127,120,.45); box-shadow: 0 0 0 3px rgba(23,127,120,.08); }
+.focus-drop-card { margin-bottom: 6px; padding: 5px; border: 1px solid #d5e0e7; border-radius: 8px; background: #fff; }
+.focus-drop-card.active { border-color: rgba(23,127,120,.45); box-shadow: 0 0 0 2px rgba(23,127,120,.08); }
 .focus-drop-card .internal-section { margin: 6px 0 0; padding: 6px; border-left: 0; background: #f8fbfc; }
-.focus-drop-target { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 0; padding: 8px; border: 1px dashed #9dbab6; border-radius: 7px; background: #f1faf8; color: #456b67; font-size: 8px; }
+.focus-drop-card .internal-section .view-row { min-height: 32px; }
+.focus-drop-target { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 0; padding: 7px 8px; border: 1px dashed #9eb8b5; border-radius: 7px; background: #f1faf8; color: #456b67; font-size: 8px; }
 .focus-drop-target small { color: var(--teal); white-space: nowrap; }
-.focus-drop-target.active { border-style: solid; border-color: var(--teal); background: #dff4f1; box-shadow: 0 0 0 3px rgba(23,127,120,.11); }
-.focus-drop-target.invalid { border-color: #d5c9c4; background: #f8f4f2; color: #9a8279; opacity: .9; margin-bottom: 6px; }
+.focus-drop-target.active { border-style: solid; border-color: var(--teal); background: #dff4f1; }
+.focus-drop-target.invalid { border-color: #d7c8c3; background: #faf5f3; color: #a07467; opacity: .92; margin-bottom: 6px; }
 .focus-drop-target.invalid small { color: #a47769; }
-.compact-drop-zone.invalid { font-weight: 700; }
 .top-button.ghost { border-color: #5b6b7e; background: transparent; color: #d7e0ea; }
 .top-button.ghost:disabled { opacity: .35; }
 

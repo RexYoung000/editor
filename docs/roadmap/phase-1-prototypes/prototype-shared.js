@@ -243,29 +243,43 @@
     const blockReason = dragState?.type === 'view' ? Core.getMoveBlockReason(state, dragState.id, subPageId) : null;
     const compatibleTarget = dragState?.type === 'view' && !blockReason;
     const incompatibleTarget = Boolean(dragState?.type === 'view' && blockReason);
-    // 拖拽页面时，兼容目标展开内部列表，支持跨关指定落点
-    const internalVisible = subPage.kind === 'managed' && (
-      (scheme === 'inline' && expanded)
-      || (dragState?.type === 'view' && compatibleTarget)
+    const isDropTarget = Boolean(dragState?.type === 'view' && dragState.targetSubPageId === subPageId);
+    // 只有方案一用树形展开；拖拽时只展开当前瞄准的目标，避免所有关卡同时摊开
+    const internalVisible = subPage.kind === 'managed' && scheme === 'inline' && (
+      (!dragState && expanded)
+      || (dragState?.type === 'view' && compatibleTarget && isDropTarget)
+      || (dragState?.type !== 'view' && expanded)
     );
+    // 方案二/三的关卡列表不提供内嵌展开箭头，避免串方案控件
+    const leadingControl = subPage.kind !== 'managed'
+      ? '<span class="icon-quiet">•</span>'
+      : scheme === 'inline'
+        ? `<button class="icon-quiet" data-action="toggle-subpage" data-subpage="${esc(subPageId)}" type="button" aria-label="${expanded ? '收起' : '展开'}内部页面">${expanded || internalVisible ? '⌄' : '›'}</button>`
+        : '<span class="icon-quiet spacer"></span>';
     let hint = '';
     if (pending) hint = ` · ${pending} 项待处理`;
     else if (incompatibleTarget) hint = ` · ${blockReason}`;
+    else if (compatibleTarget && isDropTarget) hint = ' · 可放入这里';
+    else if (compatibleTarget) hint = ' · 可放入';
+    const trailing = scheme === 'drawer' && subPage.kind === 'managed'
+      ? `<button class="drawer-open" data-action="open-drawer" data-subpage="${esc(subPageId)}" type="button">内部页面</button><span class="count-pill ${pending ? 'warn' : ''}">${subPage.viewOrder.length}</span>`
+      : scheme === 'focus' && subPage.kind === 'managed'
+        ? `<button class="drawer-open" data-action="enter-focus" data-subpage="${esc(subPageId)}" type="button">专注编辑</button>`
+        : `<span class="count-pill ${pending ? 'warn' : ''}">${subPage.viewOrder.length} 页</span>`;
     return `
-      <div class="subpage-block ${active ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${compatibleTarget ? 'compatible-target' : ''} ${incompatibleTarget ? 'incompatible-target' : ''}"
+      <div class="subpage-block ${active ? 'active' : ''} ${isDragging ? 'dragging' : ''} ${compatibleTarget ? 'compatible-target' : ''} ${isDropTarget && compatibleTarget ? 'drop-target' : ''} ${incompatibleTarget ? 'incompatible-target' : ''}"
         data-subpage-drop-row="${esc(subPageId)}" data-stage="${esc(stage.id)}" data-index="${index}" data-scroll-target="subpage:${esc(subPageId)}">
         <div class="subpage-row">
           <button class="drag-handle" data-subpage-drag="${esc(subPageId)}" type="button" aria-label="拖拽小关卡">⠿</button>
-          ${subPage.kind === 'managed' ? `<button class="icon-quiet" data-action="toggle-subpage" data-subpage="${esc(subPageId)}" type="button" aria-label="${expanded ? '收起' : '展开'}内部页面">${expanded ? '⌄' : '›'}</button>` : '<span class="icon-quiet">•</span>'}
+          ${leadingControl}
           <button class="view-select subpage-main" data-action="select-subpage" data-subpage="${esc(subPageId)}" type="button">
             <strong>${esc(Core.subPageLabel(state, subPageId))}</strong>
             <small>${esc(subPageTypeLabel(subPage))}${hint}</small>
           </button>
-          ${scheme === 'drawer' && subPage.kind === 'managed' ? `<button class="drawer-open" data-action="open-drawer" data-subpage="${esc(subPageId)}" type="button">内部页面</button>` : ''}
-          ${scheme === 'focus' && subPage.kind === 'managed' ? `<button class="drawer-open" data-action="enter-focus" data-subpage="${esc(subPageId)}" type="button">专注编辑</button>` : `<span class="count-pill ${pending ? 'warn' : ''}">${subPage.viewOrder.length} 页</span>`}
+          ${trailing}
         </div>
-        ${internalVisible ? internalPageSection(subPage, 'inline') : ''}
-        ${dragState?.type === 'view' && incompatibleTarget ? pageDropZone(subPage) : ''}
+        ${internalVisible ? internalPageSection(subPage, dragState?.type === 'view' ? 'inline-drag' : 'inline') : ''}
+        ${dragState?.type === 'view' && scheme !== 'inline' ? pageDropZone(subPage) : ''}
       </div>`;
   }
 
@@ -274,10 +288,12 @@
     if (reason) {
       return `<div class="compact-drop-zone invalid">${esc(reason)}</div>`;
     }
-    // 兼容目标已展开内部列表，这里只作兜底提示
-    const active = dragState.targetSubPageId === subPage.id && dragState.valid;
-    const label = active ? '松开放入高亮位置' : '展开后可拖到具体页面位置';
-    return `<div class="compact-drop-zone ${active ? 'active' : ''}" data-page-drop-zone="${esc(subPage.id)}">${label}</div>`;
+    const active = dragState.targetSubPageId === subPage.id;
+    // 方案二/三左侧只做轻量投放点；精确定位在当前抽屉/专注列表完成
+    const label = active
+      ? (dragState.valid ? '松开放入此小关卡' : (dragState.reason || '不能放在这里'))
+      : '拖到这里放入';
+    return `<div class="compact-drop-zone ${active ? (dragState.valid ? 'active' : 'invalid') : ''}" data-page-drop-zone="${esc(subPage.id)}">${esc(label)}</div>`;
   }
 
   function internalPageSection(subPage, context) {
@@ -285,18 +301,24 @@
     const dialogIds = subPage.viewOrder.filter((id) => state.views[id]?.kind === 'dialog');
     const dragView = dragState?.type === 'view' ? Core.getView(state, dragState.id) : null;
     const dragGroup = dragView ? Core.viewGroupOf(dragView) : null;
+    const draggingHere = Boolean(dragState?.type === 'view' && dragState.targetSubPageId === subPage.id);
     const contentEndIndex = contentIds.length ? subPage.viewOrder.indexOf(contentIds[contentIds.length - 1]) + 1 : 1;
     const dialogEndIndex = subPage.viewOrder.length;
-    const showContentEnd = dragGroup === 'content';
-    const showDialogEnd = dragGroup === 'dialog';
+    // 拖拽预览态：收敛信息，隐藏新增按钮；本关列表仍显示完整结构方便排序
+    const dragPreview = Boolean(dragState?.type === 'view');
+    const compactGroups = dragPreview && (context === 'inline-drag' || context === 'focus-cross');
+    const showContent = !compactGroups || dragGroup === 'content';
+    const showDialog = !compactGroups || dragGroup === 'dialog';
+    const showAdd = !dragPreview;
+    const showContentEnd = dragPreview && dragGroup === 'content' && (draggingHere || context === 'focus-cross' || context === 'inline-drag');
+    const showDialogEnd = dragPreview && dragGroup === 'dialog' && (draggingHere || context === 'focus-cross' || context === 'inline-drag');
     return `
-      <div class="internal-section" data-page-drop-zone="${esc(subPage.id)}" data-page-drop-group="${esc(dragGroup || '')}">
-        ${viewGroup('内容页面', contentIds, subPage, context)}
-        ${showContentEnd ? pageDropPlaceholder(subPage.id, contentEndIndex, '放入内容区末尾') : ''}
-        ${viewGroup('弹窗', dialogIds, subPage, context)}
-        ${showDialogEnd ? pageDropPlaceholder(subPage.id, dialogEndIndex, '放入弹窗区末尾') : ''}
-        ${!dragGroup ? pageDropPlaceholder(subPage.id, subPage.viewOrder.length) : ''}
-        <button class="add-view" data-action="open-add-view" data-subpage="${esc(subPage.id)}" type="button">＋ 新增内部页面</button>
+      <div class="internal-section ${dragPreview ? 'drag-preview' : ''}" data-page-drop-zone="${esc(subPage.id)}" data-page-drop-group="${esc(dragGroup || '')}">
+        ${showContent ? viewGroup('内容页面', contentIds, subPage, context) : ''}
+        ${showContentEnd ? pageDropPlaceholder(subPage.id, contentEndIndex, '放到这里') : ''}
+        ${showDialog ? viewGroup('弹窗', dialogIds, subPage, context) : ''}
+        ${showDialogEnd ? pageDropPlaceholder(subPage.id, dialogEndIndex, '放到这里') : ''}
+        ${showAdd ? `<button class="add-view" data-action="open-add-view" data-subpage="${esc(subPage.id)}" type="button">＋ 新增内部页面</button>` : ''}
       </div>`;
   }
 
@@ -380,7 +402,7 @@
   function focusCrossTargetsHtml() {
     if (!(scheme === 'focus' && state.focusActive && dragState?.type === 'view')) return '';
     const currentId = state.activeSubPageId;
-    const cards = state.stages.flatMap((stage, stageIndex) => stage.subPageIds.map((subPageId, subIndex) => {
+    const cards = state.stages.flatMap((stage, stageIndex) => stage.subPageIds.map((subPageId) => {
       if (subPageId === currentId) return '';
       const subPage = Core.getSubPage(state, subPageId);
       if (!subPage) return '';
@@ -388,21 +410,22 @@
       const compatible = !blockReason;
       const active = dragState.targetSubPageId === subPageId;
       if (!compatible) {
-        return `<div class="focus-drop-target invalid"><span>关卡 ${stageIndex + 1} / ${esc(Core.subPageLabel(state, subPageId))}</span><small>${esc(blockReason)}</small></div>`;
+        return `<div class="focus-drop-target invalid"><span>${esc(Core.subPageLabel(state, subPageId))}</span><small>${esc(blockReason)}</small></div>`;
       }
+      // 只展开当前瞄准的目标，避免底部区域被多套列表撑爆裁切
       return `
         <div class="focus-drop-card ${active ? 'active' : ''}">
           <div class="focus-drop-target ${active ? 'active' : ''}" data-page-drop-zone="${esc(subPageId)}">
             <span>关卡 ${stageIndex + 1} / ${esc(Core.subPageLabel(state, subPageId))}</span>
-            <small>拖到下方具体位置</small>
+            <small>${active ? '指定落点中' : '移入此处'}</small>
           </div>
-          ${internalPageSection(subPage, 'focus-cross')}
+          ${active ? internalPageSection(subPage, 'focus-cross') : ''}
         </div>`;
     })).join('');
     return `
       <div class="focus-cross-targets" data-scroll-key="focus-cross">
         <strong>移动到其他小关卡</strong>
-        <p>本关内排序用上方列表；跨关请拖到目标关内的具体位置。</p>
+        <p>先点选/拖到目标关卡，再落到具体位置。本关排序请用上方列表。</p>
         ${cards || '<div class="empty-mini">暂无其他可放置小关卡</div>'}
       </div>`;
   }
@@ -984,6 +1007,21 @@
           targetStageId: null,
           targetIndex: appendIndex,
         };
+      } else {
+        // 悬停在小关卡行上时先锁定目标，便于方案一只展开当前瞄准关卡
+        const subBlock = hovered?.closest('[data-subpage-drop-row]');
+        if (subBlock) {
+          const subPageId = subBlock.dataset.subpageDropRow;
+          const appendIndex = Core.defaultAppendIndex(state, dragState.id, subPageId);
+          const check = Core.canInsertViewAt(state, dragState.id, subPageId, appendIndex);
+          next = {
+            valid: check.ok,
+            reason: check.reason || Core.getMoveBlockReason(state, dragState.id, subPageId),
+            targetSubPageId: subPageId,
+            targetStageId: null,
+            targetIndex: appendIndex,
+          };
+        }
       }
     } else {
       const row = hovered?.closest('[data-subpage-drop-row]');
