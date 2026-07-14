@@ -11,6 +11,7 @@
   let suppressClickUntil = 0;
   let autoScrollRaf = 0;
   let autoScrollPoint = null;
+  let autoScrollEl = null; // 拖拽期间锁定的滚动容器，避免 pointer 越界后丢滚动
   let pendingScrollTarget = null;
   let layoutState = null;
   let panelResize = null;
@@ -149,31 +150,74 @@
     return rawIndex;
   }
 
+  function isScrollableY(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    const overflowY = style.overflowY;
+    if (!(overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')) return false;
+    return el.scrollHeight > el.clientHeight + 2;
+  }
+
   function pickScrollContainer(x, y) {
-    // 优先当前 hover；失败则按「离指针最近的可滚列表」兜底，解决拖出边界后无法自动滚
     const ghost = document.getElementById('dragGhost');
     if (ghost) ghost.style.pointerEvents = 'none';
+
+    // 指针命中的滚动区优先。跨关卡时必须能从源页面列表切到目标关卡列表。
     const hovered = document.elementFromPoint(x, y);
     const direct = hovered?.closest?.('.scroll');
-    if (direct) return direct;
+    if (direct && isScrollableY(direct)) {
+      autoScrollEl = direct;
+      return direct;
+    }
+
     if (!root) return null;
-    const scrolls = [...root.querySelectorAll('.scroll')];
+    const scrolls = [...root.querySelectorAll('.scroll')].filter(isScrollableY);
     if (!scrolls.length) return null;
+
+    // 指针在滚动区边缘附近时，选择视觉上最近的区域；这样拖到列表边界就能立即滚动。
+    const nearby = scrolls.filter((el) => {
+      const rect = el.getBoundingClientRect();
+      return x >= rect.left - 48 && x <= rect.right + 48 && y >= rect.top - 48 && y <= rect.bottom + 48;
+    });
+    if (nearby.length) {
+      let best = null;
+      let bestScore = Infinity;
+      for (const el of nearby) {
+        const rect = el.getBoundingClientRect();
+        const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+        const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+        const score = dy + dx * 0.25;
+        if (score < bestScore) {
+          bestScore = score;
+          best = el;
+        }
+      }
+      autoScrollEl = best;
+      return best;
+    }
+
+    // 指针短暂越过已选列表的上下边缘时继续滚它；横向移到另一个栏位会在上方逻辑中切换。
+    if (autoScrollEl && document.contains(autoScrollEl) && isScrollableY(autoScrollEl)) {
+      const rect = autoScrollEl.getBoundingClientRect();
+      if (x >= rect.left - 64 && x <= rect.right + 64) return autoScrollEl;
+    }
+
+    // 最后才按距离兜底，避免进入空白缝隙时自动滚动突然中断。
     let best = null;
     let bestScore = Infinity;
     for (const el of scrolls) {
       const rect = el.getBoundingClientRect();
       if (rect.width < 8 || rect.height < 8) continue;
-      // 指针在容器水平范围内时优先
-      const inX = x >= rect.left - 24 && x <= rect.right + 24;
+      const inX = x >= rect.left - 40 && x <= rect.right + 40;
       const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
       const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
-      const score = (inX ? 0 : 1000) + dy + dx * 0.25;
+      const score = (inX ? 0 : 800) + dy + dx * 0.2;
       if (score < bestScore) {
         bestScore = score;
         best = el;
       }
     }
+    if (best) autoScrollEl = best;
     return best;
   }
 
@@ -246,10 +290,18 @@
     return { valid: false, reason: null, targetSubPageId: null, targetStageId: null, targetIndex: null };
   }
 
+  function stabilizeSubPageTargetIndex(rawIndex, stageId, forceSwitch = false) {
+    if (!dragState || dragState.targetStageId !== stageId || dragState.targetIndex == null) return rawIndex;
+    const prev = dragState.targetIndex;
+    if (rawIndex === prev) return prev;
+    if (!forceSwitch && Math.abs(rawIndex - prev) === 1) return prev;
+    return rawIndex;
+  }
+
   function resolveSubPageDropAtPoint(x, y) {
     const ghost = document.getElementById('dragGhost');
     if (ghost) ghost.style.pointerEvents = 'none';
-    const samples = [[x, y], [x, y - 12], [x, y + 12]];
+    const samples = [[x, y], [x, y - 14], [x, y + 14], [x, y - 28], [x, y + 28]];
     for (const [sx, sy] of samples) {
       const el = document.elementFromPoint(sx, sy);
       if (!el) continue;
@@ -259,11 +311,15 @@
         const rel = (sy - rect.top) / Math.max(rect.height, 1);
         const baseIndex = Number(row.dataset.index);
         let targetIndex;
-        if (rel < 0.35) targetIndex = baseIndex;
-        else if (rel > 0.65) targetIndex = baseIndex + 1;
-        else targetIndex = dragState?.targetStageId === row.dataset.stage && dragState.targetIndex != null
-          ? dragState.targetIndex
-          : (rel < 0.5 ? baseIndex : baseIndex + 1);
+        let forceSwitch = false;
+        if (rel < 0.28) { targetIndex = baseIndex; forceSwitch = true; }
+        else if (rel > 0.72) { targetIndex = baseIndex + 1; forceSwitch = true; }
+        else {
+          targetIndex = dragState?.targetStageId === row.dataset.stage && dragState.targetIndex != null
+            ? dragState.targetIndex
+            : (rel < 0.5 ? baseIndex : baseIndex + 1);
+        }
+        targetIndex = stabilizeSubPageTargetIndex(targetIndex, row.dataset.stage, forceSwitch);
         return {
           valid: true,
           reason: null,
@@ -358,7 +414,7 @@
           <button class="empty-stage-action" data-action="open-template" data-purpose="initial" type="button"><strong>＋ 添加内部界面小关卡</strong><small>从模板创建后开始体验</small></button>
         </div>`;
     }
-    const placeholder = subPageDropPlaceholder(stage.id, stage.subPageIds.length);
+    // 拖拽中的占位统一由 patchDragPreview 注入，避免 render 时插入/删除导致闪烁
     return `
       <div class="stage-card ${dragStageClass(stage)}" data-subpage-drop-stage="${esc(stage.id)}">
         <div class="stage-title">
@@ -366,7 +422,7 @@
           <span>${stage.subPageIds.length} 关</span>
           <button class="stage-add" data-action="add-subpage" data-stage="${esc(stage.id)}" type="button" aria-label="新增小关卡">＋小关卡</button>
         </div>
-        <div class="subpage-list">${stage.subPageIds.map((subPageId, index) => `${subPageDropPlaceholder(stage.id, index)}${subPageRow(stage, subPageId, index)}`).join('')}${placeholder}</div>
+        <div class="subpage-list">${stage.subPageIds.map((subPageId, index) => subPageRow(stage, subPageId, index)).join('')}</div>
       </div>`;
   }
 
@@ -559,18 +615,18 @@
       if (!compatible) {
         return `<div class="focus-drop-target invalid"><span>${esc(Core.subPageLabel(state, subPageId))}</span><small>${esc(blockReason)}</small></div>`;
       }
-      // 只展开当前瞄准的目标，避免底部区域被多套列表撑爆裁切
+      // 预先保留所有兼容目标的结构，拖拽在目标间移动时只切换高亮与占位，不重绘整块面板。
       return `
         <div class="focus-drop-card ${active ? 'active' : ''}">
           <div class="focus-drop-target ${active ? 'active' : ''}" data-page-drop-zone="${esc(subPageId)}">
             <span>关卡 ${stageIndex + 1} / ${esc(Core.subPageLabel(state, subPageId))}</span>
             <small>${active ? '指定落点中' : '移入此处'}</small>
           </div>
-          ${active ? internalPageSection(subPage, 'focus-cross') : ''}
+          <div class="focus-drop-pages">${internalPageSection(subPage, 'focus-cross')}</div>
         </div>`;
     })).join('');
     return `
-      <div class="focus-cross-targets" data-scroll-key="focus-cross">
+      <div class="focus-cross-targets scroll" data-scroll-key="focus-cross">
         <strong>移动到其他小关卡</strong>
         <p>先点选/拖到目标关卡，再落到具体位置。本关排序请用上方列表。</p>
         ${cards || '<div class="empty-mini">暂无其他可放置小关卡</div>'}
@@ -748,6 +804,13 @@
     const workspace = scheme === 'inline' ? inlineWorkspace() : scheme === 'drawer' ? drawerWorkspace() : focusWorkspace();
     root.innerHTML = `<div class="prototype-app">${topbar()}${workspace}</div>${menuHtml()}${modalHtml()}${dragOverlayHtml()}<div id="toast" class="toast" hidden></div>`;
     restoreScrollPositions(scrollMap);
+    if (dragState) {
+      // DOM 重建后恢复滚动锁与预览补丁
+      autoScrollEl = null;
+      if (autoScrollPoint) autoScrollEl = pickScrollContainer(autoScrollPoint.x, autoScrollPoint.y);
+      else autoScrollEl = pickScrollContainer(dragState.x, dragState.y);
+      patchDragPreview();
+    }
     updateDragGhost();
     applyPendingScroll();
   }
@@ -1098,8 +1161,13 @@
       }
     }
     suppressClickUntil = Date.now() + 500;
+    autoScrollEl = null;
+    // 先锁定可能的滚动容器，再渲染，避免首帧找不到
+    autoScrollEl = pickScrollContainer(dragState.x, dragState.y);
     render();
-    updateDragTarget(dragState.x, dragState.y);
+    // render 后 DOM 重建，重新锁定
+    autoScrollEl = pickScrollContainer(dragState.x, dragState.y);
+    updateDragTarget(dragState.x, dragState.y, { force: true });
     startAutoScrollLoop();
   }
 
@@ -1124,7 +1192,6 @@
   function updateDragTarget(x, y, options = {}) {
     if (!dragState) return;
     const { force = false } = options;
-    const prevTarget = dragState.targetSubPageId || dragState.targetStageId || null;
     const next = dragState.type === 'view'
       ? resolveViewDropAtPoint(x, y)
       : resolveSubPageDropAtPoint(x, y);
@@ -1139,11 +1206,25 @@
       || next.targetIndex !== dragState.targetIndex;
     if (!changed && !force) return;
     Object.assign(dragState, next);
-    const nextTarget = dragState.targetSubPageId || dragState.targetStageId || null;
-    const targetSwitched = prevTarget !== nextTarget;
-    // 目标切换可能要展开/收起列表，直接全量 render；同目标内只局部补丁，避免闪烁
-    if (targetSwitched || !patchDragPreview()) render();
-    else updateDragGhost();
+    // 小关卡拖拽：始终局部补丁，杜绝整页闪烁
+    if (dragState.type === 'subpage') {
+      if (!patchDragPreview()) {
+        // 极少情况下 DOM 未就绪才全量
+        render();
+        patchDragPreview();
+      } else {
+        updateDragGhost();
+      }
+      return;
+    }
+    // 页面拖拽：方案二、三的目标结构已在拖拽开始时就绪，目标切换只局部更新。
+    // 方案一仅在目标小关卡尚未展开时，才需要补一次重绘。
+    if (!patchDragPreview()) {
+      render();
+      patchDragPreview();
+    } else {
+      updateDragGhost();
+    }
   }
 
   function clearDragPreviewMarks(scope) {
@@ -1173,12 +1254,12 @@
       const block = root.querySelector(`[data-subpage-drop-row="${dragState.targetSubPageId}"]`);
       if (!block?.querySelector('.internal-section')) return false;
     }
-    // 方案三：跨关目标卡片需要展开结构时，交给 render
+    // 方案三：跨关目标卡片在拖拽开始时已预先生成；缺失时才回退重绘。
     if (dragState.type === 'view' && scheme === 'focus' && state.focusActive) {
       const targetId = dragState.targetSubPageId;
       if (targetId && targetId !== state.activeSubPageId) {
         const card = root.querySelector(`.focus-drop-target[data-page-drop-zone="${targetId}"]`)?.closest('.focus-drop-card');
-        if (card && !card.querySelector('.internal-section')) return false;
+        if (!card || !card.querySelector('.internal-section')) return false;
       }
     }
 
@@ -1278,7 +1359,8 @@
   }
 
   function startAutoScrollLoop() {
-    stopAutoScroll();
+    // 不调用 stopAutoScroll，避免清掉已锁定容器；只停旧帧
+    if (autoScrollRaf) window.cancelAnimationFrame(autoScrollRaf);
     const tick = () => {
       if (!dragState || !autoScrollPoint) {
         autoScrollRaf = 0;
@@ -1288,21 +1370,20 @@
       const scroll = pickScrollContainer(x, y);
       if (scroll) {
         const rect = scroll.getBoundingClientRect();
-        const edge = 64;
+        const edge = 72;
         let delta = 0;
-        // 指针在容器内靠近边缘，或已经越出上下边界时都持续滚动
+        // 即使指针完全在列表外，只要 y 在列表上方/下方，就持续滚
         if (y <= rect.top + edge) {
-          const dist = Math.max(4, rect.top + edge - y);
-          delta = -Math.min(36, 10 + dist * 0.55);
+          const dist = Math.max(8, rect.top + edge - y);
+          delta = -Math.min(42, 12 + dist * 0.6);
         } else if (y >= rect.bottom - edge) {
-          const dist = Math.max(4, y - (rect.bottom - edge));
-          delta = Math.min(36, 10 + dist * 0.55);
+          const dist = Math.max(8, y - (rect.bottom - edge));
+          delta = Math.min(42, 12 + dist * 0.6);
         }
         if (delta) {
           const prev = scroll.scrollTop;
-          scroll.scrollTop += delta;
+          scroll.scrollTop = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, scroll.scrollTop + delta));
           if (scroll.scrollTop !== prev) {
-            // 滚动后强制刷新落点，保证越界内容可被滚入并放置
             updateDragTarget(x, y, { force: true });
           }
         }
@@ -1316,6 +1397,7 @@
     if (autoScrollRaf) window.cancelAnimationFrame(autoScrollRaf);
     autoScrollRaf = 0;
     autoScrollPoint = null;
+    autoScrollEl = null;
   }
 
   function pointerUpHandler() {

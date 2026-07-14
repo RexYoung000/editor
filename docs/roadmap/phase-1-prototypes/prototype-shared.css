@@ -377,6 +377,8 @@ body.is-panel-resizing .panel {
 .focus-cross-targets > p { margin: 0 0 8px; color: #7a8898; font-size: 8px; line-height: 1.4; }
 .focus-drop-card { margin-bottom: 6px; padding: 5px; border: 1px solid #d5e0e7; border-radius: 8px; background: #fff; }
 .focus-drop-card.active { border-color: rgba(23,127,120,.45); box-shadow: 0 0 0 2px rgba(23,127,120,.08); }
+.focus-drop-pages { display: none; }
+.focus-drop-card.active .focus-drop-pages { display: block; }
 .focus-drop-card .internal-section { margin: 6px 0 0; padding: 6px; border-left: 0; background: #f8fbfc; }
 .focus-drop-card .internal-section .view-row { min-height: 32px; }
 .focus-drop-target { display: flex; align-items: center; justify-content: space-between; gap: 5px; margin-bottom: 0; padding: 7px 8px; border: 1px dashed #9eb8b5; border-radius: 7px; background: #f1faf8; color: #456b67; font-size: 8px; }
