@@ -12,6 +12,7 @@
   let autoScrollRaf = 0;
   let autoScrollPoint = null;
   let autoScrollEl = null; // 拖拽期间锁定的滚动容器，避免 pointer 越界后丢滚动
+  let autoScrollEdge = null;
   let pendingScrollTarget = null;
   let layoutState = null;
   let panelResize = null;
@@ -1402,20 +1403,30 @@
 
   function advanceAutoScroll(x, y) {
     const scroll = pickScrollContainer(x, y);
-    if (!scroll) return false;
+    if (!scroll) {
+      autoScrollEdge = null;
+      return false;
+    }
     const rect = scroll.getBoundingClientRect();
     const edge = 72;
-    let delta = 0;
-    // 即使指针完全在列表外，只要 y 在列表上方/下方，就持续滚。
+    let direction = 0;
+    // 停留在边缘才开始滚；回到关卡卡片中部会立刻清除边缘状态并刹停。
     if (y <= rect.top + edge) {
-      const dist = Math.max(8, rect.top + edge - y);
-      // 常规边缘悬停保持低速，只有明显越界才逐步加速，方便瞄准指定小关卡。
-      delta = -Math.min(7, 1.5 + dist * 0.09);
+      direction = -1;
     } else if (y >= rect.bottom - edge) {
-      const dist = Math.max(8, y - (rect.bottom - edge));
-      delta = Math.min(7, 1.5 + dist * 0.09);
+      direction = 1;
     }
-    if (!delta) return false;
+    if (!direction) {
+      autoScrollEdge = null;
+      return false;
+    }
+    const now = performance.now();
+    if (!autoScrollEdge || autoScrollEdge.element !== scroll || autoScrollEdge.direction !== direction) {
+      autoScrollEdge = { element: scroll, direction, since: now };
+      return false;
+    }
+    if (now - autoScrollEdge.since < 300) return false;
+    const delta = direction * 2;
     const prev = scroll.scrollTop;
     scroll.scrollTop = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, scroll.scrollTop + delta));
     if (scroll.scrollTop === prev) return false;
@@ -1442,6 +1453,7 @@
     autoScrollRaf = 0;
     autoScrollPoint = null;
     autoScrollEl = null;
+    autoScrollEdge = null;
   }
 
   function pointerUpHandler() {
