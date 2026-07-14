@@ -39,6 +39,7 @@ forge 没有独立的 Node 服务，所有"后端"能力都由 [vite.config.ts](
 | `POST /api/upload-resource` | multipart 上传，**100MB 上限**，让远程 Electron 把视频等大文件直接写进对应 lesson 目录的 `destPath`，要求 lesson 目录已存在（即先发布过） |
 | `POST /api/save-preset-thumbnail` | 把 canvas 截图（`{ name, dataUrl }`）写到 `public/builtin/editor/<name>.png`，预设缩略图用 |
 | `GET /api/library/list?path=<rel>` | 列出 `public/builtin/library/<rel>` 目录条目，目录会判 Spine 工程，文件返回 size/mtime；路径过 `sanitizeLibraryPath` 防越界 |
+| `GET /api/library/search?q=<关键词>&type=<类型>` | 全库搜索受支持资源；关键词只匹配文件名，多个空格关键词按无序 AND 匹配，并支持 `series/color/language` 精确筛选；类型为 `image/audio/video/spine`，结果最多 200 条 |
 | `GET /api/library/file-info?path=<rel>` | 取单文件 SHA-256 前 8 字符 hash + size/mtime，hash 缓存在 `public/builtin/library/.cache/hash.json`（按 mtime+size 失效） |
 | `GET /api/library/spine-files?path=<rel>` | 传入 Spine 工程目录，递归列出 `.json/.atlas/.png/.mp3/.wav/.ogg` 文件 |
 | `GET /api/library/quick-presets?kind=<kind>` | 递归扫描 `public/builtin/library/通用素材/控件/`，返回快捷组件候选图片及系列、颜色、语言标签；`kind` 首批支持 `confirm/previous/next/audio/brush/clear` |
@@ -60,6 +61,9 @@ public/builtin/library/
 
 - 资源库是 Vite 服务器的内容目录，已被 Git 忽略，不随 Electron 安装包发布；部署资源服务器时需要单独同步。
 - PSD 是美术源文件，不进入资源库；浏览和课件下载只使用 PNG/JPG 等可直接使用的图片。
+- 资源库搜索跨全部目录，目录路径只用于结果展示和同名资源区分，不参与关键词命中；清空关键词与筛选后恢复原有三级目录浏览。
+- 语言筛选统一素材中的同义命名：`国内/简体/簡體` 归为“简体”，`英语/英文` 归为“英文”，`繁体/繁體` 归为“繁体”。
+- 搜索索引按短周期自动刷新，不依赖平台文件监听；资源新增、删除或替换后无需重启 Vite 服务。
 - 快捷组件不是把所有图片平铺到工具栏，而是保留稳定的功能入口，再按目录、系列、颜色、语言和关键词筛选候选美术。
 - 用户确认预设后，客户端沿用 `downloadLibraryFile()` 把所选图片下载到当前课件的 `images/library/`，课件只携带实际使用的素材。
 - 首批快捷预设包括确定、上一页、下一页、播放/音频、画笔、清空。确定按钮优先绑定当前页可识别的题型容器，上一页/下一页优先绑定当前页的 `PageTurnBox`；缺少题型目标、翻页管理组件或音频文件时保留组件并提示用户补充，不猜测绑定对象。

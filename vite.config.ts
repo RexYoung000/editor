@@ -86,9 +86,9 @@ function listQuickPresets(kind: QuickPresetKind) {
           [/红色|红-/u, '红色'],
         ]),
         language: detectQuickPresetTag(searchText, [
-          [/简体/u, '简体'],
-          [/繁体/u, '繁体'],
-          [/英文/u, '英文'],
+          [/简体|簡體|国内/u, '简体'],
+          [/繁体|繁體/u, '繁体'],
+          [/英文|英语/u, '英文'],
         ]),
         theme,
         directory: relDir,
@@ -98,6 +98,121 @@ function listQuickPresets(kind: QuickPresetKind) {
 
   walk(QUICK_PRESET_ROOT, '');
   return presets.sort((a, b) => a.libraryPath.localeCompare(b.libraryPath, 'zh-CN', { numeric: true }));
+}
+
+type LibraryResourceType = 'image' | 'audio' | 'video' | 'spine';
+
+type LibrarySearchEntry = {
+  name: string;
+  libraryPath: string;
+  directory: string;
+  type: LibraryResourceType;
+  size: number;
+  mtime: number;
+  series: string;
+  color: string;
+  language: string;
+};
+
+const LIBRARY_SEARCH_INDEX_TTL = 2_000;
+const LIBRARY_SEARCH_RESULT_LIMIT = 200;
+let librarySearchIndex: LibrarySearchEntry[] = [];
+let librarySearchIndexBuiltAt = 0;
+
+function detectLibraryResourceType(name: string): Exclude<LibraryResourceType, 'spine'> | null {
+  if (/\.(png|jpe?g|gif|webp)$/i.test(name)) return 'image';
+  if (/\.(mp3|wav|ogg)$/i.test(name)) return 'audio';
+  if (/\.(mp4|webm|mov)$/i.test(name)) return 'video';
+  return null;
+}
+
+function detectLibrarySeries(text: string): string {
+  const matches = text.match(/S\d+(?:\s*[-–—~至]\s*S?\d+)?/gi);
+  return matches?.at(-1)?.replace(/[–—~至]/g, '-').replace(/\s+/g, '').toUpperCase() ?? '';
+}
+
+function makeLibrarySearchEntry(
+  name: string,
+  libraryPath: string,
+  type: LibraryResourceType,
+  size: number,
+  mtime: number,
+): LibrarySearchEntry {
+  const tagText = libraryPath;
+  return {
+    name,
+    libraryPath,
+    directory: path.posix.dirname(libraryPath) === '.' ? '' : path.posix.dirname(libraryPath),
+    type,
+    size,
+    mtime,
+    series: detectLibrarySeries(tagText),
+    color: detectQuickPresetTag(tagText, [
+      [/绿色|绿-/u, '绿色'],
+      [/蓝色|蓝-/u, '蓝色'],
+      [/黄色|黄-/u, '黄色'],
+      [/橙色|橙-/u, '橙色'],
+      [/红色|红-/u, '红色'],
+      [/紫色|紫-/u, '紫色'],
+      [/粉色|粉-/u, '粉色'],
+      [/青色|青-/u, '青色'],
+    ]),
+    language: detectQuickPresetTag(tagText, [
+      [/简体|簡體|国内/u, '简体'],
+      [/繁体|繁體/u, '繁体'],
+      [/英文|英语/u, '英文'],
+    ]),
+  };
+}
+
+function rebuildLibrarySearchIndex(): LibrarySearchEntry[] {
+  const entries: LibrarySearchEntry[] = [];
+  if (!fs.existsSync(LIBRARY_ROOT)) return entries;
+
+  function walk(absDir: string, relDir: string): void {
+    if (relDir && detectSpineProject(absDir)) {
+      const stat = fs.statSync(absDir);
+      entries.push(makeLibrarySearchEntry(
+        path.posix.basename(relDir),
+        relDir,
+        'spine',
+        0,
+        stat.mtimeMs,
+      ));
+      return;
+    }
+
+    for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue;
+      const childAbs = path.join(absDir, entry.name);
+      const childRel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(childAbs, childRel);
+        continue;
+      }
+      const type = detectLibraryResourceType(entry.name);
+      if (!type) continue;
+      const stat = fs.statSync(childAbs);
+      entries.push(makeLibrarySearchEntry(entry.name, childRel, type, stat.size, stat.mtimeMs));
+    }
+  }
+
+  walk(LIBRARY_ROOT, '');
+  return entries.sort((a, b) => a.libraryPath.localeCompare(b.libraryPath, 'zh-CN', { numeric: true }));
+}
+
+function getLibrarySearchIndex(): LibrarySearchEntry[] {
+  if (librarySearchIndexBuiltAt && Date.now() - librarySearchIndexBuiltAt < LIBRARY_SEARCH_INDEX_TTL) {
+    return librarySearchIndex;
+  }
+  librarySearchIndex = rebuildLibrarySearchIndex();
+  librarySearchIndexBuiltAt = Date.now();
+  return librarySearchIndex;
+}
+
+function uniqueLibraryFacet(entries: LibrarySearchEntry[], key: 'series' | 'color' | 'language'): string[] {
+  return [...new Set(entries.map((entry) => entry[key]).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true }));
 }
 
 /**
@@ -503,6 +618,50 @@ function forgePlugin() {
               return jsonError(res, 400, '不支持的快捷组件类型');
             }
             return jsonOk(res, { kind, presets: listQuickPresets(kind) });
+          } catch (e: any) {
+            return jsonError(res, 500, String(e?.message ?? e));
+          }
+        }
+
+        // GET /api/library/search — 跨目录搜索资源文件名，并返回筛选项
+        if (pathname === '/api/library/search') {
+          try {
+            const type = urlObj.searchParams.get('type') as LibraryResourceType | null;
+            if (!type || !['image', 'audio', 'video', 'spine'].includes(type)) {
+              return jsonError(res, 400, '不支持的资源类型');
+            }
+
+            const query = (urlObj.searchParams.get('q') ?? '').trim().toLocaleLowerCase('zh-CN');
+            const keywords = query.split(/\s+/).filter(Boolean);
+            const series = urlObj.searchParams.get('series') ?? '';
+            const color = urlObj.searchParams.get('color') ?? '';
+            const language = urlObj.searchParams.get('language') ?? '';
+            const requestedLimit = Number(urlObj.searchParams.get('limit') ?? LIBRARY_SEARCH_RESULT_LIMIT);
+            const limit = Number.isFinite(requestedLimit)
+              ? Math.max(0, Math.min(LIBRARY_SEARCH_RESULT_LIMIT, Math.floor(requestedLimit)))
+              : LIBRARY_SEARCH_RESULT_LIMIT;
+
+            const sameType = getLibrarySearchIndex().filter((entry) => entry.type === type);
+            const matched = sameType.filter((entry) => {
+              if (series && entry.series !== series) return false;
+              if (color && entry.color !== color) return false;
+              if (language && entry.language !== language) return false;
+              const normalizedName = entry.name.toLocaleLowerCase('zh-CN');
+              return keywords.every((keyword) => normalizedName.includes(keyword));
+            });
+
+            return jsonOk(res, {
+              query,
+              type,
+              total: matched.length,
+              truncated: matched.length > limit,
+              results: matched.slice(0, limit),
+              facets: {
+                series: uniqueLibraryFacet(sameType, 'series'),
+                color: uniqueLibraryFacet(sameType, 'color'),
+                language: uniqueLibraryFacet(sameType, 'language'),
+              },
+            });
           } catch (e: any) {
             return jsonError(res, 500, String(e?.message ?? e));
           }

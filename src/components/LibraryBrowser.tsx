@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Check, FolderOpen, LoaderCircle, Music, Search, Video, X } from 'lucide-react';
 
 // ─── 类型 ───
 
@@ -10,6 +11,39 @@ export type LibraryListResponse = {
   ok: boolean;
   path: string;
   entries: LibraryEntry[];
+};
+
+type LibraryResourceType = 'image' | 'audio' | 'video' | 'spine';
+
+type LibrarySearchResult = {
+  name: string;
+  libraryPath: string;
+  directory: string;
+  type: LibraryResourceType;
+  size: number;
+  mtime: number;
+  series: string;
+  color: string;
+  language: string;
+};
+
+type LibrarySearchResponse = {
+  ok: boolean;
+  total: number;
+  truncated: boolean;
+  results: LibrarySearchResult[];
+  facets: {
+    series: string[];
+    color: string[];
+    language: string[];
+  };
+  error?: string;
+};
+
+type LibrarySelection = {
+  name: string;
+  isDir: boolean;
+  libraryPath?: string;
 };
 
 export type SelectResult =
@@ -102,15 +136,38 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
 
   const [pathStack, setPathStack] = useState<string[]>([]);
   const [cache, setCache] = useState<Record<string, LibraryEntry[]>>({});
-  const [selected, setSelected] = useState<{ name: string; isDir: boolean } | null>(null);
+  const [selected, setSelected] = useState<LibrarySelection | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [series, setSeries] = useState('');
+  const [color, setColor] = useState('');
+  const [language, setLanguage] = useState('');
+  const [searchResults, setSearchResults] = useState<LibrarySearchResult[]>([]);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const [resolvedSearchKey, setResolvedSearchKey] = useState('');
+  const [searchFailure, setSearchFailure] = useState({ key: '', message: '' });
+  const [facets, setFacets] = useState<LibrarySearchResponse['facets']>({
+    series: [],
+    color: [],
+    language: [],
+  });
 
   const currentPath = pathStack.join('/');
+  const searchType: LibraryResourceType = mode === 'spineFolder' ? 'spine' : (fileFilter ?? 'image');
+  const searchActive = Boolean(query.trim() || series || color || language);
+  const searchPending = searchActive && query.trim() !== debouncedQuery.trim();
+  const searchRequestKey = [searchType, debouncedQuery.trim(), series, color, language].join('\n');
+  const searchError = searchFailure.key === searchRequestKey ? searchFailure.message : '';
+  const searchLoading = searchActive && !searchPending && !searchError && resolvedSearchKey !== searchRequestKey;
   const cacheRef = useRef(cache);
-  cacheRef.current = cache;
+  useEffect(() => {
+    cacheRef.current = cache;
+  }, [cache]);
 
   const loadingRef = useRef<Set<string>>(new Set());
-  const errorRef = useRef<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
   /** localStorage 里恢复的初始路径（用于在加载失败时自动回退并清理记忆） */
   const restoredPathRef = useRef<string[] | null>(null);
 
@@ -131,11 +188,16 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
       })
       .then((data) => {
         setCache((prev) => ({ ...prev, [relPath]: data.entries }));
-        delete errorRef.current[relPath];
+        setErrors((prev) => {
+          if (!(relPath in prev)) return prev;
+          const next = { ...prev };
+          delete next[relPath];
+          return next;
+        });
       })
       .catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
-        errorRef.current[relPath] = msg;
+        setErrors((prev) => ({ ...prev, [relPath]: msg }));
         // 失效路径来自 localStorage 恢复 → 自动回退 pathStack 到最近有效的祖先目录，并清理记忆
         const restored = restoredPathRef.current;
         if (restored && restored.join('/') === relPath && relPath !== '') {
@@ -195,7 +257,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
       const savedPath = readPathRecord(targetTopLevel, mode, fileFilter);
       if (savedPath.length > 0) {
         restoredPathRef.current = savedPath;
-        setPathStack(savedPath);
+        queueMicrotask(() => setPathStack(savedPath));
       }
     }
   }, [cache, mode, fileFilter]);
@@ -207,6 +269,47 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 180);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    const requestActive = Boolean(debouncedQuery.trim() || series || color || language);
+    const params = new URLSearchParams({
+      type: searchType,
+      q: debouncedQuery.trim(),
+      series,
+      color,
+      language,
+      limit: requestActive ? '200' : '0',
+    });
+    const controller = new AbortController();
+
+    fetch(`/api/library/search?${params.toString()}`, { signal: controller.signal })
+      .then(async (res) => {
+        const data = await res.json().catch(() => null) as LibrarySearchResponse | null;
+        if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        return data;
+      })
+      .then((data) => {
+        setFacets(data.facets);
+        setSearchResults(requestActive ? data.results : []);
+        setSearchTotal(requestActive ? data.total : 0);
+        setSearchTruncated(requestActive && data.truncated);
+        setResolvedSearchKey(searchRequestKey);
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        setSearchFailure({
+          key: searchRequestKey,
+          message: reason instanceof Error ? reason.message : String(reason),
+        });
+      });
+
+    return () => controller.abort();
+  }, [searchType, debouncedQuery, series, color, language, searchRequestKey]);
 
   // 派生：每级 Tab 的子目录列表
   const tabsAtLevel = useMemo(() => {
@@ -225,7 +328,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
   }, [cache, pathStack]);
 
   const currentEntries = cache[currentPath] ?? null;
-  const currentError = errorRef.current[currentPath];
+  const currentError = errors[currentPath];
   const inDeepMode = pathStack.length > TAB_LEVELS_MAX;
 
   // 切换某一级 Tab
@@ -262,8 +365,8 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
     setSelected(null);
   };
 
-  const triggerConfirm = async () => {
-    if (!selected || busy) return;
+  const triggerConfirm = async (nextSelected: LibrarySelection | null = selected) => {
+    if (!nextSelected || busy) return;
     setBusy(true);
     try {
       // 先保存路径记录（handleConfirm 会触发 onClose 卸载组件）
@@ -272,7 +375,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
         writePathRecord(topLevelDir, mode, fileFilter, pathStack);
         writeLastUsed(topLevelDir, mode, fileFilter);
       }
-      await handleConfirm(selected, currentPath, mode, onSelect, onClose);
+      await handleConfirm(nextSelected, currentPath, mode, onSelect, onClose);
     } finally {
       setBusy(false);
     }
@@ -290,18 +393,62 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
       >
         {/* 头部 */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-slate-700">
-          <div className="text-lg font-semibold">📁 资源库</div>
+          <div className="text-lg font-semibold">资源库</div>
           <button
-            className="text-slate-400 hover:text-white text-xl px-2"
+            type="button"
+            className="flex h-8 w-8 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-white"
             onClick={onClose}
             aria-label="关闭"
+            title="关闭"
           >
-            ✕
+            <X size={17} />
           </button>
         </div>
 
+        {/* 全库搜索与筛选 */}
+        <div className="grid shrink-0 grid-cols-1 gap-2 border-b border-slate-700 px-6 py-3 sm:grid-cols-[minmax(180px,1fr)_repeat(3,minmax(120px,180px))]">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" size={15} />
+            <input
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setSelected(null);
+              }}
+              placeholder="全库搜索文件名"
+              className="h-9 w-full rounded border border-slate-700 bg-slate-800 pl-8 pr-8 text-xs text-white outline-none focus:border-blue-500"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('');
+                  setSelected(null);
+                }}
+                className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded text-slate-500 hover:bg-slate-700 hover:text-white"
+                aria-label="清空搜索"
+                title="清空搜索"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </label>
+          <select value={series} onChange={(event) => { setSeries(event.target.value); setSelected(null); }} className="h-9 rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-200 outline-none focus:border-blue-500" aria-label="系列">
+            <option value="">全部系列</option>
+            {facets.series.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <select value={color} onChange={(event) => { setColor(event.target.value); setSelected(null); }} className="h-9 rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-200 outline-none focus:border-blue-500" aria-label="颜色">
+            <option value="">全部颜色</option>
+            {facets.color.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+          <select value={language} onChange={(event) => { setLanguage(event.target.value); setSelected(null); }} className="h-9 rounded border border-slate-700 bg-slate-800 px-2 text-xs text-slate-200 outline-none focus:border-blue-500" aria-label="语言">
+            <option value="">全部语言</option>
+            {facets.language.map((value) => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </div>
+
         {/* 三级 Tab 栏 */}
-        {tabsAtLevel.map((tabs, level) => {
+        {!searchActive && tabsAtLevel.map((tabs, level) => {
           if (!tabs || tabs.length === 0) return null;
           if (level > pathStack.length) return null;
           const selectedName = pathStack[level];
@@ -317,7 +464,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
         })}
 
         {/* 深层模式面包屑 */}
-        {inDeepMode && (
+        {!searchActive && inDeepMode && (
           <div className="px-6 py-2 border-b border-slate-700 flex items-center text-sm flex-wrap">
             <button
               className="text-blue-400 hover:underline"
@@ -346,9 +493,29 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
 
         {/* 内容区域（滚动） */}
         <div className="flex-1 overflow-auto px-6 py-4">
-          {!currentEntries && !currentError && <div className="text-slate-400">加载中...</div>}
-          {currentError && !currentEntries && <div className="text-red-400">加载失败: {currentError}</div>}
-          {currentEntries && (
+          {searchActive && (searchLoading || searchPending) && (
+            <div className="flex h-full items-center justify-center text-slate-400">
+              <LoaderCircle className="animate-spin" size={22} />
+            </div>
+          )}
+          {searchActive && !searchLoading && !searchPending && searchError && (
+            <div className="flex h-full items-center justify-center text-sm text-red-400">搜索失败：{searchError}</div>
+          )}
+          {searchActive && !searchLoading && !searchPending && !searchError && searchResults.length === 0 && (
+            <div className="flex h-full items-center justify-center text-sm text-slate-500">没有匹配的资源</div>
+          )}
+          {searchActive && !searchLoading && !searchPending && !searchError && searchResults.length > 0 && (
+            <LibrarySearchGrid
+              results={searchResults}
+              selected={selected}
+              setSelected={setSelected}
+              onConfirm={(selection) => void triggerConfirm(selection)}
+              busy={busy}
+            />
+          )}
+          {!searchActive && !currentEntries && !currentError && <div className="text-slate-400">加载中...</div>}
+          {!searchActive && currentError && !currentEntries && <div className="text-red-400">加载失败: {currentError}</div>}
+          {!searchActive && currentEntries && (
             <FolderAndFileGrid
               entries={currentEntries}
               mode={mode}
@@ -357,7 +524,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
               selected={selected}
               setSelected={setSelected}
               onEnterFolder={enterFolder}
-              onConfirm={triggerConfirm}
+              onConfirm={(selection) => void triggerConfirm(selection)}
               busy={busy}
               showFolders={inDeepMode || pathStack.length >= TAB_LEVELS_MAX}
             />
@@ -367,7 +534,11 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
         {/* 底部 */}
         <div className="flex items-center justify-between px-6 py-3 border-t border-slate-700 text-sm">
           <div className="text-slate-400">
-            {selected ? `已选: ${selected.name}` : '未选'}
+            {selected
+              ? `已选: ${selected.name}`
+              : searchActive
+                ? searchTruncated ? `显示前 200 个，共 ${searchTotal} 个结果` : `${searchTotal} 个结果`
+                : '未选'}
           </div>
           <div className="space-x-3">
             <button
@@ -398,6 +569,65 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
   );
 }
 
+// ─── 全库搜索结果 ───
+
+type LibrarySearchGridProps = {
+  results: LibrarySearchResult[];
+  selected: LibrarySelection | null;
+  setSelected: (selection: LibrarySelection | null) => void;
+  onConfirm: (selection: LibrarySelection) => void;
+  busy: boolean;
+};
+
+function LibrarySearchGrid({ results, selected, setSelected, onConfirm, busy }: LibrarySearchGridProps) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+      {results.map((result) => {
+        const selection: LibrarySelection = {
+          name: result.name,
+          isDir: result.type === 'spine',
+          libraryPath: result.libraryPath,
+        };
+        const active = selected?.libraryPath === result.libraryPath;
+        const thumbnailUrl = `/builtin/library/${result.libraryPath.split('/').map(encodeURIComponent).join('/')}`;
+
+        return (
+          <button
+            key={result.libraryPath}
+            type="button"
+            onClick={() => setSelected(selection)}
+            onDoubleClick={() => onConfirm(selection)}
+            disabled={busy}
+            className={`relative min-w-0 overflow-hidden rounded border bg-slate-900 p-2 text-left transition-colors ${
+              active ? 'border-blue-500 bg-blue-950/50' : 'border-slate-700 hover:border-slate-500 hover:bg-slate-800'
+            }`}
+            title={result.libraryPath}
+          >
+            <div className="flex h-28 w-full items-center justify-center overflow-hidden rounded bg-slate-950/70">
+              {result.type === 'image' && (
+                <img src={thumbnailUrl} alt="" loading="lazy" className="max-h-full max-w-full object-contain" />
+              )}
+              {result.type === 'audio' && <Music size={32} className="text-slate-400" />}
+              {result.type === 'video' && <Video size={32} className="text-slate-400" />}
+              {result.type === 'spine' && <FolderOpen size={34} className="text-slate-400" />}
+            </div>
+            <div className="mt-2 line-clamp-2 min-h-8 text-xs leading-4 text-slate-100">{result.name}</div>
+            <div className="mt-1 truncate text-[10px] text-slate-500">{result.directory}</div>
+            <div className="mt-1 truncate text-[10px] text-slate-500">
+              {[result.series, result.color, result.language].filter(Boolean).join(' / ')}
+            </div>
+            {active && (
+              <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white">
+                <Check size={14} />
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── 文件夹/文件网格 ───
 
 type FolderAndFileGridProps = {
@@ -405,10 +635,10 @@ type FolderAndFileGridProps = {
   mode: LibraryBrowserProps['mode'];
   fileFilter: LibraryBrowserProps['fileFilter'];
   currentPath: string;
-  selected: { name: string; isDir: boolean } | null;
-  setSelected: (s: { name: string; isDir: boolean } | null) => void;
+  selected: LibrarySelection | null;
+  setSelected: (s: LibrarySelection | null) => void;
   onEnterFolder: (name: string) => void;
-  onConfirm: () => void;
+  onConfirm: (selection: LibrarySelection) => void;
   busy: boolean;
   showFolders: boolean;
 };
@@ -466,8 +696,9 @@ function FolderAndFileGrid(props: FolderAndFileGridProps) {
               const handleDoubleClick = () => {
                 if (busy || disabledForFile) return;
                 if (mode === 'spineFolder' && isSpineProj) {
-                  setSelected({ name: f.name, isDir: true });
-                  setTimeout(() => onConfirm(), 0);
+                  const selection = { name: f.name, isDir: true };
+                  setSelected(selection);
+                  onConfirm(selection);
                 }
               };
 
@@ -522,8 +753,9 @@ function FolderAndFileGrid(props: FolderAndFileGridProps) {
                   }}
                   onDoubleClick={() => {
                     if (busy || !matchesFilter) return;
-                    setSelected({ name: f.name, isDir: false });
-                    setTimeout(() => onConfirm(), 0);
+                    const selection = { name: f.name, isDir: false };
+                    setSelected(selection);
+                    onConfirm(selection);
                   }}
                   title={matchesFilter ? f.name : `${f.name} (不匹配)`}
                 >
@@ -553,14 +785,14 @@ function FolderAndFileGrid(props: FolderAndFileGridProps) {
 // ─── 确认逻辑 ───
 
 async function handleConfirm(
-  selected: { name: string; isDir: boolean } | null,
+  selected: LibrarySelection | null,
   currentPath: string,
   mode: LibraryBrowserProps['mode'],
   onSelect: LibraryBrowserProps['onSelect'],
   onClose: LibraryBrowserProps['onClose'],
 ) {
   if (!selected) return;
-  const libraryPath = currentPath ? `${currentPath}/${selected.name}` : selected.name;
+  const libraryPath = selected.libraryPath ?? (currentPath ? `${currentPath}/${selected.name}` : selected.name);
   if (mode === 'spineFolder') {
     if (!selected.isDir) return;
     await onSelect({ type: 'spine', libraryPath });
