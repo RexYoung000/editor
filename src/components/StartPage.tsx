@@ -17,7 +17,9 @@ export default function StartPage({ onEnterEditor }: Props) {
 
   // Electron 服务器输入窗口传入的地址 → 自动同步到 serverUrl
   useEffect(() => {
-    window.electronAPI.getServerUrl().then(url => {
+    // 开发服务也可以直接在浏览器中打开；此时没有 Electron 注入的本机 API。
+    // 只跳过地址同步，避免起始页因读取不存在的 API 而整体卸载。
+    window.electronAPI?.getServerUrl().then(url => {
       if (url) {
         setServerUrl(url);
         localStorage.setItem('forge_server_url', url);
