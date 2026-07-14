@@ -8,13 +8,72 @@ import { translateLabel } from '../elements/elementMetaI18n';
 import KeyboardPresetDialog from './KeyboardPresetDialog';
 import type { KeyboardPreset } from '../elements/keyboardPresets';
 import { KEYBOARD_PRESETS } from '../elements/keyboardPresets';
-import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
+import { isFlatLesson } from '../utils/courseKind';
+import { downloadLibraryFile, readFileAsDataUrl } from '../utils/electronFs';
+import { showToast } from '../utils/toast';
+import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './QuickPresetDialog';
+import type { Action, Element, SubPage } from '../types';
+
+const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
+  { kind: 'confirm', label: '确定' },
+  { kind: 'previous', label: '上一页' },
+  { kind: 'next', label: '下一页' },
+  { kind: 'audio', label: '播放/音频' },
+  { kind: 'brush', label: '画笔' },
+  { kind: 'clear', label: '清空' },
+];
+
+const QUICK_PRESET_REPLACED_TYPES = new Set(['SoundButton', 'ConfirmButton', 'NewBrushSprite']);
+
+function makeId(prefix: string): string {
+  return crypto.randomUUID?.() ?? `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+async function readNaturalSize(courseId: string, relativePath: string): Promise<{ width: number; height: number } | null> {
+  const dataUrl = await readFileAsDataUrl(courseId, relativePath);
+  if (!dataUrl) return null;
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image.naturalWidth > 0 && image.naturalHeight > 0
+      ? { width: image.naturalWidth, height: image.naturalHeight }
+      : null);
+    image.onerror = () => resolve(null);
+    image.src = dataUrl;
+  });
+}
+
+function currentSubPage(): SubPage | null {
+  const state = useEditorStore.getState();
+  const course = state.currentCourse;
+  if (!course || !state.currentSubPageId) return null;
+  const stages = [...course.stages, ...(course.previewStages ?? [])];
+  for (const stage of stages) {
+    const page = stage.subPages.find((item) => item.id === state.currentSubPageId);
+    if (page) return page;
+  }
+  return null;
+}
+
+async function findRelatedPreset(kind: 'brush' | 'clear', source: QuickPreset): Promise<QuickPreset | null> {
+  const response = await fetch(`/api/library/quick-presets?kind=${kind}`);
+  if (!response.ok) return null;
+  const data = await response.json() as { presets?: QuickPreset[] };
+  const candidates = data.presets ?? [];
+  const exactDirectory = candidates.find((item) => item.directory === source.directory);
+  if (exactDirectory) return exactDirectory;
+  return candidates.find((item) =>
+    item.series === source.series
+    && item.color === source.color
+    && item.language === source.language
+    && item.theme === source.theme,
+  ) ?? null;
+}
 
 /** 连线题：根据 direction 给前3个、后3个 MatchingItem 分配位置和 name */
 type MatchingLayoutItem = { x: number; y: number; name: string };
 type MatchingLayout = { items: MatchingLayoutItem[] };
 
-export function getMatchingLayout(direction: 0 | 1 | 2): MatchingLayout {
+function getMatchingLayout(direction: 0 | 1 | 2): MatchingLayout {
   if (direction === 0) {
     return { items: [
       { x: 750,  y: 450, name: 'l1' },
@@ -68,6 +127,9 @@ export default function ElementToolbar() {
   });
     const [activeTab, setActiveTab] = useState('commonComponents');
   const [keyboardDialogOpen, setKeyboardDialogOpen] = useState(false);
+  const [quickPresetOpen, setQuickPresetOpen] = useState(false);
+  const [quickPresetKind, setQuickPresetKind] = useState<QuickPresetKind>('confirm');
+  const [quickPresetBusy, setQuickPresetBusy] = useState(false);
 
   const handleAdd = (type: string) => {
     if (frozen) return;
@@ -271,10 +333,10 @@ export default function ElementToolbar() {
 
     // 默认给 NewBrushSprite 加上"初始化画笔功能"事件
     brushBox.actions = [{
-      id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: makeId('action'),
       event: 'onInitBrush',
       actionType: 'none',
-      groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      groupId: makeId('group'),
     }];
 
     const boxObj = createLayaComponent(brushBox);
@@ -657,7 +719,127 @@ export default function ElementToolbar() {
     selectElement(dvb.id, false);
   };
 
-  const items = Object.entries(elementMeta).filter(([, m]) => m.category === activeTab && m.label !== '视频' && !m.toolbarHidden);
+  const openQuickPreset = (kind: QuickPresetKind) => {
+    if (frozen) return;
+    setQuickPresetKind(kind);
+    setQuickPresetOpen(true);
+  };
+
+  const registerAndAdd = (element: Element, parent?: Parameters<typeof createLayaComponent>[1]) => {
+    const obj = createLayaComponent(element, parent);
+    if (obj) registerObject(element.id, obj);
+    addElement(element);
+    return obj;
+  };
+
+  const applyPresetImage = async (element: Element, courseId: string, preset: QuickPreset, prop: 'skin' | '_foregroundSkin') => {
+    const { localRelPath } = await downloadLibraryFile(courseId, preset.libraryPath);
+    const size = await readNaturalSize(courseId, localRelPath);
+    if (size) {
+      element.width = size.width;
+      element.height = size.height;
+    }
+    const extension = localRelPath.split('.').pop()?.toUpperCase() ?? '';
+    element.props = {
+      ...element.props,
+      [prop]: localRelPath,
+      ...(size ? { _naturalWidth: size.width, _naturalHeight: size.height } : {}),
+      ...(extension ? { _fileFormat: extension } : {}),
+    };
+    return localRelPath;
+  };
+
+  const handleQuickPresetSelected = async (kind: QuickPresetKind, preset: QuickPreset) => {
+    const state = useEditorStore.getState();
+    const courseId = state.currentCourse?.id;
+    const pageContext = currentSubPage();
+    if (!courseId || !pageContext) {
+      showToast('请先打开一个可编辑课件', 'warning');
+      return;
+    }
+
+    setQuickPresetBusy(true);
+    try {
+      const subPageId = pageContext.id;
+      if (kind === 'confirm') {
+        const element = createDefaultElement('ConfirmButton', subPageId);
+        await applyPresetImage(element, courseId, preset, 'skin');
+        const target = pageContext.elements.find((item) => item.type === 'KlInputBox' || item.layaType === 'ChoiceBox')
+          ?? pageContext.elements.find((item) => item.type === 'DragViewBox' || item.type === 'MatchingGame');
+        if (target) {
+          const isGame = target.type === 'DragViewBox' || target.type === 'MatchingGame';
+          element.actions = [{
+            id: makeId('action'),
+            event: isGame ? 'onClickInitGameConfirmWithLock' : 'onClickInitConfirmWithLock',
+            targetId: target.id,
+            actionType: 'toggleVisible',
+            groupId: makeId('group'),
+          }];
+        }
+        registerAndAdd(element);
+        selectElement(element.id, false);
+        if (!target) showToast('确定按钮已创建；当前页没有可自动绑定的题型，请在事件面板补充目标', 'warning');
+      } else if (kind === 'previous' || kind === 'next') {
+        const element = createDefaultElement(kind === 'previous' ? 'PageTurnLeftBtn' : 'PageTurnRightBtn', subPageId);
+        await applyPresetImage(element, courseId, preset, 'skin');
+        const pageTurnTarget = pageContext.elements.find((item) => item.type === 'PageTurnBox');
+        if (pageTurnTarget) {
+          const action: Action = {
+            id: makeId('action'),
+            event: 'onClick',
+            targetId: pageTurnTarget.id,
+            actionType: kind === 'previous' ? 'pageTurnPrevOnce' : 'pageTurnNextOnce',
+            groupId: makeId('group'),
+          };
+          element.actions = [action];
+        }
+        registerAndAdd(element);
+        selectElement(element.id, false);
+        if (!pageTurnTarget) showToast(`${kind === 'previous' ? '上一页' : '下一页'}按钮已创建；当前页没有翻页管理组件，请在事件面板补充目标`, 'warning');
+      } else if (kind === 'audio') {
+        const element = createDefaultElement('SoundButton', subPageId);
+        await applyPresetImage(element, courseId, preset, 'skin');
+        registerAndAdd(element);
+        selectElement(element.id, false);
+        showToast('音频按钮已创建，请在属性面板选择需要播放的音频', 'info');
+      } else {
+        const drawPreset = kind === 'brush' ? preset : await findRelatedPreset('brush', preset);
+        const clearPreset = kind === 'clear' ? preset : await findRelatedPreset('clear', preset);
+        const brushBox = createDefaultElement('NewBrushSprite', subPageId);
+        const drawBtn = createDefaultElement('BrushDrawBtn', subPageId);
+        const clearBtn = createDefaultElement('BrushClearBtn', subPageId);
+        drawBtn.parentId = brushBox.id;
+        clearBtn.parentId = brushBox.id;
+        if (drawPreset) await applyPresetImage(drawBtn, courseId, drawPreset, '_foregroundSkin');
+        if (clearPreset) await applyPresetImage(clearBtn, courseId, clearPreset, 'skin');
+        brushBox.actions = [{
+          id: makeId('action'),
+          event: 'onInitBrush',
+          actionType: 'none',
+          groupId: makeId('group'),
+        }];
+        const brushObj = registerAndAdd(brushBox);
+        registerAndAdd(drawBtn, brushObj);
+        registerAndAdd(clearBtn, brushObj);
+        selectElement(brushBox.id, false);
+        if (!drawPreset || !clearPreset) {
+          showToast(`已创建画笔组合；未找到同目录的${drawPreset ? '清空' : '画笔'}皮肤，已保留默认外观`, 'warning');
+        }
+      }
+      setQuickPresetOpen(false);
+    } catch (reason) {
+      showToast(`添加快捷组件失败：${reason instanceof Error ? reason.message : String(reason)}`, 'error');
+    } finally {
+      setQuickPresetBusy(false);
+    }
+  };
+
+  const items = Object.entries(elementMeta).filter(([type, m]) =>
+    m.category === activeTab
+    && m.label !== '视频'
+    && !m.toolbarHidden
+    && !QUICK_PRESET_REPLACED_TYPES.has(type),
+  );
 
   return (
     <div className="bg-slate-800 border-b border-slate-700 px-3 py-1.5">
@@ -677,6 +859,20 @@ export default function ElementToolbar() {
         ))}
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">
+        {activeTab === 'commonComponents' && QUICK_PRESET_BUTTONS.map((item) => (
+          <button
+            key={item.kind}
+            onClick={() => openQuickPreset(item.kind)}
+            disabled={frozen}
+            className={`px-2.5 py-1.5 rounded text-xs transition-colors shrink-0 ${
+              frozen
+                ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
+                : 'bg-slate-700 hover:bg-emerald-700 text-slate-300 hover:text-white'
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
         {activeTab === 'speechCourse' && (
           <>
             <button
@@ -758,6 +954,14 @@ export default function ElementToolbar() {
         onClose={() => setKeyboardDialogOpen(false)}
         onSelect={handlePresetSelected}
       />
+      {quickPresetOpen && (
+        <QuickPresetDialog
+          initialKind={quickPresetKind}
+          busy={quickPresetBusy}
+          onClose={() => setQuickPresetOpen(false)}
+          onSelect={handleQuickPresetSelected}
+        />
+      )}
     </div>
   );
 }

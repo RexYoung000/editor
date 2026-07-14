@@ -41,7 +41,29 @@ forge 没有独立的 Node 服务，所有"后端"能力都由 [vite.config.ts](
 | `GET /api/library/list?path=<rel>` | 列出 `public/builtin/library/<rel>` 目录条目，目录会判 Spine 工程，文件返回 size/mtime；路径过 `sanitizeLibraryPath` 防越界 |
 | `GET /api/library/file-info?path=<rel>` | 取单文件 SHA-256 前 8 字符 hash + size/mtime，hash 缓存在 `public/builtin/library/.cache/hash.json`（按 mtime+size 失效） |
 | `GET /api/library/spine-files?path=<rel>` | 传入 Spine 工程目录，递归列出 `.json/.atlas/.png/.mp3/.wav/.ogg` 文件 |
+| `GET /api/library/quick-presets?kind=<kind>` | 递归扫描 `public/builtin/library/通用素材/控件/`，返回快捷组件候选图片及系列、颜色、语言标签；`kind` 首批支持 `confirm/previous/next/audio/brush/clear` |
 | `GET /api/download-vcredist` | 流式下载 `installers/vc_redist.x64.exe`，给 Electron 安装器引导 Windows VC++ Redistributable 用 |
+
+### 通用素材与快捷组件
+
+资源服务器上的正式通用素材按以下结构部署，不增加课程品牌层级：
+
+```text
+public/builtin/library/
+└── 通用素材/
+    ├── 二级窗口/
+    ├── 其他设计底框/
+    ├── 控件/
+    ├── 通用框/
+    └── 通用背景图/
+```
+
+- 资源库是 Vite 服务器的内容目录，已被 Git 忽略，不随 Electron 安装包发布；部署资源服务器时需要单独同步。
+- PSD 是美术源文件，不进入资源库；浏览和课件下载只使用 PNG/JPG 等可直接使用的图片。
+- 快捷组件不是把所有图片平铺到工具栏，而是保留稳定的功能入口，再按目录、系列、颜色、语言和关键词筛选候选美术。
+- 用户确认预设后，客户端沿用 `downloadLibraryFile()` 把所选图片下载到当前课件的 `images/library/`，课件只携带实际使用的素材。
+- 首批快捷预设包括确定、上一页、下一页、播放/音频、画笔、清空。确定按钮优先绑定当前页可识别的题型容器，上一页/下一页优先绑定当前页的 `PageTurnBox`；缺少题型目标、翻页管理组件或音频文件时保留组件并提示用户补充，不猜测绑定对象。
+- 画笔和清空仍按现有 `NewBrushSprite + BrushDrawBtn + BrushClearBtn` 组合创建，选择任一类预设时优先在同目录自动配对另一类皮肤。
 
 ## Preview URL 双斜杠防护
 

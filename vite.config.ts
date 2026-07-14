@@ -22,6 +22,83 @@ const MAX_COMPILED_ZIP_SIZE = 300 * 1024 * 1024; // 300MB
 
 // 资源库根目录（绝对路径，dev server 启动时一次性算出）
 const LIBRARY_ROOT = path.resolve(process.cwd(), 'public/builtin/library');
+const QUICK_PRESET_ROOT = path.join(LIBRARY_ROOT, '通用素材', '控件');
+
+const QUICK_PRESET_RULES = {
+  confirm: /确定|確定|确认|確認|提交|完成答题|完成答題|一键完成|一鍵完成/,
+  previous: /上一页|上一頁|上页|上頁|左翻页|左翻頁/,
+  next: /下一页|下一頁|下页|下頁|右翻页|右翻頁/,
+  audio: /播放声音|播放聲音|播放音频|播放音頻|喇叭|音频|音頻|音效|播放/,
+  brush: /画笔|畫筆|笔-小|筆/,
+  clear: /清空|橡皮|擦除/,
+} as const;
+
+type QuickPresetKind = keyof typeof QUICK_PRESET_RULES;
+
+function detectQuickPresetTag(text: string, choices: Array<[RegExp, string]>): string {
+  for (const [pattern, label] of choices) {
+    if (pattern.test(text)) return label;
+  }
+  return '';
+}
+
+function listQuickPresets(kind: QuickPresetKind) {
+  if (!fs.existsSync(QUICK_PRESET_ROOT)) return [];
+
+  const presets: Array<{
+    libraryPath: string;
+    name: string;
+    series: string;
+    color: string;
+    language: string;
+    theme: string;
+    directory: string;
+  }> = [];
+  const imagePattern = /\.(png|jpe?g|gif|webp)$/i;
+  const namePattern = QUICK_PRESET_RULES[kind];
+
+  function walk(absDir: string, relDir: string): void {
+    for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue;
+      const childAbs = path.join(absDir, entry.name);
+      const childRel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(childAbs, childRel);
+        continue;
+      }
+      if (!imagePattern.test(entry.name) || !namePattern.test(entry.name)) continue;
+
+      const pathParts = relDir.split('/').filter(Boolean);
+      const searchText = `${relDir}/${entry.name}`;
+      const series = pathParts[0] ?? '';
+      const theme = series.startsWith('S9') && pathParts[1] && pathParts[1] !== '控件'
+        ? pathParts[1]
+        : '';
+      presets.push({
+        libraryPath: `通用素材/控件/${childRel}`,
+        name: entry.name.replace(/\.[^.]+$/, ''),
+        series,
+        color: detectQuickPresetTag(searchText, [
+          [/绿色|绿-/u, '绿色'],
+          [/蓝色|蓝-/u, '蓝色'],
+          [/黄色|黄-/u, '黄色'],
+          [/橙色|橙/u, '橙色'],
+          [/红色|红-/u, '红色'],
+        ]),
+        language: detectQuickPresetTag(searchText, [
+          [/简体/u, '简体'],
+          [/繁体/u, '繁体'],
+          [/英文/u, '英文'],
+        ]),
+        theme,
+        directory: relDir,
+      });
+    }
+  }
+
+  walk(QUICK_PRESET_ROOT, '');
+  return presets.sort((a, b) => a.libraryPath.localeCompare(b.libraryPath, 'zh-CN', { numeric: true }));
+}
 
 /**
  * 把外部传入的相对路径规范化并做越界校验。
@@ -417,6 +494,19 @@ function forgePlugin() {
         const cleanedUrl = req.url.replace(/\/\/+/g, '/');
         const urlObj = new URL(cleanedUrl, 'http://localhost');
         const pathname = urlObj.pathname;
+
+        // GET /api/library/quick-presets — 按功能类型返回通用素材中的快捷组件候选
+        if (pathname === '/api/library/quick-presets') {
+          try {
+            const kind = urlObj.searchParams.get('kind') as QuickPresetKind | null;
+            if (!kind || !(kind in QUICK_PRESET_RULES)) {
+              return jsonError(res, 400, '不支持的快捷组件类型');
+            }
+            return jsonOk(res, { kind, presets: listQuickPresets(kind) });
+          } catch (e: any) {
+            return jsonError(res, 500, String(e?.message ?? e));
+          }
+        }
 
         // GET /api/library/list — 列出某资源库目录的内容
         if (pathname === '/api/library/list') {
