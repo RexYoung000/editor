@@ -158,7 +158,7 @@
     return el.scrollHeight > el.clientHeight + 2;
   }
 
-  function targetDropScrollContainer() {
+  function targetDropScrollElement() {
     if (!root || !dragState || dragState.type !== 'view' || !dragState.targetSubPageId) return null;
     const currentSubPageId = activeSubPage()?.id;
     let key = null;
@@ -168,8 +168,19 @@
     if (scheme === 'drawer') key = dragState.targetSubPageId === currentSubPageId ? 'drawer-views' : 'stage-list';
     // 方案三跨关卡目标在下方独立区域，本关排序保留在上方页面列表。
     if (scheme === 'focus') key = dragState.targetSubPageId === currentSubPageId ? 'focus-views' : 'focus-cross';
-    const target = key ? root.querySelector(`[data-scroll-key="${key}"]`) : null;
+    return key ? root.querySelector(`[data-scroll-key="${key}"]`) : null;
+  }
+
+  function targetDropScrollContainer() {
+    const target = targetDropScrollElement();
     return isScrollableY(target) ? target : null;
+  }
+
+  function staysInTargetScrollColumn(x) {
+    const target = targetDropScrollElement();
+    if (!target) return false;
+    const rect = target.getBoundingClientRect();
+    return x >= rect.left - 72 && x <= rect.right + 72;
   }
 
   function pickScrollContainer(x, y) {
@@ -1216,9 +1227,10 @@
     const next = dragState.type === 'view'
       ? resolveViewDropAtPoint(x, y)
       : resolveSubPageDropAtPoint(x, y);
-    // 短暂丢失 hit-test（滚出缝隙/指针在空白）时保留上一个有效目标，避免预览闪没
+    // 自动滚动时指针会越过列表底边。仍在同一列就保留上一个有效目标，
+    // 否则强制刷新会清空目标，使下一帧失去应继续滚动的列表。
     if (!next.targetSubPageId && !next.targetStageId && (dragState.targetSubPageId || dragState.targetStageId)) {
-      if (!force) return;
+      if (!force || staysInTargetScrollColumn(x)) return;
     }
     const changed = next.valid !== dragState.valid
       || next.reason !== dragState.reason
