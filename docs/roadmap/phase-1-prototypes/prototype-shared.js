@@ -1154,6 +1154,8 @@
     event.preventDefault();
     const type = pageHandle ? 'view' : 'subpage';
     const id = pageHandle ? pageHandle.dataset.pageDrag : subPageHandle.dataset.subpageDrag;
+    // 捕获后即使经过其他面板，后续 pointermove 也稳定回到当前拖拽链路。
+    try { handle.setPointerCapture(event.pointerId); } catch {}
     pressState = {
       type,
       id,
@@ -1162,6 +1164,7 @@
       x: event.clientX,
       y: event.clientY,
       handle,
+      pointerId: event.pointerId,
       timer: null,
     };
     handle.classList.add('pressing');
@@ -1182,6 +1185,8 @@
       targetSubPageId: null,
       targetStageId: null,
       targetIndex: null,
+      handle: pressState.handle,
+      pointerId: pressState.pointerId,
     };
     if (handle) handle.classList.remove('pressing');
     window.clearTimeout(pressState.timer);
@@ -1193,6 +1198,8 @@
       }
     }
     suppressClickUntil = Date.now() + 500;
+    // 即使拖拽由第一段移动触发，也立刻具备可滚动的指针位置。
+    autoScrollPoint = { x: dragState.x, y: dragState.y };
     autoScrollEl = null;
     // 先锁定可能的滚动容器，再渲染，避免首帧找不到
     autoScrollEl = pickScrollContainer(dragState.x, dragState.y);
@@ -1218,6 +1225,8 @@
     dragState.y = event.clientY;
     autoScrollPoint = { x: event.clientX, y: event.clientY };
     updateDragTarget(event.clientX, event.clientY);
+    // 指针移动当帧就执行一次，避免仅依赖动画帧导致拖到边缘时没有任何反馈。
+    advanceAutoScroll(event.clientX, event.clientY);
     updateDragGhost();
   }
 
@@ -1391,36 +1400,37 @@
     ghost.innerHTML = `<strong>${esc(sourceLabel)}</strong><span>${esc(targetLabel || '寻找放置位置')}</span>`;
   }
 
+  function advanceAutoScroll(x, y) {
+    const scroll = pickScrollContainer(x, y);
+    if (!scroll) return false;
+    const rect = scroll.getBoundingClientRect();
+    const edge = 72;
+    let delta = 0;
+    // 即使指针完全在列表外，只要 y 在列表上方/下方，就持续滚。
+    if (y <= rect.top + edge) {
+      const dist = Math.max(8, rect.top + edge - y);
+      delta = -Math.min(42, 12 + dist * 0.6);
+    } else if (y >= rect.bottom - edge) {
+      const dist = Math.max(8, y - (rect.bottom - edge));
+      delta = Math.min(42, 12 + dist * 0.6);
+    }
+    if (!delta) return false;
+    const prev = scroll.scrollTop;
+    scroll.scrollTop = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, scroll.scrollTop + delta));
+    if (scroll.scrollTop === prev) return false;
+    updateDragTarget(x, y, { force: true });
+    return true;
+  }
+
   function startAutoScrollLoop() {
-    // 不调用 stopAutoScroll，避免清掉已锁定容器；只停旧帧
+    // 不调用 stopAutoScroll，避免清掉已锁定容器；只停旧帧。
     if (autoScrollRaf) window.cancelAnimationFrame(autoScrollRaf);
     const tick = () => {
       if (!dragState || !autoScrollPoint) {
         autoScrollRaf = 0;
         return;
       }
-      const { x, y } = autoScrollPoint;
-      const scroll = pickScrollContainer(x, y);
-      if (scroll) {
-        const rect = scroll.getBoundingClientRect();
-        const edge = 72;
-        let delta = 0;
-        // 即使指针完全在列表外，只要 y 在列表上方/下方，就持续滚
-        if (y <= rect.top + edge) {
-          const dist = Math.max(8, rect.top + edge - y);
-          delta = -Math.min(42, 12 + dist * 0.6);
-        } else if (y >= rect.bottom - edge) {
-          const dist = Math.max(8, y - (rect.bottom - edge));
-          delta = Math.min(42, 12 + dist * 0.6);
-        }
-        if (delta) {
-          const prev = scroll.scrollTop;
-          scroll.scrollTop = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, scroll.scrollTop + delta));
-          if (scroll.scrollTop !== prev) {
-            updateDragTarget(x, y, { force: true });
-          }
-        }
-      }
+      advanceAutoScroll(autoScrollPoint.x, autoScrollPoint.y);
       autoScrollRaf = window.requestAnimationFrame(tick);
     };
     autoScrollRaf = window.requestAnimationFrame(tick);
@@ -1475,12 +1485,18 @@
   function cancelPress() {
     if (!pressState) return;
     window.clearTimeout(pressState.timer);
+    try {
+      if (pressState.handle?.hasPointerCapture?.(pressState.pointerId)) pressState.handle.releasePointerCapture(pressState.pointerId);
+    } catch {}
     root?.querySelectorAll('.pressing').forEach((element) => element.classList.remove('pressing'));
     pressState = null;
   }
 
   function clearDrag() {
     cancelPress();
+    try {
+      if (dragState?.handle?.hasPointerCapture?.(dragState.pointerId)) dragState.handle.releasePointerCapture(dragState.pointerId);
+    } catch {}
     stopAutoScroll();
     dragState = null;
     suppressClickUntil = Date.now() + 250;
