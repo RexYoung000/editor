@@ -1409,10 +1409,11 @@
     // 即使指针完全在列表外，只要 y 在列表上方/下方，就持续滚。
     if (y <= rect.top + edge) {
       const dist = Math.max(8, rect.top + edge - y);
-      delta = -Math.min(42, 12 + dist * 0.6);
+      // 常规边缘悬停保持低速，只有明显越界才逐步加速，方便瞄准指定小关卡。
+      delta = -Math.min(14, 4 + dist * 0.18);
     } else if (y >= rect.bottom - edge) {
       const dist = Math.max(8, y - (rect.bottom - edge));
-      delta = Math.min(42, 12 + dist * 0.6);
+      delta = Math.min(14, 4 + dist * 0.18);
     }
     if (!delta) return false;
     const prev = scroll.scrollTop;
