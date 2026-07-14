@@ -1410,10 +1410,10 @@
     if (y <= rect.top + edge) {
       const dist = Math.max(8, rect.top + edge - y);
       // 常规边缘悬停保持低速，只有明显越界才逐步加速，方便瞄准指定小关卡。
-      delta = -Math.min(14, 4 + dist * 0.18);
+      delta = -Math.min(7, 1.5 + dist * 0.09);
     } else if (y >= rect.bottom - edge) {
       const dist = Math.max(8, y - (rect.bottom - edge));
-      delta = Math.min(14, 4 + dist * 0.18);
+      delta = Math.min(7, 1.5 + dist * 0.09);
     }
     if (!delta) return false;
     const prev = scroll.scrollTop;
