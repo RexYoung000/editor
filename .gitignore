@@ -32,6 +32,7 @@ dist-ssr
 .preview-pid
 .socket-pid
 .socket.log
+.codegraph/
 
 # Local service credentials/certificates
 conf/DBConfig.xml
