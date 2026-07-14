@@ -158,9 +158,30 @@
     return el.scrollHeight > el.clientHeight + 2;
   }
 
+  function targetDropScrollContainer() {
+    if (!root || !dragState || dragState.type !== 'view' || !dragState.targetSubPageId) return null;
+    const currentSubPageId = activeSubPage()?.id;
+    let key = null;
+    // 方案一的内部页树与放置目标都在关卡列表；命中目标后即使指针落到下方元素面板，也应继续滚它。
+    if (scheme === 'inline') key = 'stage-list';
+    // 方案二仅在跨小关卡后切到左侧关卡列表，本关排序仍由抽屉页面列表负责。
+    if (scheme === 'drawer') key = dragState.targetSubPageId === currentSubPageId ? 'drawer-views' : 'stage-list';
+    // 方案三跨关卡目标在下方独立区域，本关排序保留在上方页面列表。
+    if (scheme === 'focus') key = dragState.targetSubPageId === currentSubPageId ? 'focus-views' : 'focus-cross';
+    const target = key ? root.querySelector(`[data-scroll-key="${key}"]`) : null;
+    return isScrollableY(target) ? target : null;
+  }
+
   function pickScrollContainer(x, y) {
     const ghost = document.getElementById('dragGhost');
     if (ghost) ghost.style.pointerEvents = 'none';
+
+    // 已命中放置目标时，目标区域优先于指针下方的相邻面板，保证能一直拖到列表最底部。
+    const targetScroll = targetDropScrollContainer();
+    if (targetScroll) {
+      autoScrollEl = targetScroll;
+      return targetScroll;
+    }
 
     // 指针命中的滚动区优先。跨关卡时必须能从源页面列表切到目标关卡列表。
     const hovered = document.elementFromPoint(x, y);
