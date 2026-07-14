@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Check, FolderOpen, LoaderCircle, Music, Search, Video, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, FolderOpen, LoaderCircle, Music, Search, Video, X } from 'lucide-react';
 
 // ─── 类型 ───
 
@@ -27,6 +27,14 @@ type LibrarySearchResult = {
   language: string;
 };
 
+type LibraryQuickTagOption = {
+  id: string;
+  label: string;
+  group: string;
+  primary: boolean;
+  count: number;
+};
+
 type LibrarySearchResponse = {
   ok: boolean;
   total: number;
@@ -37,6 +45,7 @@ type LibrarySearchResponse = {
     color: string[];
     language: string[];
   };
+  quickTags: LibraryQuickTagOption[];
   error?: string;
 };
 
@@ -127,6 +136,30 @@ function writeLastUsed(topLevelDir: string, mode: LibraryBrowserProps['mode'], f
   }
 }
 
+function QuickTagButton(props: {
+  tag: LibraryQuickTagOption;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const { tag, active, onClick } = props;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={`${tag.label}：${tag.count} 个资源`}
+      className={`flex h-7 shrink-0 items-center gap-1 rounded border px-2.5 text-xs transition-colors ${
+        active
+          ? 'border-blue-500 bg-blue-600 text-white'
+          : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-500 hover:bg-slate-700 hover:text-white'
+      }`}
+    >
+      <span>{tag.label}</span>
+      <span className={active ? 'text-blue-100' : 'text-slate-500'}>{tag.count}</span>
+    </button>
+  );
+}
+
 // ─── 主组件 ───
 
 const TAB_LEVELS_MAX = 3;
@@ -143,6 +176,9 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
   const [series, setSeries] = useState('');
   const [color, setColor] = useState('');
   const [language, setLanguage] = useState('');
+  const [quickTag, setQuickTag] = useState('');
+  const [showMoreTags, setShowMoreTags] = useState(false);
+  const [quickTags, setQuickTags] = useState<LibraryQuickTagOption[]>([]);
   const [searchResults, setSearchResults] = useState<LibrarySearchResult[]>([]);
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchTruncated, setSearchTruncated] = useState(false);
@@ -156,9 +192,9 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
 
   const currentPath = pathStack.join('/');
   const searchType: LibraryResourceType = mode === 'spineFolder' ? 'spine' : (fileFilter ?? 'image');
-  const searchActive = Boolean(query.trim() || series || color || language);
+  const searchActive = Boolean(query.trim() || series || color || language || quickTag);
   const searchPending = searchActive && query.trim() !== debouncedQuery.trim();
-  const searchRequestKey = [searchType, debouncedQuery.trim(), series, color, language].join('\n');
+  const searchRequestKey = [searchType, debouncedQuery.trim(), series, color, language, quickTag].join('\n');
   const searchError = searchFailure.key === searchRequestKey ? searchFailure.message : '';
   const searchLoading = searchActive && !searchPending && !searchError && resolvedSearchKey !== searchRequestKey;
   const cacheRef = useRef(cache);
@@ -276,13 +312,14 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
   }, [query]);
 
   useEffect(() => {
-    const requestActive = Boolean(debouncedQuery.trim() || series || color || language);
+    const requestActive = Boolean(debouncedQuery.trim() || series || color || language || quickTag);
     const params = new URLSearchParams({
       type: searchType,
       q: debouncedQuery.trim(),
       series,
       color,
       language,
+      quickTag,
       limit: requestActive ? '200' : '0',
     });
     const controller = new AbortController();
@@ -295,6 +332,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
       })
       .then((data) => {
         setFacets(data.facets);
+        setQuickTags(data.quickTags ?? []);
         setSearchResults(requestActive ? data.results : []);
         setSearchTotal(requestActive ? data.total : 0);
         setSearchTruncated(requestActive && data.truncated);
@@ -309,7 +347,24 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
       });
 
     return () => controller.abort();
-  }, [searchType, debouncedQuery, series, color, language, searchRequestKey]);
+  }, [searchType, debouncedQuery, series, color, language, quickTag, searchRequestKey]);
+
+  const availableQuickTags = useMemo(() => quickTags.filter((tag) => tag.count > 0), [quickTags]);
+  const primaryQuickTags = useMemo(() => availableQuickTags.filter((tag) => tag.primary), [availableQuickTags]);
+  const quickTagGroups = useMemo(() => {
+    const groups = new Map<string, LibraryQuickTagOption[]>();
+    for (const tag of availableQuickTags) {
+      const items = groups.get(tag.group) ?? [];
+      items.push(tag);
+      groups.set(tag.group, items);
+    }
+    return [...groups.entries()];
+  }, [availableQuickTags]);
+
+  const toggleQuickTag = (id: string) => {
+    setQuickTag((current) => current === id ? '' : id);
+    setSelected(null);
+  };
 
   // 派生：每级 Tab 的子目录列表
   const tabsAtLevel = useMemo(() => {
@@ -446,6 +501,56 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
             {facets.language.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </div>
+
+        {/* 用途快捷检索 */}
+        {availableQuickTags.length > 0 && (
+          <div className="shrink-0 border-b border-slate-700 px-6 py-2">
+            <div className="flex min-h-7 items-start gap-2">
+              <span className="flex h-7 shrink-0 items-center text-xs text-slate-500">快捷检索</span>
+              {!showMoreTags && (
+                <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto pb-1">
+                  {primaryQuickTags.map((tag) => (
+                    <QuickTagButton
+                      key={tag.id}
+                      tag={tag}
+                      active={quickTag === tag.id}
+                      onClick={() => toggleQuickTag(tag.id)}
+                    />
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowMoreTags((current) => !current)}
+                className="flex h-7 shrink-0 items-center gap-1 rounded px-2 text-xs text-slate-400 hover:bg-slate-800 hover:text-white"
+                aria-expanded={showMoreTags}
+              >
+                {showMoreTags ? '收起' : '更多'}
+                {showMoreTags ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+            </div>
+
+            {showMoreTags && (
+              <div className="mt-2 space-y-2 border-t border-slate-800 pt-2">
+                {quickTagGroups.map(([group, tags]) => (
+                  <div key={group} className="grid grid-cols-[64px_minmax(0,1fr)] items-start gap-2">
+                    <span className="flex h-7 items-center text-[11px] text-slate-500">{group}</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {tags.map((tag) => (
+                        <QuickTagButton
+                          key={tag.id}
+                          tag={tag}
+                          active={quickTag === tag.id}
+                          onClick={() => toggleQuickTag(tag.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 三级 Tab 栏 */}
         {!searchActive && tabsAtLevel.map((tabs, level) => {
