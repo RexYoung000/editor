@@ -4,7 +4,7 @@ import type { Element } from '../types';
 import {
   preloadAtlas, initEditorInteraction, removeObject,
   clearAllObjects, createLayaComponent, registerObject, getObject, syncTransform,
-  initWorldRoot, setWorldTransform, getWorldTransform,
+  initWorldRoot, setCanvasViewport, setWorldTransform, getWorldTransform,
 } from '../utils/layaBridge';
 import { applyKlProps, drawPlaceholder } from '../utils/laya/components';
 import { objects, canvasRoot, laya } from '../utils/laya/core';
@@ -20,10 +20,13 @@ import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
 import { findActiveElementPage, findCanvasElementPage } from '../utils/internalPages';
 import {
   CANVAS_ZOOM_BUTTON_STEP,
+  constrainViewportToFrame,
+  fitCanvasFrame,
   fitCanvasViewport,
   panViewportByWheel,
   zoomViewportAtPoint,
   zoomViewportByWheel,
+  type CanvasFrame,
 } from '../utils/canvasViewport';
 
 const CANVAS_W = 1920;
@@ -106,7 +109,11 @@ export default function Canvas() {
   const prevPageIdRef = useRef<string | null>(null);
   const prevElementsRef = useRef<Map<string, Element>>(new Map());
 
-  // ─── world state：pan/zoom 由 worldRoot 控制 ───
+  // ─── 固定画布窗口 + 内部镜头状态 ───
+  const emptyFrame: CanvasFrame = { x: 0, y: 0, width: 0, height: 0, fitZoom: 0.4 };
+  const [canvasFrame, setCanvasFrameRaw] = useState<CanvasFrame>(emptyFrame);
+  const canvasFrameRef = useRef<CanvasFrame>(emptyFrame);
+  const viewportInitializedRef = useRef(false);
   const [world, setWorldRaw] = useState({ zoom: 0.4, panX: 0, panY: 0 });
   const worldRef = useRef(world);
   const setWorld = useCallback((w: { zoom: number; panX: number; panY: number }) => {
@@ -121,8 +128,11 @@ export default function Canvas() {
       setWorldRaw(fallback);
       return;
     }
-    worldRef.current = w;
-    setWorldRaw(w);
+    const next = canvasFrameRef.current.width > 0
+      ? constrainViewportToFrame(w, canvasFrameRef.current, CANVAS_W, CANVAS_H)
+      : w;
+    worldRef.current = next;
+    setWorldRaw(next);
   }, []);
   useLayoutEffect(() => { worldRef.current = world; }, [world]);
 
@@ -147,6 +157,27 @@ export default function Canvas() {
   useEffect(() => { clearSelectionRef.current = clearSelection; }, [clearSelection]);
 
   const layaContainerRef = useRef<HTMLElement | null>(null);
+
+  const syncCanvasFrame = useCallback((hostWidth: number, hostHeight: number) => {
+    const previous = canvasFrameRef.current;
+    const next = fitCanvasFrame(hostWidth, hostHeight, CANVAS_W, CANVAS_H);
+    canvasFrameRef.current = next;
+    if (
+      previous.x !== next.x || previous.y !== next.y
+      || previous.width !== next.width || previous.height !== next.height
+    ) {
+      setCanvasFrameRaw(next);
+    }
+    setCanvasViewport(next.x, next.y, next.width, next.height);
+    if (viewportInitializedRef.current && previous.width > 0) {
+      setWorld({
+        ...worldRef.current,
+        panX: worldRef.current.panX + next.x - previous.x,
+        panY: worldRef.current.panY + next.y - previous.y,
+      });
+    }
+    return next;
+  }, [setWorld]);
 
   // ─── 初始化 Laya ───
   const initLaya = useCallback(() => {
@@ -197,6 +228,7 @@ export default function Canvas() {
     L.stage.width = hostRect.width;
     L.stage.height = hostRect.height;
     L.stage.setScreenSize(hostRect.width * dpr, hostRect.height * dpr);
+    syncCanvasFrame(hostRect.width, hostRect.height);
     resetCanvasRendering();
 
     const resizeStage = () => {
@@ -217,6 +249,7 @@ export default function Canvas() {
       if (canvas) {
         canvas.style.cssText = `position:absolute;top:0;left:0;width:${r.width}px;height:${r.height}px;margin:0;padding:0;border:0;transform:none;transform-origin:0 0;`;
       }
+      syncCanvasFrame(r.width, r.height);
       // 同步当前 world 变换到 worldRoot
       setWorldTransform(worldRef.current.panX, worldRef.current.panY, worldRef.current.zoom);
     };
@@ -231,8 +264,10 @@ export default function Canvas() {
       resizeStage();
       // worldRoot + boundaryFrame
       initWorldRoot();
-      // 初始按当前可用区域适应画布，不写死缩放比例
-      const initialViewport = fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H);
+      const frame = syncCanvasFrame(host.clientWidth, host.clientHeight);
+      viewportInitializedRef.current = true;
+      // 初始镜头完整显示固定画布窗口
+      const initialViewport = { zoom: frame.fitZoom, panX: frame.x, panY: frame.y };
       setWorld(initialViewport);
       setWorldTransform(initialViewport.panX, initialViewport.panY, initialViewport.zoom);
       initEditorInteraction({
@@ -245,7 +280,7 @@ export default function Canvas() {
       });
       setLayaReady(true);
     });
-  }, [setWorld]);
+  }, [setWorld, syncCanvasFrame]);
 
   useEffect(() => {
     const start = Date.now();
@@ -371,14 +406,14 @@ export default function Canvas() {
       }
     }
 
-    // z-order 同步：boundaryFrame 在 index 0，元素从 index 1 开始
+    // z-order 同步：固定画布边框在外层 viewportRoot，worldRoot 内元素从 index 0 开始
     const root = canvasRoot();
     if (root) {
       const topLevel = currentPage.elements.filter(e => !e.parentId);
       topLevel.forEach((el, i) => {
         const obj = getObject(el.id);
         if (obj?.parent === root) {
-          try { root.setChildIndex(obj, i + 1); } catch { /* ignore */ }
+          try { root.setChildIndex(obj, i); } catch { /* ignore */ }
         }
       });
       // 子元素 z-order 同步：同一父容器内按 elements 数组顺序排列
@@ -463,6 +498,7 @@ export default function Canvas() {
         // Disconnect ResizeObserver
         resizeObserverRef.current?.disconnect();
         resizeObserverRef.current = null;
+        viewportInitializedRef.current = false;
         // Remove editor interaction handler from Laya stage
         cleanupEditorInteraction();
         // Clear all Laya objects
@@ -575,9 +611,15 @@ export default function Canvas() {
     const host = layaHostRef.current;
     if (!host) return;
     const rect = host.getBoundingClientRect();
-    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    const frame = canvasFrameRef.current;
+    if (
+      localX < frame.x || localX > frame.x + frame.width
+      || localY < frame.y || localY > frame.y + frame.height
+    ) return;
     e.preventDefault();
-    const anchor = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const anchor = { x: localX, y: localY };
     lastPointerRef.current = anchor;
     const viewport = worldRef.current;
     const next = e.metaKey || e.ctrlKey
@@ -632,8 +674,14 @@ export default function Canvas() {
       const host = layaHostRef.current;
       if (host) {
         const rect = host.getBoundingClientRect();
-        if (event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) {
-          lastPointerRef.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        const localX = event.clientX - rect.left;
+        const localY = event.clientY - rect.top;
+        const frame = canvasFrameRef.current;
+        if (
+          localX >= frame.x && localX <= frame.x + frame.width
+          && localY >= frame.y && localY <= frame.y + frame.height
+        ) {
+          lastPointerRef.current = { x: localX, y: localY };
         }
       }
       if (!panningRef.current) return;
@@ -666,6 +714,16 @@ export default function Canvas() {
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const shouldPan = e.button === 1 || (e.button === 0 && spacePressedRef.current);
     if (!shouldPan) return;
+    const host = layaHostRef.current;
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    const frame = canvasFrameRef.current;
+    if (
+      localX < frame.x || localX > frame.x + frame.width
+      || localY < frame.y || localY > frame.y + frame.height
+    ) return;
     e.preventDefault();
     e.stopPropagation();
     panningRef.current = true;
@@ -675,9 +733,9 @@ export default function Canvas() {
   }, []);
 
   const handleFitZoom = useCallback(() => {
-    const host = layaHostRef.current;
-    if (!host) return;
-    setWorld(fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H));
+    const frame = canvasFrameRef.current;
+    if (frame.width <= 0) return;
+    setWorld({ zoom: frame.fitZoom, panX: frame.x, panY: frame.y });
   }, [setWorld]);
 
   // ─── 拖拽图片到画布 ───
@@ -865,7 +923,11 @@ export default function Canvas() {
         onContextMenu={(e) => e.preventDefault()}>
       <div className="flex-1 overflow-hidden relative">
         {spacePressed && (
-          <div className={`absolute inset-0 z-50 ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`} aria-hidden="true" />
+          <div
+            className={`absolute z-50 ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+            style={{ left: canvasFrame.x, top: canvasFrame.y, width: canvasFrame.width, height: canvasFrame.height }}
+            aria-hidden="true"
+          />
         )}
         {/* 拖拽图片高亮 */}
         {dragHover && (
@@ -873,23 +935,37 @@ export default function Canvas() {
         )}
         {/* layaHost 铺满视口 */}
         <div ref={layaHostRef} data-laya-host className="absolute inset-0" />
+        {/* Laya stage 仍铺满编辑区；用工作区底色遮住固定画布窗口外的渲染背景。 */}
+        {canvasFrame.width > 0 && (
+          <>
+            <div className="absolute left-0 right-0 top-0 bg-slate-800 pointer-events-none" style={{ height: canvasFrame.y, zIndex: 1 }} />
+            <div className="absolute left-0 right-0 bottom-0 bg-slate-800 pointer-events-none" style={{ top: canvasFrame.y + canvasFrame.height, zIndex: 1 }} />
+            <div className="absolute left-0 bg-slate-800 pointer-events-none" style={{ top: canvasFrame.y, width: canvasFrame.x, height: canvasFrame.height, zIndex: 1 }} />
+            <div className="absolute right-0 bg-slate-800 pointer-events-none" style={{ top: canvasFrame.y, left: canvasFrame.x + canvasFrame.width, height: canvasFrame.height, zIndex: 1 }} />
+          </>
+        )}
         {currentPage?.kind === 'dialog' && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 py-1 rounded-full bg-slate-950/80 border border-violet-400/40 text-[11px] text-violet-200">
             弹窗编辑 · 主界面底板只读
           </div>
         )}
         {layaReady && (
-          <CanvasOverlay
-            layaHostRef={layaHostRef}
-            world={world}
-            selectedIds={selectedElementIds}
-            currentPage={currentPage}
-            editingElement={editingElement}
-            snap={snap}
-            marqueeStart={marqueeStart}
-            onMarqueeComplete={(ids) => { selectElements(ids); setMarqueeStart(null); }}
-            setEditingId={setEditingId}
-          />
+          <div className="absolute inset-0 pointer-events-none" style={{
+            zIndex: 5,
+            clipPath: `inset(${canvasFrame.y}px calc(100% - ${canvasFrame.x + canvasFrame.width}px) calc(100% - ${canvasFrame.y + canvasFrame.height}px) ${canvasFrame.x}px)`,
+          }}>
+            <CanvasOverlay
+              layaHostRef={layaHostRef}
+              world={world}
+              selectedIds={selectedElementIds}
+              currentPage={currentPage}
+              editingElement={editingElement}
+              snap={snap}
+              marqueeStart={marqueeStart}
+              onMarqueeComplete={(ids) => { selectElements(ids); setMarqueeStart(null); }}
+              setEditingId={setEditingId}
+            />
+          </div>
         )}
         {!layaReady && (
           <div className="absolute inset-0 flex items-center justify-center text-gray-400 z-10">
@@ -897,7 +973,13 @@ export default function Canvas() {
           </div>
         )}
         {layaReady && currentPage && currentPage.elements.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 2 }}>
+          <div className="absolute flex items-center justify-center pointer-events-none" style={{
+            left: canvasFrame.x,
+            top: canvasFrame.y,
+            width: canvasFrame.width,
+            height: canvasFrame.height,
+            zIndex: 2,
+          }}>
             <div className="text-center text-slate-400/40">
               <div className="text-lg mb-2">{t('addComponentsHint')}</div>
               <div className="text-xs space-y-1">
@@ -908,25 +990,34 @@ export default function Canvas() {
           </div>
         )}
         {showGrid && (
-          <div className="absolute pointer-events-none" style={{
-            left: world.panX, top: world.panY,
-            width: CANVAS_W * world.zoom, height: CANVAS_H * world.zoom,
-            backgroundImage: `
-              linear-gradient(rgba(59,130,246,0.06) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(59,130,246,0.06) 1px, transparent 1px),
-              linear-gradient(rgba(59,130,246,0.12) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(59,130,246,0.12) 1px, transparent 1px)
-            `,
-            backgroundSize: `${20 * world.zoom}px ${20 * world.zoom}px, ${20 * world.zoom}px ${20 * world.zoom}px, ${100 * world.zoom}px ${100 * world.zoom}px, ${100 * world.zoom}px ${100 * world.zoom}px`,
+          <div className="absolute pointer-events-none overflow-hidden" style={{
+            left: canvasFrame.x,
+            top: canvasFrame.y,
+            width: canvasFrame.width,
+            height: canvasFrame.height,
             zIndex: 2,
-          }} />
+          }}>
+            <div className="absolute" style={{
+              left: world.panX - canvasFrame.x,
+              top: world.panY - canvasFrame.y,
+              width: CANVAS_W * world.zoom,
+              height: CANVAS_H * world.zoom,
+              backgroundImage: `
+                linear-gradient(rgba(59,130,246,0.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,0.06) 1px, transparent 1px),
+                linear-gradient(rgba(59,130,246,0.12) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,0.12) 1px, transparent 1px)
+              `,
+              backgroundSize: `${20 * world.zoom}px ${20 * world.zoom}px, ${20 * world.zoom}px ${20 * world.zoom}px, ${100 * world.zoom}px ${100 * world.zoom}px, ${100 * world.zoom}px ${100 * world.zoom}px`,
+            }} />
+          </div>
         )}
         {/* 标尺 */}
         {showRuler && (
           <>
-            <div className="absolute pointer-events-none bg-slate-800" style={{ left: world.panX - RULER_PX, top: world.panY - RULER_PX, width: RULER_PX, height: RULER_PX, zIndex: 10 }} />
-            <CanvasRuler orientation="horizontal" length={CANVAS_W} zoom={world.zoom} offsetX={world.panX} offsetY={world.panY} rulerWidth={RULER_PX} />
-            <CanvasRuler orientation="vertical" length={CANVAS_H} zoom={world.zoom} offsetX={world.panX} offsetY={world.panY} rulerWidth={RULER_PX} />
+            <div className="absolute pointer-events-none bg-slate-800" style={{ left: canvasFrame.x - RULER_PX, top: canvasFrame.y - RULER_PX, width: RULER_PX, height: RULER_PX, zIndex: 10 }} />
+            <CanvasRuler orientation="horizontal" length={CANVAS_W} zoom={world.zoom} offsetX={canvasFrame.x} offsetY={canvasFrame.y} viewportLength={canvasFrame.width} contentOffset={world.panX - canvasFrame.x} rulerWidth={RULER_PX} />
+            <CanvasRuler orientation="vertical" length={CANVAS_H} zoom={world.zoom} offsetX={canvasFrame.x} offsetY={canvasFrame.y} viewportLength={canvasFrame.height} contentOffset={world.panY - canvasFrame.y} rulerWidth={RULER_PX} />
           </>
         )}
       </div>

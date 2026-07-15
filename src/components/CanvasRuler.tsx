@@ -7,9 +7,13 @@ interface RulerProps {
   length: number;
   /** Current zoom factor */
   zoom: number;
-  /** Position of the canvas edge in viewport pixels */
+  /** 固定画布窗口在工作区中的位置 */
   offsetX: number;
   offsetY: number;
+  /** 固定画布窗口在当前方向上的长度 */
+  viewportLength: number;
+  /** 镜头内容相对固定窗口起点的偏移 */
+  contentOffset: number;
   /** Ruler strip width in viewport pixels (fixed, not scaled) */
   rulerWidth: number;
 }
@@ -25,6 +29,8 @@ export default function CanvasRuler({
   zoom,
   offsetX,
   offsetY,
+  viewportLength,
+  contentOffset,
   rulerWidth,
 }: RulerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -36,9 +42,11 @@ export default function CanvasRuler({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
+    const visibleStart = Math.max(0, Math.floor((-contentOffset / zoom) / TICK_FINE) * TICK_FINE);
+    const visibleEnd = Math.min(length, Math.ceil(((viewportLength - contentOffset) / zoom) / TICK_FINE) * TICK_FINE);
 
     if (orientation === 'horizontal') {
-      const w = length * zoom;
+      const w = viewportLength;
       const h = rulerWidth;
       el.width = w * dpr;
       el.height = h * dpr;
@@ -64,10 +72,8 @@ export default function CanvasRuler({
       ctx.font = '9px sans-serif';
       ctx.textBaseline = 'bottom';
 
-      const maxPx = length * zoom;
-      for (let logical = 0; logical <= length; logical += TICK_FINE) {
-        const px = logical * zoom;
-        if (px > maxPx) break;
+      for (let logical = visibleStart; logical <= visibleEnd; logical += TICK_FINE) {
+        const px = contentOffset + logical * zoom;
 
         let tickH: number;
         let lineW: number;
@@ -93,7 +99,7 @@ export default function CanvasRuler({
     } else {
       // Vertical
       const w = rulerWidth;
-      const h = length * zoom;
+      const h = viewportLength;
       el.width = w * dpr;
       el.height = h * dpr;
       el.style.width = `${w}px`;
@@ -118,10 +124,8 @@ export default function CanvasRuler({
       ctx.font = '9px sans-serif';
       ctx.textBaseline = 'top';
 
-      const maxPx = length * zoom;
-      for (let logical = 0; logical <= length; logical += TICK_FINE) {
-        const px = logical * zoom;
-        if (px > maxPx) break;
+      for (let logical = visibleStart; logical <= visibleEnd; logical += TICK_FINE) {
+        const px = contentOffset + logical * zoom;
 
         let tickW: number;
         let lineW: number;
@@ -150,7 +154,7 @@ export default function CanvasRuler({
         }
       }
     }
-  }, [orientation, length, zoom, rulerWidth]);
+  }, [orientation, length, zoom, viewportLength, contentOffset, rulerWidth]);
 
   useEffect(() => { draw(); }, [draw]);
 

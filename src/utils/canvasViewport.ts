@@ -6,6 +6,14 @@ export type CanvasViewport = {
 
 export type ViewportPoint = { x: number; y: number };
 
+export type CanvasFrame = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fitZoom: number;
+};
+
 export const MIN_CANVAS_ZOOM = 0.1;
 export const MAX_CANVAS_ZOOM = 2;
 export const CANVAS_ZOOM_BUTTON_STEP = 0.05;
@@ -80,12 +88,44 @@ export function fitCanvasViewport(
   canvasHeight: number,
   padding = 48,
 ): CanvasViewport {
+  const frame = fitCanvasFrame(viewportWidth, viewportHeight, canvasWidth, canvasHeight, padding);
+  return { zoom: frame.fitZoom, panX: frame.x, panY: frame.y };
+}
+
+export function fitCanvasFrame(
+  viewportWidth: number,
+  viewportHeight: number,
+  canvasWidth: number,
+  canvasHeight: number,
+  padding = 48,
+): CanvasFrame {
   const availableWidth = Math.max(1, viewportWidth - padding * 2);
   const availableHeight = Math.max(1, viewportHeight - padding * 2);
   const zoom = clampCanvasZoom(Math.min(1, availableWidth / canvasWidth, availableHeight / canvasHeight));
   return {
-    zoom,
-    panX: (viewportWidth - canvasWidth * zoom) / 2,
-    panY: (viewportHeight - canvasHeight * zoom) / 2,
+    fitZoom: zoom,
+    width: canvasWidth * zoom,
+    height: canvasHeight * zoom,
+    x: (viewportWidth - canvasWidth * zoom) / 2,
+    y: (viewportHeight - canvasHeight * zoom) / 2,
+  };
+}
+
+export function constrainViewportToFrame(
+  viewport: CanvasViewport,
+  frame: CanvasFrame,
+  canvasWidth: number,
+  canvasHeight: number,
+): CanvasViewport {
+  const contentWidth = canvasWidth * viewport.zoom;
+  const contentHeight = canvasHeight * viewport.zoom;
+  const constrainAxis = (pan: number, frameStart: number, frameLength: number, contentLength: number) => {
+    if (contentLength <= frameLength) return frameStart + (frameLength - contentLength) / 2;
+    return Math.min(frameStart, Math.max(frameStart + frameLength - contentLength, pan));
+  };
+  return {
+    ...viewport,
+    panX: constrainAxis(viewport.panX, frame.x, frame.width, contentWidth),
+    panY: constrainAxis(viewport.panY, frame.y, frame.height, contentHeight),
   };
 }
