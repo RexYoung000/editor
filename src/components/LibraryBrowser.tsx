@@ -469,7 +469,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-slate-700">
+        <div className="flex shrink-0 items-center justify-between px-6 py-3 border-b border-slate-700">
           <div className="text-lg font-semibold">资源库</div>
           <button
             type="button"
@@ -524,9 +524,11 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
           </select>
         </div>
 
+        {/* 筛选、目录与资源共用滚动区，避免展开筛选后持续遮挡资源。 */}
+        <div className="min-h-0 flex-1 overflow-auto">
         {/* 用途快捷检索 */}
         {availableQuickTags.length > 0 && (
-          <div className="shrink-0 border-b border-slate-700 px-6 py-2">
+          <div className="border-b border-slate-700 px-6 py-2">
             <div className="flex min-h-7 items-start gap-2">
               <span className="flex h-7 shrink-0 items-center text-xs text-slate-500">快捷检索</span>
               {!showMoreTags && (
@@ -576,7 +578,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
 
         {/* 搜索期间保留目录入口，允许返回原目录或直接切换分类。 */}
         {searchActive && (
-          <div className="flex shrink-0 items-center gap-2 border-b border-slate-700 bg-slate-900/70 px-6 py-2">
+          <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-900/70 px-6 py-2">
             <span className="shrink-0 text-xs text-slate-500">目录浏览</span>
             <button
               type="button"
@@ -646,8 +648,8 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
           </div>
         )}
 
-        {/* 内容区域（滚动） */}
-        <div className="flex-1 overflow-auto px-6 py-4">
+        {/* 资源内容 */}
+        <div className="px-6 py-4">
           {searchActive && (searchLoading || searchPending) && (
             <div className="flex h-full items-center justify-center text-slate-400">
               <LoaderCircle className="animate-spin" size={22} />
@@ -685,9 +687,10 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
             />
           )}
         </div>
+        </div>
 
         {/* 底部 */}
-        <div className="flex items-center justify-between px-6 py-3 border-t border-slate-700 text-sm">
+        <div className="flex shrink-0 items-center justify-between px-6 py-3 border-t border-slate-700 text-sm">
           <div className="text-slate-400">
             {selected
               ? `已选: ${selected.name}`
