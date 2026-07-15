@@ -34,6 +34,13 @@ export type { Element, SubPage, Stage, Course };
 // Backwards alias: many call sites still import `Page`
 export type { SubPage as Page } from '../types';
 
+export interface ElementPasteResult {
+  allIds: string[];
+  selectedIds: string[];
+  idMap: Record<string, string>;
+  elements: Element[];
+}
+
 async function loadImageSize(skin: string): Promise<{ w: number; h: number } | null> {
   return new Promise((resolve) => {
     if (!skin) { resolve(null); return; }
@@ -117,8 +124,11 @@ interface EditorState {
   selectAll: () => void;
   clearSelection: () => void;
   copyElements: () => void;
-  pasteElements: () => void;
-  duplicateElements: () => void;
+  pasteElements: (saveToHistory?: boolean) => ElementPasteResult | null;
+  duplicateElements: () => ElementPasteResult | null;
+  duplicateElementsForDrag: (sourceIds: string[]) => ElementPasteResult | null;
+  updateElementsWithoutHistory: (updates: Array<Pick<Element, 'id' | 'x' | 'y' | 'width' | 'height' | 'rotation'>>) => void;
+  removeElementsWithoutHistory: (ids: string[]) => void;
   alignElements: (direction: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => void;
   groupElements: () => void;
   ungroupElements: () => void;
@@ -1467,15 +1477,24 @@ export const useEditorStore = create<EditorState>()(
         ));
       }),
 
-    pasteElements: () =>
+    pasteElements: (saveToHistory = true) => {
+      let result: ElementPasteResult | null = null;
       set((state) => {
         if (state.clipboard.length === 0) return;
         const page = findCurrentSubPage(state);
         if (!page) return;
         const idMap = new Map<string, string>();
+        const groupIdMap = new Map<string, string>();
+        const actionGroupIdMap = new Map<string, string>();
+        const branchIdMap = new Map<string, string>();
         const now = Date.now();
         state.clipboard.forEach((el, i) => {
           idMap.set(el.id, `el-${now + i}-${Math.random().toString(36).slice(2, 6)}`);
+          if (el.groupId && !groupIdMap.has(el.groupId)) groupIdMap.set(el.groupId, genId('group'));
+          for (const action of el.actions ?? []) {
+            if (action.groupId && !actionGroupIdMap.has(action.groupId)) actionGroupIdMap.set(action.groupId, genId('action-group'));
+            if (action.branchId && !branchIdMap.has(action.branchId)) branchIdMap.set(action.branchId, genId('branch'));
+          }
         });
         const newIds: string[] = [];
 
@@ -1486,11 +1505,15 @@ export const useEditorStore = create<EditorState>()(
         state.clipboard.forEach((el) => {
           const newEl = JSON.parse(JSON.stringify(el));
           newEl.id = idMap.get(el.id)!;
+          if (newEl.groupId && groupIdMap.has(newEl.groupId)) newEl.groupId = groupIdMap.get(newEl.groupId);
           // 先重映射 parentId 和 actions.targetId，让后续 name 生成能扫到正确父节点下的兄弟
           if (newEl.parentId && idMap.has(newEl.parentId)) newEl.parentId = idMap.get(newEl.parentId);
           if (newEl.actions) {
-            newEl.actions.forEach((a: { targetId?: string }) => {
+            newEl.actions.forEach((a: { id: string; targetId?: string; groupId?: string; branchId?: string }) => {
+              a.id = genId('action');
               if (a.targetId && idMap.has(a.targetId)) a.targetId = idMap.get(a.targetId);
+              if (a.groupId && actionGroupIdMap.has(a.groupId)) a.groupId = actionGroupIdMap.get(a.groupId);
+              if (a.branchId && branchIdMap.has(a.branchId)) a.branchId = branchIdMap.get(a.branchId);
             });
           }
 
@@ -1537,14 +1560,71 @@ export const useEditorStore = create<EditorState>()(
           page.elements.push(newEl);
           newIds.push(newEl.id);
         });
-        state.selectedElementIds = newIds;
-        get().saveHistory();
-      }),
+        const newIdSet = new Set(newIds);
+        const selectedIds = newIds.filter((id) => {
+          let element = page.elements.find((item) => item.id === id);
+          const visited = new Set<string>();
+          while (element?.parentId && !visited.has(element.id)) {
+            visited.add(element.id);
+            if (newIdSet.has(element.parentId)) return false;
+            element = page.elements.find((item) => item.id === element?.parentId);
+          }
+          return true;
+        });
+        state.selectedElementIds = selectedIds;
+        result = {
+          allIds: newIds,
+          selectedIds,
+          idMap: Object.fromEntries(idMap),
+          elements: JSON.parse(JSON.stringify(page.elements)),
+        };
+      });
+      if (result && saveToHistory) get().saveHistory();
+      return result;
+    },
 
     duplicateElements: () => {
       get().copyElements();
-      get().pasteElements();
+      return get().pasteElements();
     },
+
+    duplicateElementsForDrag: (sourceIds) => {
+      const previousClipboard = JSON.parse(JSON.stringify(get().clipboard));
+      const previousSelection = [...get().selectedElementIds];
+      set((state) => { state.selectedElementIds = sourceIds; });
+      get().copyElements();
+      const result = get().pasteElements(false);
+      set((state) => {
+        state.clipboard = previousClipboard;
+        if (!result) state.selectedElementIds = previousSelection;
+      });
+      return result;
+    },
+
+    updateElementsWithoutHistory: (updates) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const updateMap = new Map(updates.map((update) => [update.id, update]));
+        for (const element of page.elements) {
+          const update = updateMap.get(element.id);
+          if (!update) continue;
+          element.x = update.x;
+          element.y = update.y;
+          element.width = update.width;
+          element.height = update.height;
+          element.rotation = update.rotation;
+        }
+      }),
+
+    removeElementsWithoutHistory: (ids) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const removing = new Set(ids);
+        page.elements = page.elements.filter((element) => !removing.has(element.id));
+        state.selectedElementIds = state.selectedElementIds.filter((id) => !removing.has(id));
+      }),
 
     alignElements: (direction) =>
       set((state) => {

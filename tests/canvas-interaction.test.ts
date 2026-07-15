@@ -14,7 +14,12 @@ import {
 } from '../src/utils/canvasSelection';
 import {
   createMoveTransaction,
+  createResizeTransaction,
+  createRotateTransaction,
+  getSelectionFrame,
   previewMoveTransaction,
+  previewResizeTransaction,
+  previewRotateTransaction,
   transactionHasChanges,
 } from '../src/utils/canvasTransformTransaction';
 
@@ -95,4 +100,84 @@ test('跨父容器移动保持相同画布位移并只修改变换根', () => {
   assert.ok(Math.abs((secondResult?.y ?? 0) - 20) < 0.000001);
   assert.equal(transactionHasChanges(preview), true);
   assert.equal(transactionHasChanges(transaction), false);
+});
+
+test('单选变换框沿元素真实旋转方向显示', () => {
+  const rotated = element('rotated', { x: 100, y: 100, width: 100, height: 40, rotation: 90 });
+  const frame = getSelectionFrame([rotated], ['rotated']);
+  assert.ok(frame);
+  assert.ok(Math.abs(frame.origin.x - 100) < 0.000001);
+  assert.ok(Math.abs(frame.origin.y - 100) < 0.000001);
+  assert.ok(Math.abs(frame.width - 100) < 0.000001);
+  assert.ok(Math.abs(frame.height - 40) < 0.000001);
+  assert.ok(Math.abs(frame.rotation - 90) < 0.000001);
+});
+
+test('多选支持自由缩放和 Shift 等比缩放', () => {
+  const first = element('first');
+  const second = element('second', { x: 200, y: 100 });
+  const elements = [first, second];
+  const transaction = createResizeTransaction(elements, ['first', 'second'], 'se');
+  assert.ok(transaction);
+
+  const free = previewResizeTransaction(transaction, elements, { x: 600, y: 300 }, false, (value) => value);
+  const freeSecond = free.preview.find((item) => item.id === 'second');
+  assert.deepEqual(
+    { x: freeSecond?.x, y: freeSecond?.y, width: freeSecond?.width, height: freeSecond?.height },
+    { x: 400, y: 150, width: 200, height: 150 },
+  );
+
+  const proportional = previewResizeTransaction(transaction, elements, { x: 600, y: 300 }, true, (value) => value);
+  const proportionalSecond = proportional.preview.find((item) => item.id === 'second');
+  assert.deepEqual(
+    { x: proportionalSecond?.x, y: proportionalSecond?.y, width: proportionalSecond?.width, height: proportionalSecond?.height },
+    { x: 400, y: 200, width: 200, height: 200 },
+  );
+});
+
+test('跨旋转父容器缩放仍按画布绝对坐标更新', () => {
+  const leftParent = element('left-parent', { x: 100, y: 100, width: 300, height: 300 });
+  const rotatedParent = element('rotated-parent', { x: 500, y: 100, width: 300, height: 300, rotation: 90 });
+  const first = element('first', { x: 20, y: 30, parentId: 'left-parent' });
+  const second = element('second', { x: 40, y: 50, parentId: 'rotated-parent' });
+  const elements = [leftParent, rotatedParent, first, second];
+  const transaction = createResizeTransaction(elements, ['first', 'second'], 'se');
+  assert.ok(transaction);
+  const pointer = {
+    x: transaction.frame.origin.x + transaction.frame.width * 2,
+    y: transaction.frame.origin.y + transaction.frame.height * 2,
+  };
+  const preview = previewResizeTransaction(transaction, elements, pointer, false, (value) => value);
+  for (const result of preview.preview) {
+    const start = transaction.roots.find((item) => item.id === result.id)!;
+    const expectedX = transaction.frame.origin.x + (start.worldPivot.x - transaction.frame.origin.x) * 2;
+    const expectedY = transaction.frame.origin.y + (start.worldPivot.y - transaction.frame.origin.y) * 2;
+    assert.ok(Math.abs(result.worldPivot.x - expectedX) < 0.000001);
+    assert.ok(Math.abs(result.worldPivot.y - expectedY) < 0.000001);
+  }
+});
+
+test('多选整体旋转围绕选择中心并支持角度吸附', () => {
+  const first = element('first');
+  const second = element('second', { x: 200 });
+  const elements = [first, second];
+  const transaction = createRotateTransaction(elements, ['first', 'second'], { x: 150, y: -50 });
+  assert.ok(transaction);
+
+  const rightAngle = previewRotateTransaction(transaction, elements, { x: 250, y: 50 }, false);
+  const firstResult = rightAngle.preview.find((item) => item.id === 'first');
+  const secondResult = rightAngle.preview.find((item) => item.id === 'second');
+  assert.ok(Math.abs((firstResult?.x ?? 0) - 200) < 0.000001);
+  assert.ok(Math.abs((firstResult?.y ?? 0) + 100) < 0.000001);
+  assert.ok(Math.abs((secondResult?.x ?? 0) - 200) < 0.000001);
+  assert.ok(Math.abs((secondResult?.y ?? 0) - 100) < 0.000001);
+  assert.equal(firstResult?.rotation, 90);
+  assert.equal(secondResult?.rotation, 90);
+
+  const radians = -52 * Math.PI / 180;
+  const snapped = previewRotateTransaction(transaction, elements, {
+    x: 150 + Math.cos(radians) * 100,
+    y: 50 + Math.sin(radians) * 100,
+  }, true);
+  assert.equal(snapped.angleDelta, 45);
 });

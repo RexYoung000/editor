@@ -6,12 +6,12 @@ import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
 import { resolveElementFont } from '../utils/fontLoader';
 import {
   getElementWorldBounds,
-  worldDeltaToElementParent,
   type CanvasPoint,
 } from '../utils/canvasGeometry';
 import {
   findTopElementAtPoint,
   getContainerIds,
+  getTransformRootIds,
   isElementHidden,
   normalizeSelection,
   resolveMarqueeSelection,
@@ -20,14 +20,25 @@ import {
 } from '../utils/canvasSelection';
 import {
   createMoveTransaction,
+  createResizeTransaction,
+  createRotateTransaction,
+  getSelectionFrame,
   previewMoveTransaction,
+  previewResizeTransaction,
+  previewRotateTransaction,
   transactionHasChanges,
+  type CanvasTransformTransaction,
   type MoveTransaction,
+  type ResizeTransaction,
+  type RotateTransaction,
+  type SelectionFrame,
+  type TransformHandle,
+  type TransformSnapshot,
 } from '../utils/canvasTransformTransaction';
 
 const HANDLE_SIZE = 10;
 const POINTER_START_THRESHOLD = 3;
-const HANDLE_DEFS = [
+const HANDLE_DEFS: Array<{ id: TransformHandle; rx: number; ry: number; cursor: string }> = [
   { id: 'nw', rx: 0, ry: 0, cursor: 'nw-resize' },
   { id: 'n', rx: 0.5, ry: 0, cursor: 'n-resize' },
   { id: 'ne', rx: 1, ry: 0, cursor: 'ne-resize' },
@@ -37,6 +48,7 @@ const HANDLE_DEFS = [
   { id: 'sw', rx: 0, ry: 1, cursor: 'sw-resize' },
   { id: 'w', rx: 0, ry: 0.5, cursor: 'w-resize' },
 ];
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 interface WorldState {
   zoom: number;
@@ -63,6 +75,10 @@ interface MovePointer extends PointerBase {
   startWorld: CanvasPoint;
   transaction: MoveTransaction;
   clickSelection: string[] | null;
+  duplicateOnDrag: boolean;
+  duplicateIds: string[] | null;
+  originalSelection: string[];
+  transactionElements: Element[] | null;
 }
 
 interface MarqueePointer extends PointerBase {
@@ -74,20 +90,19 @@ interface MarqueePointer extends PointerBase {
 
 interface ResizePointer extends PointerBase {
   kind: 'resize';
-  startWorld: CanvasPoint;
-  elementId: string;
-  corner: string;
-  startX: number;
-  startY: number;
-  startWidth: number;
-  startHeight: number;
-  previewX: number;
-  previewY: number;
-  previewWidth: number;
-  previewHeight: number;
+  transaction: ResizeTransaction;
 }
 
-type PointerInteraction = MovePointer | MarqueePointer | ResizePointer;
+interface RotatePointer extends PointerBase {
+  kind: 'rotate';
+  transaction: RotateTransaction;
+}
+
+type PointerInteraction = MovePointer | MarqueePointer | ResizePointer | RotatePointer;
+
+function getTransformTransaction(interaction: PointerInteraction): CanvasTransformTransaction | null {
+  return interaction.kind === 'marquee' ? null : interaction.transaction;
+}
 
 interface CanvasOverlayProps {
   layaHostRef: React.RefObject<HTMLDivElement | null>;
@@ -111,7 +126,9 @@ export default function CanvasOverlay({
   const interactionRef = useRef<PointerInteraction | null>(null);
   const [localMarquee, setLocalMarqueeState] = useState<MarqueeState | null>(null);
   const localMarqueeRef = useRef<MarqueeState | null>(null);
-  const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number; dw?: number; dh?: number } | null>(null);
+  const [previewTransforms, setPreviewTransforms] = useState<TransformSnapshot[] | null>(null);
+  const [previewFrame, setPreviewFrame] = useState<SelectionFrame | null>(null);
+  const [previewAngle, setPreviewAngle] = useState<number | null>(null);
   const worldRef = useRef(world);
   const currentPageRef = useRef(currentPage);
   const snapRef = useRef(snap);
@@ -163,21 +180,16 @@ export default function CanvasOverlay({
   }, [layaHostRef]);
 
   const restorePreview = useCallback((interaction: PointerInteraction) => {
-    if (interaction.kind === 'move') {
-      for (const start of interaction.transaction.roots) {
-        const object = getObject(start.id);
-        if (object) {
-          object.x = start.x;
-          object.y = start.y;
-        }
-      }
-    } else if (interaction.kind === 'resize') {
-      const object = getObject(interaction.elementId);
+    const transaction = getTransformTransaction(interaction);
+    if (!transaction) return;
+    for (const start of transaction.roots) {
+      const object = getObject(start.id);
       if (object) {
-        object.x = interaction.startX;
-        object.y = interaction.startY;
-        object.width = interaction.startWidth;
-        object.height = interaction.startHeight;
+        object.x = start.x;
+        object.y = start.y;
+        object.width = start.width;
+        object.height = start.height;
+        object.rotation = start.rotation;
       }
     }
   }, []);
@@ -196,50 +208,49 @@ export default function CanvasOverlay({
     const interaction = interactionRef.current;
     if (!interaction) return;
     interactionRef.current = null;
-    setDragOffset(null);
+    setPreviewTransforms(null);
+    setPreviewFrame(null);
+    setPreviewAngle(null);
 
     const page = currentPageRef.current;
     const store = useEditorStore.getState();
     if (!commit) {
       restorePreview(interaction);
+      if (interaction.kind === 'move' && interaction.duplicateIds) {
+        store.removeElementsWithoutHistory(interaction.duplicateIds);
+        store.selectElements(interaction.originalSelection);
+      }
       setLocalMarquee(null);
       return;
     }
 
-    if (interaction.kind === 'move') {
+    if (interaction.kind !== 'marquee') {
       if (!interaction.started) {
-        if (interaction.clickSelection) store.selectElements(interaction.clickSelection);
+        if (interaction.kind === 'move' && interaction.clickSelection) {
+          store.selectElements(interaction.clickSelection);
+        }
         return;
       }
       if (!transactionHasChanges(interaction.transaction)) {
         restorePreview(interaction);
+        if (interaction.kind === 'move' && interaction.duplicateIds) {
+          store.removeElementsWithoutHistory(interaction.duplicateIds);
+          store.selectElements(interaction.originalSelection);
+        }
         return;
       }
       for (const preview of interaction.transaction.preview) {
-        store.updateElement(preview.id, { x: preview.x, y: preview.y });
-        const element = page?.elements.find((item) => item.id === preview.id);
+        store.updateElement(preview.id, {
+          x: preview.x,
+          y: preview.y,
+          width: preview.width,
+          height: preview.height,
+          rotation: preview.rotation,
+        });
+        const element = page?.elements.find((item) => item.id === preview.id)
+          ?? (interaction.kind === 'move' ? interaction.transactionElements?.find((item) => item.id === preview.id) : undefined);
         if (element) commitPageTurnPosition(element, preview.x, preview.y);
       }
-      store.saveHistory();
-      return;
-    }
-
-    if (interaction.kind === 'resize') {
-      if (!interaction.started) return;
-      const changed = Math.abs(interaction.previewX - interaction.startX) > 0.000001
-        || Math.abs(interaction.previewY - interaction.startY) > 0.000001
-        || Math.abs(interaction.previewWidth - interaction.startWidth) > 0.000001
-        || Math.abs(interaction.previewHeight - interaction.startHeight) > 0.000001;
-      if (!changed) {
-        restorePreview(interaction);
-        return;
-      }
-      store.updateElement(interaction.elementId, {
-        x: interaction.previewX,
-        y: interaction.previewY,
-        width: interaction.previewWidth,
-        height: interaction.previewHeight,
-      });
       store.saveHistory();
       return;
     }
@@ -285,9 +296,12 @@ export default function CanvasOverlay({
       && !currentIds.includes(hit.id),
     );
     const toggle = event.metaKey || event.ctrlKey;
+    const duplicateOnDrag = IS_MAC ? event.altKey : event.ctrlKey;
     if (hit && !hitIsUnselectedContainerInterior) {
       const hitWasSelected = currentIds.includes(hit.id);
-      const pointerSelection = hitWasSelected && !toggle
+      const pointerSelection = duplicateOnDrag && hitWasSelected
+        ? normalizeSelection(page.elements, currentIds)
+        : hitWasSelected && !toggle
         ? normalizeSelection(page.elements, currentIds)
         : resolvePointerSelection(page.elements, currentIds, hit.id, toggle);
       store.selectElements(pointerSelection);
@@ -304,9 +318,15 @@ export default function CanvasOverlay({
         startWorld: point,
         started: false,
         transaction,
-        clickSelection: hitWasSelected && !toggle
-          ? resolvePointerSelection(page.elements, currentIds, hit.id, false)
-          : null,
+        clickSelection: duplicateOnDrag && toggle
+          ? resolvePointerSelection(page.elements, currentIds, hit.id, true)
+          : hitWasSelected && !toggle
+            ? resolvePointerSelection(page.elements, currentIds, hit.id, false)
+            : null,
+        duplicateOnDrag,
+        duplicateIds: null,
+        originalSelection: currentIds,
+        transactionElements: null,
       };
       return;
     }
@@ -327,11 +347,14 @@ export default function CanvasOverlay({
   const startResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const corner = event.currentTarget.dataset.resizeCorner;
-    const elementId = event.currentTarget.dataset.elementId;
-    const element = currentPageRef.current?.elements.find((item) => item.id === elementId);
-    if (!corner || !element) return;
-    const point = pointerToWorld(event.clientX, event.clientY);
-    if (!point) return;
+    const page = currentPageRef.current;
+    if (!corner || !page) return;
+    const transaction = createResizeTransaction(
+      page.elements,
+      useEditorStore.getState().selectedElementIds,
+      corner as TransformHandle,
+    );
+    if (!transaction) return;
     event.stopPropagation();
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -340,18 +363,32 @@ export default function CanvasOverlay({
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
-      startWorld: point,
       started: false,
-      elementId: element.id,
-      corner,
-      startX: element.x,
-      startY: element.y,
-      startWidth: element.width,
-      startHeight: element.height,
-      previewX: element.x,
-      previewY: element.y,
-      previewWidth: element.width,
-      previewHeight: element.height,
+      transaction,
+    };
+  }, []);
+
+  const startRotate = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const page = currentPageRef.current;
+    const point = pointerToWorld(event.clientX, event.clientY);
+    if (!page || !point) return;
+    const transaction = createRotateTransaction(
+      page.elements,
+      useEditorStore.getState().selectedElementIds,
+      point,
+    );
+    if (!transaction) return;
+    event.stopPropagation();
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    interactionRef.current = {
+      kind: 'rotate',
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      started: false,
+      transaction,
     };
   }, [pointerToWorld]);
 
@@ -363,15 +400,34 @@ export default function CanvasOverlay({
       event.clientY - interaction.startClientY,
     );
     if (!interaction.started && distance < POINTER_START_THRESHOLD) return;
+    const justStarted = !interaction.started;
     interaction.started = true;
     const point = pointerToWorld(event.clientX, event.clientY);
     const page = currentPageRef.current;
     if (!point || !page) return;
 
     if (interaction.kind === 'move') {
+      if (justStarted && interaction.duplicateOnDrag && !interaction.duplicateIds) {
+        const duplicate = useEditorStore.getState().duplicateElementsForDrag(
+          interaction.transaction.roots.map((root) => root.id),
+        );
+        const mappedPrimaryId = duplicate?.idMap[interaction.transaction.primaryId];
+        const duplicateTransaction = duplicate && mappedPrimaryId
+          ? createMoveTransaction(duplicate.elements, duplicate.selectedIds, mappedPrimaryId)
+          : null;
+        if (!duplicate || !duplicateTransaction) {
+          if (duplicate) useEditorStore.getState().removeElementsWithoutHistory(duplicate.allIds);
+          interaction.duplicateOnDrag = false;
+        } else {
+          interaction.transaction = duplicateTransaction;
+          interaction.duplicateIds = duplicate.allIds;
+          interaction.transactionElements = duplicate.elements;
+        }
+      }
+      const transactionElements = interaction.transactionElements ?? page.elements;
       interaction.transaction = previewMoveTransaction(
         interaction.transaction,
-        page.elements,
+        transactionElements,
         { x: point.x - interaction.startWorld.x, y: point.y - interaction.startWorld.y },
         snapRef.current,
         event.shiftKey,
@@ -381,12 +437,16 @@ export default function CanvasOverlay({
         if (object) {
           object.x = preview.x;
           object.y = preview.y;
+          object.width = preview.width;
+          object.height = preview.height;
+          object.rotation = preview.rotation;
         }
       }
-      setDragOffset({
-        dx: interaction.transaction.worldDelta.x,
-        dy: interaction.transaction.worldDelta.y,
-      });
+      if (interaction.duplicateIds) {
+        useEditorStore.getState().updateElementsWithoutHistory(interaction.transaction.preview);
+      }
+      setPreviewTransforms(interaction.transaction.preview);
+      setPreviewFrame(interaction.transaction.previewFrame);
       return;
     }
 
@@ -400,43 +460,35 @@ export default function CanvasOverlay({
       return;
     }
 
-    const element = page.elements.find((item) => item.id === interaction.elementId);
-    if (!element) return;
-    const localDelta = worldDeltaToElementParent(element, page.elements, {
-      x: point.x - interaction.startWorld.x,
-      y: point.y - interaction.startWorld.y,
-    });
-    let x = interaction.startX;
-    let y = interaction.startY;
-    let width = interaction.startWidth;
-    let height = interaction.startHeight;
-    if (interaction.corner.includes('e')) width = Math.max(20, interaction.startWidth + localDelta.x);
-    if (interaction.corner.includes('w')) {
-      width = Math.max(20, interaction.startWidth - localDelta.x);
-      x = interaction.startX + interaction.startWidth - width;
+    if (interaction.kind === 'resize') {
+      interaction.transaction = previewResizeTransaction(
+        interaction.transaction,
+        page.elements,
+        point,
+        event.shiftKey,
+        snapRef.current,
+      );
+    } else {
+      interaction.transaction = previewRotateTransaction(
+        interaction.transaction,
+        page.elements,
+        point,
+        event.shiftKey,
+      );
     }
-    if (interaction.corner.includes('s')) height = Math.max(20, interaction.startHeight + localDelta.y);
-    if (interaction.corner.includes('n')) {
-      height = Math.max(20, interaction.startHeight - localDelta.y);
-      y = interaction.startY + interaction.startHeight - height;
+    for (const preview of interaction.transaction.preview) {
+      const object = getObject(preview.id);
+      if (object) {
+        object.x = preview.x;
+        object.y = preview.y;
+        object.width = preview.width;
+        object.height = preview.height;
+        object.rotation = preview.rotation;
+      }
     }
-    interaction.previewX = snapRef.current(x);
-    interaction.previewY = snapRef.current(y);
-    interaction.previewWidth = snapRef.current(width);
-    interaction.previewHeight = snapRef.current(height);
-    const object = getObject(interaction.elementId);
-    if (object) {
-      object.x = interaction.previewX;
-      object.y = interaction.previewY;
-      object.width = interaction.previewWidth;
-      object.height = interaction.previewHeight;
-    }
-    setDragOffset({
-      dx: interaction.previewX - interaction.startX,
-      dy: interaction.previewY - interaction.startY,
-      dw: interaction.previewWidth - interaction.startWidth,
-      dh: interaction.previewHeight - interaction.startHeight,
-    });
+    setPreviewTransforms(interaction.transaction.preview);
+    setPreviewFrame(interaction.transaction.previewFrame);
+    setPreviewAngle(interaction.kind === 'rotate' ? interaction.transaction.angleDelta : null);
   }, [pointerToWorld, setLocalMarquee]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -473,18 +525,32 @@ export default function CanvasOverlay({
   }, [pointerToWorld, setEditingId]);
 
   const elements = currentPage?.elements ?? [];
+  const previewMap = new Map((previewTransforms ?? []).map((snapshot) => [snapshot.id, snapshot]));
+  const displayElements = elements.map((element) => {
+    const preview = previewMap.get(element.id);
+    return preview ? {
+      ...element,
+      x: preview.x,
+      y: preview.y,
+      width: preview.width,
+      height: preview.height,
+      rotation: preview.rotation,
+    } : element;
+  });
   const { zoom, panX, panY } = world;
   const selectedElement = selectedIds.length === 1
-    ? elements.find((element) => element.id === selectedIds[0])
+    ? displayElements.find((element) => element.id === selectedIds[0])
     : null;
   const multiElements = selectedIds.length > 1
-    ? elements.filter((element) => selectedIds.includes(element.id))
+    ? displayElements.filter((element) => selectedIds.includes(element.id))
     : [];
-  const elementMap = new Map(elements.map((element) => [element.id, element]));
-  const containerIds = getContainerIds(elements);
-  const containerElements = elements.filter((element) => (
+  const elementMap = new Map(displayElements.map((element) => [element.id, element]));
+  const containerIds = getContainerIds(displayElements);
+  const containerElements = displayElements.filter((element) => (
     containerIds.has(element.id) && !isElementHidden(element, elementMap)
   ));
+  const selectionFrame = previewFrame ?? getSelectionFrame(displayElements, selectedIds);
+  const canTransform = getTransformRootIds(displayElements, selectedIds).length > 0;
 
   const groupColors = new Map<string, string>();
   const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -508,7 +574,7 @@ export default function CanvasOverlay({
       onDoubleClick={handleDoubleClick}
     >
       {containerElements.map((element) => {
-        const bounds = getElementWorldBounds(element, elements);
+        const bounds = getElementWorldBounds(element, displayElements);
         const rect = worldRectToScreen(bounds.x, bounds.y, bounds.width, bounds.height, panX, panY, zoom);
         const selected = selectedIds.includes(element.id);
         const label = element.name || element.type;
@@ -558,36 +624,38 @@ export default function CanvasOverlay({
         );
       })}
 
-      {selectedElement && !(editingElement && editingElement.id === selectedElement.id) && (() => {
-        const bounds = getElementWorldBounds(selectedElement, elements);
-        const rect = worldRectToScreen(
-          bounds.x + (dragOffset?.dx ?? 0),
-          bounds.y + (dragOffset?.dy ?? 0),
-          bounds.width + (dragOffset?.dw ?? 0),
-          bounds.height + (dragOffset?.dh ?? 0),
+      {selectionFrame && !(editingElement && selectedElement?.id === editingElement.id) && (() => {
+        const origin = worldRectToScreen(
+          selectionFrame.origin.x,
+          selectionFrame.origin.y,
+          0,
+          0,
           panX,
           panY,
           zoom,
         );
-        const isLocked = selectedElement.locked;
+        const frameWidth = selectionFrame.width * zoom;
+        const frameHeight = selectionFrame.height * zoom;
         return (
           <div style={{
             position: 'absolute',
-            left: rect.left,
-            top: rect.top,
-            width: rect.width,
-            height: rect.height,
-            border: isLocked ? '1px solid #f59e0b' : '1px solid #3b82f6',
+            left: origin.left,
+            top: origin.top,
+            width: frameWidth,
+            height: frameHeight,
+            border: canTransform ? '1px solid #3b82f6' : '1px solid #f59e0b',
             boxSizing: 'border-box',
             pointerEvents: 'none',
+            transform: `rotate(${selectionFrame.rotation}deg)`,
+            transformOrigin: '0 0',
           }}>
-            {!isLocked && HANDLE_DEFS.map((definition) => (
+            {canTransform && HANDLE_DEFS.map((definition) => (
               <div
                 key={definition.id}
                 style={{
                   position: 'absolute',
-                  left: definition.rx * rect.width - HANDLE_SIZE / 2,
-                  top: definition.ry * rect.height - HANDLE_SIZE / 2,
+                  left: definition.rx * frameWidth - HANDLE_SIZE / 2,
+                  top: definition.ry * frameHeight - HANDLE_SIZE / 2,
                   width: HANDLE_SIZE,
                   height: HANDLE_SIZE,
                   background: '#fff',
@@ -597,24 +665,73 @@ export default function CanvasOverlay({
                   boxSizing: 'border-box',
                 }}
                 data-resize-corner={definition.id}
-                data-element-id={selectedElement.id}
                 onPointerDown={startResize}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
                 onPointerCancel={() => finishInteraction(false)}
               />
             ))}
+            {canTransform && (
+              <>
+                <div style={{
+                  position: 'absolute',
+                  left: frameWidth / 2,
+                  top: -28,
+                  width: 1,
+                  height: 28,
+                  background: '#3b82f6',
+                }} />
+                <div
+                  data-rotate-handle
+                  style={{
+                    position: 'absolute',
+                    left: frameWidth / 2 - 7,
+                    top: -35,
+                    width: 14,
+                    height: 14,
+                    border: '2px solid #3b82f6',
+                    borderRadius: '50%',
+                    background: '#fff',
+                    boxSizing: 'border-box',
+                    pointerEvents: 'auto',
+                    cursor: 'grab',
+                  }}
+                  onPointerDown={startRotate}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={() => finishInteraction(false)}
+                />
+                {previewAngle !== null && (
+                  <div style={{
+                    position: 'absolute',
+                    left: frameWidth / 2 + 12,
+                    top: -40,
+                    padding: '1px 4px',
+                    color: '#fff',
+                    background: 'rgba(30, 41, 59, 0.9)',
+                    fontSize: 11,
+                    lineHeight: '16px',
+                    whiteSpace: 'nowrap',
+                    transform: `rotate(${-selectionFrame.rotation}deg)`,
+                    transformOrigin: 'left center',
+                  }}>
+                    {Math.round(previewAngle)}°
+                  </div>
+                )}
+              </>
+            )}
           </div>
         );
       })()}
 
       {multiElements.map((element) => {
-        const bounds = getElementWorldBounds(element, elements);
-        const rect = worldRectToScreen(
-          bounds.x + (dragOffset?.dx ?? 0),
-          bounds.y + (dragOffset?.dy ?? 0),
-          bounds.width,
-          bounds.height,
+        const memberFrame = getSelectionFrame(displayElements, [element.id]);
+        if (!memberFrame) return null;
+        const origin = worldRectToScreen(
+          memberFrame.origin.x,
+          memberFrame.origin.y,
+          0,
+          0,
           panX,
           panY,
           zoom,
@@ -625,13 +742,15 @@ export default function CanvasOverlay({
         return (
           <div key={element.id} style={{
             position: 'absolute',
-            left: rect.left,
-            top: rect.top,
-            width: rect.width,
-            height: rect.height,
+            left: origin.left,
+            top: origin.top,
+            width: memberFrame.width * zoom,
+            height: memberFrame.height * zoom,
             border: `1.5px solid ${borderColor}`,
             boxSizing: 'border-box',
             pointerEvents: 'none',
+            transform: `rotate(${memberFrame.rotation}deg)`,
+            transformOrigin: '0 0',
           }} />
         );
       })}
