@@ -2,8 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CANVAS_ZOOM_BUTTON_STEP,
-  constrainViewportToFrame,
-  fitCanvasFrame,
+  constrainViewportToWorkspace,
   fitCanvasViewport,
   normalizeWheelDelta,
   panViewportByWheel,
@@ -46,28 +45,29 @@ test('普通滚轮平移，Shift 将垂直输入转为横向平移', () => {
 
 test('适应画布根据当前视口动态计算并居中', () => {
   const fitted = fitCanvasViewport(1200, 700, 1920, 1080);
-  assert.ok(fitted.zoom > 0.5 && fitted.zoom < 0.57);
+  assert.equal(fitted.zoom, 0.6);
   assert.ok(Math.abs(fitted.panX - (1200 - 1920 * fitted.zoom) / 2) < 0.000001);
   assert.ok(Math.abs(fitted.panY - (700 - 1080 * fitted.zoom) / 2) < 0.000001);
 });
 
-test('固定画布窗口约束镜头，不能把内容拖出有效范围', () => {
-  const frame = fitCanvasFrame(1200, 700, 1920, 1080);
-  const zoomed = constrainViewportToFrame(
-    { zoom: 0.8, panX: 9999, panY: -9999 },
-    frame,
+test('页面可大幅移出工作区，但每个方向至少保留 48px 可见范围', () => {
+  const towardBottomRight = constrainViewportToWorkspace(
+    { zoom: 0.8, panX: 9999, panY: 9999 },
+    1200,
+    700,
     1920,
     1080,
   );
-  assert.equal(zoomed.panX, frame.x);
-  assert.equal(zoomed.panY, frame.y + frame.height - 1080 * 0.8);
+  assert.equal(towardBottomRight.panX, 1200 - 48);
+  assert.equal(towardBottomRight.panY, 700 - 48);
 
-  const fitted = constrainViewportToFrame(
-    { zoom: frame.fitZoom, panX: -500, panY: 500 },
-    frame,
+  const towardTopLeft = constrainViewportToWorkspace(
+    { zoom: 0.8, panX: -9999, panY: -9999 },
+    1200,
+    700,
     1920,
     1080,
   );
-  assert.ok(Math.abs(fitted.panX - frame.x) < 0.000001);
-  assert.ok(Math.abs(fitted.panY - frame.y) < 0.000001);
+  assert.equal(towardTopLeft.panX + 1920 * 0.8, 48);
+  assert.equal(towardTopLeft.panY + 1080 * 0.8, 48);
 });

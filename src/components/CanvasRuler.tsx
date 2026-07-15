@@ -7,12 +7,12 @@ interface RulerProps {
   length: number;
   /** Current zoom factor */
   zoom: number;
-  /** 固定画布窗口在工作区中的位置 */
+  /** 固定标尺在工作区中的交点位置 */
   offsetX: number;
   offsetY: number;
-  /** 固定画布窗口在当前方向上的长度 */
+  /** 标尺在当前方向覆盖的工作区长度 */
   viewportLength: number;
-  /** 镜头内容相对固定窗口起点的偏移 */
+  /** 页面画布原点相对标尺起点的偏移 */
   contentOffset: number;
   /** Ruler strip width in viewport pixels (fixed, not scaled) */
   rulerWidth: number;
@@ -92,7 +92,7 @@ export default function CanvasRuler({
         ctx.stroke();
 
         // Label on major ticks
-        if (logical % TICK_MAJOR === 0 && logical > 0) {
+        if (logical % TICK_MAJOR === 0) {
           ctx.fillText(String(logical), px + 3, h - 2);
         }
       }
@@ -144,7 +144,7 @@ export default function CanvasRuler({
         ctx.stroke();
 
         // Label on major ticks
-        if (logical % TICK_MAJOR === 0 && logical > 0) {
+        if (logical % TICK_MAJOR === 0) {
           ctx.save();
           ctx.translate(w - 2, px + 3);
           ctx.rotate(-Math.PI / 2);

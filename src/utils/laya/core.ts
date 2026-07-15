@@ -21,10 +21,8 @@ export function objects(): Map<string, LayaObj> { return _objects; }
 
 // ─── worldRoot：编辑态的 pan/zoom 容器 ───
 
-let _viewportRoot: LayaObj = null;
 let _worldRoot: LayaObj = null;
 let _boundaryFrame: LayaObj = null;
-let _canvasViewport = { x: 0, y: 0, width: 0, height: 0 };
 
 export function worldRoot(): LayaObj { return _worldRoot; }
 // canvasRoot 别名：让 components.ts、Canvas.tsx 等旧代码无需立即改名
@@ -36,54 +34,32 @@ export function initWorldRoot(): void {
   if (!L?.stage) return;
   if (_worldRoot) return;
 
-  _viewportRoot = new (window as LayaAny).laya.display.Sprite();
-  _viewportRoot.name = '_canvasViewport';
-  _viewportRoot.mouseEnabled = true;
-  _viewportRoot.mouseThrough = true;
-  L.stage.addChild(_viewportRoot);
-
   _worldRoot = new (window as LayaAny).laya.display.Sprite();
   _worldRoot.name = '_worldRoot';
   _worldRoot.mouseEnabled = true;
   _worldRoot.mouseThrough = true;
+  L.stage.addChild(_worldRoot);
 
   _boundaryFrame = new (window as LayaAny).laya.display.Sprite();
   _boundaryFrame.name = '_boundaryFrame';
+  _boundaryFrame.graphics.drawRect(0, 0, 1920, 1080, '#000000', '#64748b', 2);
+  _boundaryFrame.size(1920, 1080);
   _boundaryFrame.mouseEnabled = false;
   _boundaryFrame.mouseThrough = true;
-  _viewportRoot.addChild(_boundaryFrame);
-  _viewportRoot.addChild(_worldRoot);
-}
-
-/** 固定画布窗口：只移动内部 worldRoot，窗口本身不参与镜头平移。 */
-export function setCanvasViewport(x: number, y: number, width: number, height: number): void {
-  _canvasViewport = { x, y, width, height };
-  if (!_viewportRoot || !_boundaryFrame) return;
-  _viewportRoot.x = x;
-  _viewportRoot.y = y;
-  _viewportRoot.size(width, height);
-  const Rectangle = (window as LayaAny).laya.maths.Rectangle;
-  _viewportRoot.scrollRect = new Rectangle(0, 0, width, height);
-  _boundaryFrame.graphics.clear();
-  _boundaryFrame.graphics.drawRect(0, 0, width, height, '#000000', '#444444', 2);
-  _boundaryFrame.size(width, height);
+  _worldRoot.addChildAt(_boundaryFrame, 0);
 }
 
 export function setWorldTransform(panX: number, panY: number, zoom: number): void {
   if (!_worldRoot) return;
-  _worldRoot.x = panX - _canvasViewport.x;
-  _worldRoot.y = panY - _canvasViewport.y;
+  _worldRoot.x = panX;
+  _worldRoot.y = panY;
   _worldRoot.scaleX = zoom;
   _worldRoot.scaleY = zoom;
 }
 
 export function getWorldTransform(): { panX: number; panY: number; zoom: number } {
   if (!_worldRoot) return { panX: 0, panY: 0, zoom: 1 };
-  return {
-    panX: _canvasViewport.x + _worldRoot.x,
-    panY: _canvasViewport.y + _worldRoot.y,
-    zoom: _worldRoot.scaleX,
-  };
+  return { panX: _worldRoot.x, panY: _worldRoot.y, zoom: _worldRoot.scaleX };
 }
 
 export function registerObject(id: string, obj: LayaObj) {
