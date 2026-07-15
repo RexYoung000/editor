@@ -11,6 +11,7 @@ import {
 import {
   findTopElementAtPoint,
   getContainerIds,
+  getSelectionContextContainerIds,
   getTransformRootIds,
   isElementHidden,
   normalizeSelection,
@@ -543,6 +544,7 @@ export default function CanvasOverlay({
   const containerElements = displayElements.filter((element) => (
     containerIds.has(element.id) && !isElementHidden(element, elementMap)
   ));
+  const contextContainerIds = getSelectionContextContainerIds(displayElements, selectedIds);
   const selectionFrame = previewFrame ?? getSelectionFrame(displayElements, selectedIds);
   const canTransform = getTransformRootIds(displayElements, selectedIds).length > 0;
 
@@ -571,15 +573,23 @@ export default function CanvasOverlay({
         const bounds = getElementWorldBounds(element, displayElements);
         const rect = worldRectToScreen(bounds.x, bounds.y, bounds.width, bounds.height, panX, panY, zoom);
         const selected = selectedIds.includes(element.id);
+        const contextHighlighted = contextContainerIds.has(element.id);
         const label = element.name || element.type;
         return (
-          <div key={`container-${element.id}`} style={{
+          <div
+            key={`container-${element.id}`}
+            data-container-context={contextHighlighted ? 'true' : undefined}
+            style={{
             position: 'absolute',
             left: rect.left,
             top: rect.top,
             width: rect.width,
             height: rect.height,
-            border: selected ? '1px dashed rgba(59, 130, 246, 0.9)' : '1px dashed rgba(148, 163, 184, 0.55)',
+            border: selected
+              ? '1px dashed rgba(59, 130, 246, 0.9)'
+              : contextHighlighted
+                ? '2px dashed rgb(34, 211, 238)'
+                : '1px dashed rgba(148, 163, 184, 0.55)',
             boxSizing: 'border-box',
             pointerEvents: 'none',
           }}>
@@ -590,9 +600,14 @@ export default function CanvasOverlay({
               maxWidth: Math.max(rect.width, 80),
               padding: '1px 4px',
               overflow: 'hidden',
-              color: selected ? '#bfdbfe' : 'rgba(203, 213, 225, 0.8)',
-              background: selected ? 'rgba(30, 64, 175, 0.9)' : 'rgba(30, 41, 59, 0.78)',
+              color: selected ? '#bfdbfe' : contextHighlighted ? '#ecfeff' : 'rgba(203, 213, 225, 0.8)',
+              background: selected
+                ? 'rgba(30, 64, 175, 0.9)'
+                : contextHighlighted
+                  ? 'rgba(8, 145, 178, 0.95)'
+                  : 'rgba(30, 41, 59, 0.78)',
               fontSize: 10,
+              fontWeight: selected || contextHighlighted ? 600 : 400,
               lineHeight: '15px',
               whiteSpace: 'nowrap',
               textOverflow: 'ellipsis',

@@ -8,6 +8,7 @@ import {
 import {
   findTopElementAtPoint,
   getContainerIds,
+  getSelectionContextContainerIds,
   getTransformRootIds,
   normalizeSelection,
   resolvePointerSelection,
@@ -71,6 +72,22 @@ test('容器内部点击穿透到普通组件，内部空白用于框选', () =>
   assert.equal(findTopElementAtPoint(elements, { x: 210, y: 210 }, [])?.id, 'child');
   assert.equal(findTopElementAtPoint(elements, { x: 150, y: 150 }, []), null);
   assert.equal(findTopElementAtPoint(elements, { x: 430, y: 30 }, [])?.id, 'empty-covered');
+});
+
+test('选中子组件只派生直接父容器上下文，不把几何覆盖视为父子关系', () => {
+  const parent = element('parent', { type: 'ContainerBox', width: 300, height: 300 });
+  const child = element('child', { parentId: 'parent' });
+  const sibling = element('sibling', { x: 120, parentId: 'parent' });
+  const otherParent = element('other-parent', { type: 'Box', x: 400, width: 300, height: 300 });
+  const otherChild = element('other-child', { parentId: 'other-parent' });
+  const coveredOnly = element('covered-only', { x: 20, y: 20 });
+  const elements = [coveredOnly, parent, child, sibling, otherParent, otherChild];
+
+  assert.deepEqual([...getSelectionContextContainerIds(elements, ['child'])], ['parent']);
+  assert.deepEqual([...getSelectionContextContainerIds(elements, ['child', 'sibling'])], ['parent']);
+  assert.deepEqual([...getSelectionContextContainerIds(elements, ['child', 'other-child'])], ['parent', 'other-parent']);
+  assert.deepEqual([...getSelectionContextContainerIds(elements, ['covered-only'])], []);
+  assert.deepEqual([...getSelectionContextContainerIds(elements, ['parent', 'child'])], []);
 });
 
 test('父子不会同时作为选择或变换根，锁定元素不参与变换', () => {

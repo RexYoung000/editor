@@ -27,6 +27,18 @@ export function getContainerIds(elements: Element[]): Set<string> {
   }));
 }
 
+export function getSelectionContextContainerIds(elements: Element[], selectedIds: string[]): Set<string> {
+  const elementMap = new Map(elements.map((element) => [element.id, element]));
+  const containerIds = getContainerIds(elements);
+  const selected = new Set(selectedIds);
+  const contextIds = new Set<string>();
+  for (const id of selectedIds) {
+    const parentId = elementMap.get(id)?.parentId;
+    if (parentId && containerIds.has(parentId) && !selected.has(parentId)) contextIds.add(parentId);
+  }
+  return contextIds;
+}
+
 function isLocked(element: Element, elementMap: Map<string, Element>): boolean {
   let current: Element | undefined = element;
   const visited = new Set<string>();
