@@ -6,8 +6,7 @@ import { Trash2, Eye, EyeOff, AlignStartVertical, AlignCenterVertical, AlignEndV
 import { useI18n } from '../i18n';
 import { findActiveElementPage } from '../utils/internalPages';
 import type { Element } from '../types';
-
-const CONTAINER_TYPES = ['Box', 'ContainerBox', 'PageTurnBox', 'HBox', 'VBox', 'Panel', 'DragView', 'DragViewBox', 'DragDropBox', 'DragDragBox', 'ChoiceBox', 'MatchingGame', 'OneStrokeGame', 'MazeView', 'KlInputBox'];
+import { isContainerElementType } from '../utils/elementContainers';
 
 type DropTarget =
   | { kind: 'reorder'; parentId: string | undefined; index: number }
@@ -70,7 +69,7 @@ export default function ElementList() {
 
     const rect = e.currentTarget.getBoundingClientRect();
     const y = e.clientY - rect.top;
-    const isContainer = CONTAINER_TYPES.includes(el.type);
+    const isContainer = isContainerElementType(el.type);
     const parentId = el.parentId;
 
     if (isContainer && y > rect.height * 0.25 && y < rect.height * 0.75) {

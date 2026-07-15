@@ -5,6 +5,7 @@ import {
   type CanvasPoint,
   type CanvasRect,
 } from './canvasGeometry';
+import { isContainerElementType } from './elementContainers';
 
 export function isElementHidden(element: Element, elementMap: Map<string, Element>): boolean {
   let current: Element | undefined = element;
@@ -18,7 +19,12 @@ export function isElementHidden(element: Element, elementMap: Map<string, Elemen
 }
 
 export function getContainerIds(elements: Element[]): Set<string> {
-  return new Set(elements.flatMap((element) => element.parentId ? [element.parentId] : []));
+  return new Set(elements.flatMap((element) => {
+    const ids: string[] = [];
+    if (isContainerElementType(element.type)) ids.push(element.id);
+    if (element.parentId) ids.push(element.parentId);
+    return ids;
+  }));
 }
 
 function isLocked(element: Element, elementMap: Map<string, Element>): boolean {
@@ -130,7 +136,12 @@ export function findTopElementAtPoint(
   selectedIds: string[],
 ): Element | null {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
-  const hits = elements.filter((element) => !isElementHidden(element, elementMap) && isPointInsideElement(point, element, elements));
+  const containerIds = getContainerIds(elements);
+  const hits = elements.filter((element) => (
+    !containerIds.has(element.id)
+    && !isElementHidden(element, elementMap)
+    && isPointInsideElement(point, element, elements)
+  ));
   const chooseTop = (candidates: Element[]) => {
     for (let index = candidates.length - 1; index >= 0; index--) {
       const candidate = candidates[index];

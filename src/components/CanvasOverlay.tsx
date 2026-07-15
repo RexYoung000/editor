@@ -289,15 +289,9 @@ export default function CanvasOverlay({
     const hit = containerHandle
       ? page.elements.find((element) => element.id === containerHandle.dataset.containerHandle) ?? null
       : findTopElementAtPoint(page.elements, point, currentIds);
-    const hitIsUnselectedContainerInterior = Boolean(
-      hit
-      && !containerHandle
-      && getContainerIds(page.elements).has(hit.id)
-      && !currentIds.includes(hit.id),
-    );
     const toggle = event.metaKey || event.ctrlKey;
     const duplicateOnDrag = IS_MAC ? event.altKey : event.ctrlKey;
-    if (hit && !hitIsUnselectedContainerInterior) {
+    if (hit) {
       const hitWasSelected = currentIds.includes(hit.id);
       const pointerSelection = duplicateOnDrag && hitWasSelected
         ? normalizeSelection(page.elements, currentIds)

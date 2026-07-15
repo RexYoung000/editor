@@ -7,6 +7,7 @@ import {
 } from '../src/utils/canvasGeometry';
 import {
   findTopElementAtPoint,
+  getContainerIds,
   getTransformRootIds,
   normalizeSelection,
   resolvePointerSelection,
@@ -54,6 +55,22 @@ test('命中优先选择子元素，已选元素区域优先保持可拖', () =>
   assert.equal(findTopElementAtPoint(elements, { x: 25, y: 25 }, [])?.id, 'child');
   assert.equal(findTopElementAtPoint(elements, { x: 40, y: 40 }, ['child'])?.id, 'child');
   assert.equal(findTopElementAtPoint(elements, { x: 25, y: 25 }, ['parent'])?.id, 'child');
+});
+
+test('容器内部点击穿透到普通组件，内部空白用于框选', () => {
+  const covered = element('covered', { x: 40, y: 40, width: 50, height: 50 });
+  const container = element('container', { type: 'ContainerBox', width: 300, height: 300 });
+  const child = element('child', { x: 200, y: 200, width: 50, height: 50, parentId: 'container' });
+  const emptyContainer = element('empty-container', { type: 'Box', x: 400, width: 100, height: 100 });
+  const emptyCovered = element('empty-covered', { x: 420, y: 20, width: 50, height: 50 });
+  const elements = [covered, container, child, emptyCovered, emptyContainer];
+
+  assert.deepEqual([...getContainerIds(elements)], ['container', 'empty-container']);
+  assert.equal(findTopElementAtPoint(elements, { x: 50, y: 50 }, [])?.id, 'covered');
+  assert.equal(findTopElementAtPoint(elements, { x: 50, y: 50 }, ['container'])?.id, 'covered');
+  assert.equal(findTopElementAtPoint(elements, { x: 210, y: 210 }, [])?.id, 'child');
+  assert.equal(findTopElementAtPoint(elements, { x: 150, y: 150 }, []), null);
+  assert.equal(findTopElementAtPoint(elements, { x: 430, y: 30 }, [])?.id, 'empty-covered');
 });
 
 test('父子不会同时作为选择或变换根，锁定元素不参与变换', () => {

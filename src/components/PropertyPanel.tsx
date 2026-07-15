@@ -19,6 +19,7 @@ import { readFileAsDataUrl } from '../utils/electronFs';
 import { translateLabel } from '../elements/elementMetaI18n';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
 import { collectInternalPageIssues, findActiveElementPage, isInternalPagesSubPage } from '../utils/internalPages';
+import { isContainerElementType } from '../utils/elementContainers';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -696,7 +697,7 @@ export default function PropertyPanel() {
                     <option value="">{t('noneTopLevel')}</option>
                     {elements.filter(el => {
                       if (el.id === single.id) return false;
-                      if (!['Box', 'ContainerBox', 'PageTurnBox', 'HBox', 'VBox', 'Panel', 'DragView', 'DragViewBox', 'DragDropBox', 'DragDragBox', 'ChoiceBox', 'MatchingGame', 'OneStrokeGame', 'MazeView', 'KlInputBox'].includes(el.type)) return false;
+                      if (!isContainerElementType(el.type)) return false;
                       // 排除自身的子孙（防止循环引用）
                       let pid: string | undefined = el.parentId;
                       while (pid) {
