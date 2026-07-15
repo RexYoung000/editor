@@ -3,13 +3,10 @@ import { laya, clearAllObjects, setPreviewMode } from './core';
 import { createLayaComponent, applyKlProps } from './components';
 import { registerObject } from './core';
 import { objects } from './core';
-import { setEditorCb, editorCb } from './selection';
-import type { EditorCallbacks } from './selection';
 
 let _previewPages: Page[] = [];
 let _previewPageIdx = 0;
 let _previewOnPage: ((idx: number) => void) | null = null;
-let _savedEditorCb: EditorCallbacks | null = null;
 
 export function resizeStageToContainer(container: HTMLElement): void {
   const L = laya();
@@ -114,8 +111,6 @@ export function enterPreviewMode(pages: Page[], onPage: (idx: number) => void): 
   _previewPages = JSON.parse(JSON.stringify(pages));
   _previewPageIdx = 0;
   _previewOnPage = onPage;
-  _savedEditorCb = editorCb();
-  setEditorCb(null);
   previewGoToPage(0);
 }
 
@@ -123,7 +118,5 @@ export function exitPreviewMode(): void {
   setPreviewMode(false);
   _previewPages = [];
   _previewOnPage = null;
-  setEditorCb(_savedEditorCb);
-  _savedEditorCb = null;
   clearAllObjects();
 }

@@ -1,25 +1,39 @@
-// DOM overlay for selection boxes, handles, marquee, inline editing.
-// All visual selection UI is screen-pixel sized (not scaled by zoom).
-
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Element } from '../types';
 import { useEditorStore } from '../store/editorStore';
 import { getObject } from '../utils/layaBridge';
-import { clientToWorld, worldRectToScreen, setOverlayHandling } from '../utils/laya/selection';
+import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
 import { resolveElementFont } from '../utils/fontLoader';
+import {
+  getElementWorldBounds,
+  worldDeltaToElementParent,
+  type CanvasPoint,
+} from '../utils/canvasGeometry';
+import {
+  findTopElementAtPoint,
+  normalizeSelection,
+  resolveMarqueeSelection,
+  resolvePointerSelection,
+  selectElementsInRect,
+} from '../utils/canvasSelection';
+import {
+  createMoveTransaction,
+  previewMoveTransaction,
+  transactionHasChanges,
+  type MoveTransaction,
+} from '../utils/canvasTransformTransaction';
 
 const HANDLE_SIZE = 10;
-// 容器型元素：即使在 z 序更顶层也不抢选中（避免全屏容器压住具体元素）
-const CONTAINER_TYPES = new Set(['Box', 'ContainerBox', 'PageTurnBox', 'HBox', 'VBox', 'Panel', 'DragView', 'DragViewBox', 'DragDropBox', 'DragDragBox', 'ChoiceBox', 'MatchingGame', 'OneStrokeGame', 'MazeView', 'KlInputBox']);
+const POINTER_START_THRESHOLD = 3;
 const HANDLE_DEFS = [
-  { id: 'nw', rx: 0,   ry: 0,   cursor: 'nw-resize' },
-  { id: 'n',  rx: 0.5, ry: 0,   cursor: 'n-resize' },
-  { id: 'ne', rx: 1,   ry: 0,   cursor: 'ne-resize' },
-  { id: 'e',  rx: 1,   ry: 0.5, cursor: 'e-resize' },
-  { id: 'se', rx: 1,   ry: 1,   cursor: 'se-resize' },
-  { id: 's',  rx: 0.5, ry: 1,   cursor: 's-resize' },
-  { id: 'sw', rx: 0,   ry: 1,   cursor: 'sw-resize' },
-  { id: 'w',  rx: 0,   ry: 0.5, cursor: 'w-resize' },
+  { id: 'nw', rx: 0, ry: 0, cursor: 'nw-resize' },
+  { id: 'n', rx: 0.5, ry: 0, cursor: 'n-resize' },
+  { id: 'ne', rx: 1, ry: 0, cursor: 'ne-resize' },
+  { id: 'e', rx: 1, ry: 0.5, cursor: 'e-resize' },
+  { id: 'se', rx: 1, ry: 1, cursor: 'se-resize' },
+  { id: 's', rx: 0.5, ry: 1, cursor: 's-resize' },
+  { id: 'sw', rx: 0, ry: 1, cursor: 'sw-resize' },
+  { id: 'w', rx: 0, ry: 0.5, cursor: 'w-resize' },
 ];
 
 interface WorldState {
@@ -35,44 +49,44 @@ interface MarqueeState {
   endWY: number;
 }
 
-type DragState = {
-  corner: string | null;
-  startWX: number;
-  startWY: number;
-  startX: number;
-  startY: number;
-  startW: number;
-  startH: number;
-  elementId: string;
-  // 拖拽期间各元素的起始位置（用于 batch commit）
-  startPositions: Map<string, { x: number; y: number; w: number; h: number }>;
-};
-
-// ─── helper: absolute world rect for nested elements ───
-
-function getAbsoluteWorldRect(el: Element, allElements: Element[]) {
-  let absX = el.x, absY = el.y;
-  let cur = el;
-  const map = new Map(allElements.map(e => [e.id, e]));
-  while (cur.parentId) {
-    const parent = map.get(cur.parentId);
-    if (!parent) break;
-    absX += parent.x;
-    absY += parent.y;
-    cur = parent;
-  }
-  // anchorX/Y 使 Laya 组件的 (x,y) 为锚点位置而非左上角，包围框需偏移补偿
-  const props = el.props as Record<string, unknown>;
-  const anchorX = Number(props.anchorX ?? 0);
-  const anchorY = Number(props.anchorY ?? 0);
-  if (anchorX || anchorY) {
-    absX -= anchorX * el.width;
-    absY -= anchorY * el.height;
-  }
-  return { x: absX, y: absY, w: el.width, h: el.height };
+interface PointerBase {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  started: boolean;
 }
 
-// ─── component ───
+interface MovePointer extends PointerBase {
+  kind: 'move';
+  startWorld: CanvasPoint;
+  transaction: MoveTransaction;
+  clickSelection: string[] | null;
+}
+
+interface MarqueePointer extends PointerBase {
+  kind: 'marquee';
+  startWorld: CanvasPoint;
+  initialSelection: string[];
+  intersect: boolean;
+  toggle: boolean;
+}
+
+interface ResizePointer extends PointerBase {
+  kind: 'resize';
+  startWorld: CanvasPoint;
+  elementId: string;
+  corner: string;
+  startX: number;
+  startY: number;
+  startWidth: number;
+  startHeight: number;
+  previewX: number;
+  previewY: number;
+  previewWidth: number;
+  previewHeight: number;
+}
+
+type PointerInteraction = MovePointer | MarqueePointer | ResizePointer;
 
 interface CanvasOverlayProps {
   layaHostRef: React.RefObject<HTMLDivElement | null>;
@@ -80,491 +94,584 @@ interface CanvasOverlayProps {
   selectedIds: string[];
   currentPage: { elements: Element[] } | null;
   editingElement: Element | null;
-  snap: (v: number) => number;
-  /** Laya calls onMarqueeStart when clicking empty space — overlay starts tracking */
-  marqueeStart: { wx: number; wy: number } | null;
-  onMarqueeComplete: (ids: string[]) => void;
+  snap: (value: number) => number;
   setEditingId: (id: string | null) => void;
 }
 
 export default function CanvasOverlay({
-  layaHostRef, world, selectedIds, currentPage, editingElement, snap,
-  marqueeStart, onMarqueeComplete, setEditingId,
+  layaHostRef,
+  world,
+  selectedIds,
+  currentPage,
+  editingElement,
+  snap,
+  setEditingId,
 }: CanvasOverlayProps) {
-  const dragRef = useRef<DragState | null>(null);
-  const [localMarquee, setLocalMarquee] = useState<MarqueeState | null>(null);
-  const localMarqueeRef = useRef(localMarquee);
-  useEffect(() => { localMarqueeRef.current = localMarquee; }, [localMarquee]);
-
-  // 拖拽期间的偏移量，用于更新选框位置而不触发 store 重渲染
+  const interactionRef = useRef<PointerInteraction | null>(null);
+  const [localMarquee, setLocalMarqueeState] = useState<MarqueeState | null>(null);
+  const localMarqueeRef = useRef<MarqueeState | null>(null);
   const [dragOffset, setDragOffset] = useState<{ dx: number; dy: number; dw?: number; dh?: number } | null>(null);
-  const dragOffsetRef = useRef(dragOffset);
-  useEffect(() => { dragOffsetRef.current = dragOffset; }, [dragOffset]);
-
   const worldRef = useRef(world);
-  useEffect(() => { worldRef.current = world; }, [world]);
-
   const currentPageRef = useRef(currentPage);
-  useEffect(() => { currentPageRef.current = currentPage; }, [currentPage]);
-
-  const selectedIdsRef = useRef(selectedIds);
-  useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
-
   const snapRef = useRef(snap);
+
+  useEffect(() => { worldRef.current = world; }, [world]);
+  useEffect(() => { currentPageRef.current = currentPage; }, [currentPage]);
   useEffect(() => { snapRef.current = snap; }, [snap]);
 
-  const [overlayFontFamily, setOverlayFontFamily] = useState<string>('FZLanTingHei');
+  const setLocalMarquee = useCallback((value: MarqueeState | null) => {
+    localMarqueeRef.current = value;
+    setLocalMarqueeState(value);
+  }, []);
+
+  const [resolvedFont, setResolvedFont] = useState<{ elementId: string; fontFamily: string } | null>(null);
   useEffect(() => {
-    if (!editingElement || editingElement.type !== 'NewTextArea') {
-      setOverlayFontFamily('FZLanTingHei');
-      return;
-    }
+    if (!editingElement || editingElement.type !== 'NewTextArea') return;
     const courseId = useEditorStore.getState().currentCourse?.id ?? '';
     if (!courseId) return;
-    const p = (editingElement.props ?? {}) as Record<string, unknown>;
-    const fontLocalPath = (p.fontLocalPath as string | undefined) ?? '';
-    const fontLibraryId = (p.fontLibraryId as string | undefined) ?? '';
-    resolveElementFont(courseId, fontLocalPath, fontLibraryId)
-      .then(setOverlayFontFamily)
-      .catch(() => setOverlayFontFamily('FZLanTingHei'));
-  }, [editingElement]);
-
-  // ─── marquee start signal from Laya ───
-  useEffect(() => {
-    if (!marqueeStart) return;
-    setLocalMarquee({
-      startWX: marqueeStart.wx,
-      startWY: marqueeStart.wy,
-      endWX: marqueeStart.wx,
-      endWY: marqueeStart.wy,
+    const props = editingElement.props as Record<string, unknown>;
+    let cancelled = false;
+    resolveElementFont(
+      courseId,
+      (props.fontLocalPath as string | undefined) ?? '',
+      (props.fontLibraryId as string | undefined) ?? '',
+    ).then((fontFamily) => {
+      if (!cancelled) setResolvedFont({ elementId: editingElement.id, fontFamily });
+    }).catch(() => {
+      if (!cancelled) setResolvedFont({ elementId: editingElement.id, fontFamily: 'FZLanTingHei' });
     });
-  }, [marqueeStart]);
+    return () => { cancelled = true; };
+  }, [editingElement]);
+  const overlayFontFamily = resolvedFont && resolvedFont.elementId === editingElement?.id
+    ? resolvedFont.fontFamily
+    : 'FZLanTingHei';
 
-  // ─── drag: mousedown on border / handle ───
-  const startDrag = useCallback((e: React.MouseEvent, corner: string | null, elementId: string) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setOverlayHandling(true);
-    const el = currentPage?.elements.find(e2 => e2.id === elementId);
-    if (!el) return;
-    const hostRect = layaHostRef.current!.getBoundingClientRect();
-    const { wx, wy } = clientToWorld(e.clientX, e.clientY, hostRect, world.panX, world.panY, world.zoom);
-    // 记录所有参与拖拽元素的起始位置
-    const startPositions = new Map<string, { x: number; y: number; w: number; h: number }>();
-    const store = useEditorStore.getState();
-    const selected = store.selectedElementIds;
-    const page = currentPage;
-    if (selected.length > 1 && selected.includes(elementId) && page) {
-      selected.forEach(sid => {
-        const selEl = page.elements.find(e2 => e2.id === sid);
-        if (selEl) startPositions.set(sid, { x: selEl.x, y: selEl.y, w: selEl.width, h: selEl.height });
-      });
-    } else {
-      startPositions.set(elementId, { x: el.x, y: el.y, w: el.width, h: el.height });
+  const pointerToWorld = useCallback((clientX: number, clientY: number) => {
+    const host = layaHostRef.current;
+    if (!host) return null;
+    const viewport = worldRef.current;
+    const point = clientToWorld(
+      clientX,
+      clientY,
+      host.getBoundingClientRect(),
+      viewport.panX,
+      viewport.panY,
+      viewport.zoom,
+    );
+    return { x: point.wx, y: point.wy };
+  }, [layaHostRef]);
+
+  const restorePreview = useCallback((interaction: PointerInteraction) => {
+    if (interaction.kind === 'move') {
+      for (const start of interaction.transaction.roots) {
+        const object = getObject(start.id);
+        if (object) {
+          object.x = start.x;
+          object.y = start.y;
+        }
+      }
+    } else if (interaction.kind === 'resize') {
+      const object = getObject(interaction.elementId);
+      if (object) {
+        object.x = interaction.startX;
+        object.y = interaction.startY;
+        object.width = interaction.startWidth;
+        object.height = interaction.startHeight;
+      }
     }
-    dragRef.current = {
+  }, []);
+
+  const commitPageTurnPosition = useCallback((element: Element, x: number, y: number) => {
+    if (element.type !== 'PageTurnImage') return;
+    const props = element.props as { pages?: Array<{ x: number; y: number }>; currentPageIndex?: number };
+    const pages = [...(props.pages ?? [])];
+    const index = props.currentPageIndex ?? 0;
+    if (index < 0 || index >= pages.length) return;
+    pages[index] = { ...pages[index], x, y };
+    useEditorStore.getState().updateElement(element.id, { props: { ...element.props, pages } });
+  }, []);
+
+  const finishInteraction = useCallback((commit: boolean) => {
+    const interaction = interactionRef.current;
+    if (!interaction) return;
+    interactionRef.current = null;
+    setDragOffset(null);
+
+    const page = currentPageRef.current;
+    const store = useEditorStore.getState();
+    if (!commit) {
+      restorePreview(interaction);
+      setLocalMarquee(null);
+      return;
+    }
+
+    if (interaction.kind === 'move') {
+      if (!interaction.started) {
+        if (interaction.clickSelection) store.selectElements(interaction.clickSelection);
+        return;
+      }
+      if (!transactionHasChanges(interaction.transaction)) {
+        restorePreview(interaction);
+        return;
+      }
+      for (const preview of interaction.transaction.preview) {
+        store.updateElement(preview.id, { x: preview.x, y: preview.y });
+        const element = page?.elements.find((item) => item.id === preview.id);
+        if (element) commitPageTurnPosition(element, preview.x, preview.y);
+      }
+      store.saveHistory();
+      return;
+    }
+
+    if (interaction.kind === 'resize') {
+      if (!interaction.started) return;
+      const changed = Math.abs(interaction.previewX - interaction.startX) > 0.000001
+        || Math.abs(interaction.previewY - interaction.startY) > 0.000001
+        || Math.abs(interaction.previewWidth - interaction.startWidth) > 0.000001
+        || Math.abs(interaction.previewHeight - interaction.startHeight) > 0.000001;
+      if (!changed) {
+        restorePreview(interaction);
+        return;
+      }
+      store.updateElement(interaction.elementId, {
+        x: interaction.previewX,
+        y: interaction.previewY,
+        width: interaction.previewWidth,
+        height: interaction.previewHeight,
+      });
+      store.saveHistory();
+      return;
+    }
+
+    const marquee = localMarqueeRef.current;
+    setLocalMarquee(null);
+    if (!interaction.started || !marquee || !page) return;
+    const rect = {
+      x: Math.min(marquee.startWX, marquee.endWX),
+      y: Math.min(marquee.startWY, marquee.endWY),
+      width: Math.abs(marquee.endWX - marquee.startWX),
+      height: Math.abs(marquee.endWY - marquee.startWY),
+    };
+    const hits = selectElementsInRect(page.elements, rect, interaction.intersect);
+    store.selectElements(resolveMarqueeSelection(
+      page.elements,
+      interaction.initialSelection,
+      hits,
+      interaction.toggle,
+    ));
+  }, [commitPageTurnPosition, restorePreview, setLocalMarquee]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || interactionRef.current) return;
+    if ((event.target as HTMLElement).closest('[data-canvas-interactive]')) return;
+    const page = currentPageRef.current;
+    const point = pointerToWorld(event.clientX, event.clientY);
+    if (!page || !point) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const store = useEditorStore.getState();
+    const currentIds = store.selectedElementIds;
+    const hit = findTopElementAtPoint(page.elements, point, currentIds);
+    const toggle = event.metaKey || event.ctrlKey;
+    if (hit) {
+      const hitWasSelected = currentIds.includes(hit.id);
+      const pointerSelection = hitWasSelected && !toggle
+        ? normalizeSelection(page.elements, currentIds)
+        : resolvePointerSelection(page.elements, currentIds, hit.id, toggle);
+      store.selectElements(pointerSelection);
+      const transaction = createMoveTransaction(page.elements, pointerSelection, hit.id);
+      if (!transaction) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        return;
+      }
+      interactionRef.current = {
+        kind: 'move',
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startWorld: point,
+        started: false,
+        transaction,
+        clickSelection: hitWasSelected && !toggle
+          ? resolvePointerSelection(page.elements, currentIds, hit.id, false)
+          : null,
+      };
+      return;
+    }
+
+    if (!toggle) store.clearSelection();
+    interactionRef.current = {
+      kind: 'marquee',
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startWorld: point,
+      initialSelection: currentIds,
+      intersect: event.altKey,
+      toggle,
+      started: false,
+    };
+  }, [pointerToWorld]);
+
+  const startResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const corner = event.currentTarget.dataset.resizeCorner;
+    const elementId = event.currentTarget.dataset.elementId;
+    const element = currentPageRef.current?.elements.find((item) => item.id === elementId);
+    if (!corner || !element) return;
+    const point = pointerToWorld(event.clientX, event.clientY);
+    if (!point) return;
+    event.stopPropagation();
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    interactionRef.current = {
+      kind: 'resize',
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startWorld: point,
+      started: false,
+      elementId: element.id,
       corner,
-      startWX: wx, startWY: wy,
-      startX: el.x, startY: el.y,
-      startW: el.width, startH: el.height,
-      elementId,
-      startPositions,
+      startX: element.x,
+      startY: element.y,
+      startWidth: element.width,
+      startHeight: element.height,
+      previewX: element.x,
+      previewY: element.y,
+      previewWidth: element.width,
+      previewHeight: element.height,
     };
-  }, [currentPage, world, layaHostRef]);
+  }, [pointerToWorld]);
 
-  // ─── document-level mousemove/mouseup for drag + marquee ───
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const interaction = interactionRef.current;
+    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(
+      event.clientX - interaction.startClientX,
+      event.clientY - interaction.startClientY,
+    );
+    if (!interaction.started && distance < POINTER_START_THRESHOLD) return;
+    interaction.started = true;
+    const point = pointerToWorld(event.clientX, event.clientY);
+    const page = currentPageRef.current;
+    if (!point || !page) return;
+
+    if (interaction.kind === 'move') {
+      interaction.transaction = previewMoveTransaction(
+        interaction.transaction,
+        page.elements,
+        { x: point.x - interaction.startWorld.x, y: point.y - interaction.startWorld.y },
+        snapRef.current,
+        event.shiftKey,
+      );
+      for (const preview of interaction.transaction.preview) {
+        const object = getObject(preview.id);
+        if (object) {
+          object.x = preview.x;
+          object.y = preview.y;
+        }
+      }
+      setDragOffset({
+        dx: interaction.transaction.worldDelta.x,
+        dy: interaction.transaction.worldDelta.y,
+      });
+      return;
+    }
+
+    if (interaction.kind === 'marquee') {
+      setLocalMarquee({
+        startWX: interaction.startWorld.x,
+        startWY: interaction.startWorld.y,
+        endWX: point.x,
+        endWY: point.y,
+      });
+      return;
+    }
+
+    const element = page.elements.find((item) => item.id === interaction.elementId);
+    if (!element) return;
+    const localDelta = worldDeltaToElementParent(element, page.elements, {
+      x: point.x - interaction.startWorld.x,
+      y: point.y - interaction.startWorld.y,
+    });
+    let x = interaction.startX;
+    let y = interaction.startY;
+    let width = interaction.startWidth;
+    let height = interaction.startHeight;
+    if (interaction.corner.includes('e')) width = Math.max(20, interaction.startWidth + localDelta.x);
+    if (interaction.corner.includes('w')) {
+      width = Math.max(20, interaction.startWidth - localDelta.x);
+      x = interaction.startX + interaction.startWidth - width;
+    }
+    if (interaction.corner.includes('s')) height = Math.max(20, interaction.startHeight + localDelta.y);
+    if (interaction.corner.includes('n')) {
+      height = Math.max(20, interaction.startHeight - localDelta.y);
+      y = interaction.startY + interaction.startHeight - height;
+    }
+    interaction.previewX = snapRef.current(x);
+    interaction.previewY = snapRef.current(y);
+    interaction.previewWidth = snapRef.current(width);
+    interaction.previewHeight = snapRef.current(height);
+    const object = getObject(interaction.elementId);
+    if (object) {
+      object.x = interaction.previewX;
+      object.y = interaction.previewY;
+      object.width = interaction.previewWidth;
+      object.height = interaction.previewHeight;
+    }
+    setDragOffset({
+      dx: interaction.previewX - interaction.startX,
+      dy: interaction.previewY - interaction.startY,
+      dw: interaction.previewWidth - interaction.startWidth,
+      dh: interaction.previewHeight - interaction.startHeight,
+    });
+  }, [pointerToWorld, setLocalMarquee]);
+
+  const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (interactionRef.current?.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    finishInteraction(true);
+  }, [finishInteraction]);
+
   useEffect(() => {
-    const onDocMouseMove = (e: MouseEvent) => {
-      const drag = dragRef.current;
-      const marquee = localMarqueeRef.current;
-
-      if (drag) {
-        const hostRect = layaHostRef.current!.getBoundingClientRect();
-        const { wx, wy } = clientToWorld(e.clientX, e.clientY, hostRect, worldRef.current.panX, worldRef.current.panY, worldRef.current.zoom);
-        const dx = wx - drag.startWX;
-        const dy = wy - drag.startWY;
-        const s = snapRef.current;
-        const selected = selectedIdsRef.current;
-        const page = currentPageRef.current;
-
-        if (drag.corner === null) {
-          // ── move: 只更新 Laya 对象位置 + dragOffset，不触发 store 重渲染 ──
-          const nx = s(drag.startX + dx), ny = s(drag.startY + dy);
-          const mainObj = getObject(drag.elementId);
-          if (mainObj) { mainObj.x = nx; mainObj.y = ny; }
-
-          if (selected.length > 1 && selected.includes(drag.elementId) && page) {
-            const dragStart = drag.startPositions.get(drag.elementId);
-            if (!dragStart) return;
-            const dxTotal = nx - dragStart.x, dyTotal = ny - dragStart.y;
-            selected.forEach(sid => {
-              if (sid === drag.elementId) return;
-              const start = drag.startPositions.get(sid);
-              if (!start) return;
-              const nx2 = start.x + dxTotal, ny2 = start.y + dyTotal;
-              const obj = getObject(sid);
-              if (obj) { obj.x = nx2; obj.y = ny2; }
-            });
-          }
-          // 更新选框偏移（用 setState 让 DOM 跟随，但不触发 store）
-          setDragOffset({ dx: nx - drag.startX, dy: ny - drag.startY });
-        } else {
-          // ── resize: 只更新 Laya 对象 + dragOffset ──
-          let x = drag.startX, y = drag.startY;
-          let w = drag.startW, h = drag.startH;
-          const c = drag.corner;
-          if (c.includes('e')) w = Math.max(20, drag.startW + dx);
-          if (c.includes('w')) { w = Math.max(20, drag.startW - dx); x = drag.startX + (drag.startW - w); }
-          if (c.includes('s')) h = Math.max(20, drag.startH + dy);
-          if (c.includes('n')) { h = Math.max(20, drag.startH - dy); y = drag.startY + (drag.startH - h); }
-          x = s(x); y = s(y); w = s(w); h = s(h);
-          const obj = getObject(drag.elementId);
-          if (obj) { obj.x = x; obj.y = y; obj.width = w; obj.height = h; }
-          setDragOffset({ dx: x - drag.startX, dy: y - drag.startY, dw: w - drag.startW, dh: h - drag.startH });
-        }
-        return;
-      }
-
-      if (marquee) {
-        const hostRect = layaHostRef.current!.getBoundingClientRect();
-        const { wx, wy } = clientToWorld(e.clientX, e.clientY, hostRect, worldRef.current.panX, worldRef.current.panY, worldRef.current.zoom);
-        setLocalMarquee({ ...marquee, endWX: wx, endWY: wy });
-        return;
-      }
+    const cancel = () => finishInteraction(false);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !interactionRef.current) return;
+      event.preventDefault();
+      cancel();
     };
-
-    const onDocMouseUp = () => {
-      setOverlayHandling(false);
-      const drag = dragRef.current;
-      if (drag) {
-        dragRef.current = null;
-        setDragOffset(null);
-        // batch commit: 一次性把所有元素最终位置写入 store
-        const store = useEditorStore.getState();
-        const selected = store.selectedElementIds;
-        const page = currentPageRef.current;
-        if (drag.corner === null) {
-          // move — 从 Laya 对象读取最终位置
-          if (selected.length > 1 && selected.includes(drag.elementId) && page) {
-            selected.forEach(sid => {
-              const obj = getObject(sid);
-              if (obj) {
-                store.updateElement(sid, { x: obj.x, y: obj.y });
-              }
-              // 翻页图片：同步画布位置到当前页
-              const selEl = page.elements.find(e => e.id === sid);
-              if (selEl && selEl.type === 'PageTurnImage') {
-                const props = selEl.props as { pages?: Array<{ x: number; y: number }>; currentPageIndex?: number };
-                const pages = [...(props.pages ?? [])];
-                const idx = props.currentPageIndex ?? 0;
-                if (idx >= 0 && idx < pages.length && obj) {
-                  pages[idx] = { ...pages[idx], x: obj.x, y: obj.y };
-                  store.updateElement(sid, { props: { ...selEl.props, pages } });
-                }
-              }
-            });
-          } else {
-            const obj = getObject(drag.elementId);
-            if (obj) {
-              store.updateElement(drag.elementId, { x: obj.x, y: obj.y });
-            }
-            // 翻页图片：同步画布位置到当前页
-            const dragEl = page?.elements.find(e => e.id === drag.elementId);
-            if (dragEl && dragEl.type === 'PageTurnImage') {
-              const props = dragEl.props as { pages?: Array<{ x: number; y: number }>; currentPageIndex?: number };
-              const pages = [...(props.pages ?? [])];
-              const idx = props.currentPageIndex ?? 0;
-              if (idx >= 0 && idx < pages.length && obj) {
-                pages[idx] = { ...pages[idx], x: obj.x, y: obj.y };
-                store.updateElement(drag.elementId, { props: { ...dragEl.props, pages } });
-              }
-            }
-          }
-        } else {
-          // resize
-          const obj = getObject(drag.elementId);
-          if (obj) {
-            store.updateElement(drag.elementId, { x: obj.x, y: obj.y, width: obj.width, height: obj.height });
-          }
-        }
-        store.saveHistory();
-        return;
-      }
-      if (localMarqueeRef.current) {
-        const m = localMarqueeRef.current;
-        const rx = Math.min(m.startWX, m.endWX);
-        const ry = Math.min(m.startWY, m.endWY);
-        const rw = Math.abs(m.endWX - m.startWX);
-        const rh = Math.abs(m.endWY - m.startWY);
-        const page = currentPageRef.current;
-        const ids: string[] = [];
-        if (rw > 4 && rh > 4 && page) {
-          for (const el of page.elements) {
-            const props = el.props as Record<string, unknown>;
-            if (props._editorHidden === true) continue;
-            const abs = getAbsoluteWorldRect(el, page.elements);
-            if (abs.x < rx + rw && abs.x + abs.w > rx && abs.y < ry + rh && abs.y + abs.h > ry) {
-              ids.push(el.id);
-            }
-          }
-        }
-        setLocalMarquee(null);
-        onMarqueeComplete(ids);
-        return;
-      }
-    };
-
-    document.addEventListener('mousemove', onDocMouseMove);
-    document.addEventListener('mouseup', onDocMouseUp);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('blur', cancel);
     return () => {
-      document.removeEventListener('mousemove', onDocMouseMove);
-      document.removeEventListener('mouseup', onDocMouseUp);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('blur', cancel);
+      cancel();
     };
-  }, [layaHostRef, onMarqueeComplete]);
+  }, [finishInteraction]);
 
-  // ─── render ───
+  const handleDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('[data-canvas-interactive]')) return;
+    const page = currentPageRef.current;
+    const point = pointerToWorld(event.clientX, event.clientY);
+    if (!page || !point) return;
+    const hit = findTopElementAtPoint(page.elements, point, useEditorStore.getState().selectedElementIds);
+    if (hit && (hit.type === 'NewTextArea' || hit.type === 'Video')) setEditingId(hit.id);
+  }, [pointerToWorld, setEditingId]);
 
   const elements = currentPage?.elements ?? [];
   const { zoom, panX, panY } = world;
-
-  // single selection element
   const selectedElement = selectedIds.length === 1
-    ? elements.find(e => e.id === selectedIds[0])
+    ? elements.find((element) => element.id === selectedIds[0])
     : null;
-
-  // multi-selection elements
   const multiElements = selectedIds.length > 1
-    ? elements.filter(e => selectedIds.includes(e.id))
+    ? elements.filter((element) => selectedIds.includes(element.id))
     : [];
 
-  // group colors for multi-selection
   const groupColors = new Map<string, string>();
   const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
-  let colorIdx = 0;
-  for (const el of multiElements) {
-    if (el.groupId && !groupColors.has(el.groupId)) {
-      groupColors.set(el.groupId, colors[colorIdx % colors.length]);
-      colorIdx++;
+  let colorIndex = 0;
+  for (const element of multiElements) {
+    if (element.groupId && !groupColors.has(element.groupId)) {
+      groupColors.set(element.groupId, colors[colorIndex % colors.length]);
+      colorIndex++;
     }
   }
 
   return (
-    <div data-keep-selection style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}>
-      {/* ── single selection: border + handles ── */}
-      {/* 编辑播放 Video / 编辑 NewTextArea 时隐藏选择框，避免拦截视频控件/文本框事件 */}
+    <div
+      data-keep-selection
+      className="absolute inset-0"
+      style={{ pointerEvents: 'auto', zIndex: 5, touchAction: 'none' }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => finishInteraction(false)}
+      onDoubleClick={handleDoubleClick}
+    >
       {selectedElement && !(editingElement && editingElement.id === selectedElement.id) && (() => {
-        // 拖拽期间：用 store 原始位置 + dragOffset 计算选框位置，避免依赖 store 实时更新
-        const abs = getAbsoluteWorldRect(selectedElement, elements);
-        const ex = abs.x + (dragOffset?.dx ?? 0);
-        const ey = abs.y + (dragOffset?.dy ?? 0);
-        const ew = abs.w + (dragOffset?.dw ?? 0);
-        const eh = abs.h + (dragOffset?.dh ?? 0);
-        const rect = worldRectToScreen(ex, ey, ew, eh, panX, panY, zoom);
+        const bounds = getElementWorldBounds(selectedElement, elements);
+        const rect = worldRectToScreen(
+          bounds.x + (dragOffset?.dx ?? 0),
+          bounds.y + (dragOffset?.dy ?? 0),
+          bounds.width + (dragOffset?.dw ?? 0),
+          bounds.height + (dragOffset?.dh ?? 0),
+          panX,
+          panY,
+          zoom,
+        );
         const isLocked = selectedElement.locked;
         return (
-          <div
-            style={{
-              position: 'absolute',
-              left: rect.left, top: rect.top,
-              width: rect.width, height: rect.height,
-              border: isLocked ? '1px solid #f59e0b' : '1px solid #3b82f6',
-              boxSizing: 'border-box',
-              pointerEvents: isLocked ? 'none' : 'auto',
-              cursor: isLocked ? 'default' : 'move',
-            }}
-            onMouseDown={(e) => {
-              // 中键不启动拖拽，放行给 Canvas 做画布平移
-              if (e.button !== 0) return;
-              // 当前选中元素的选中框被点击：先看点击点是否落在数组更靠后（视觉更顶层）的某个非容器元素上，
-              // 是 → 切选到那个元素；否 → 拖当前选中元素。
-              // 容器（Box/KlInputBox 等）即使数组靠后也不参与，否则全屏容器会一直"压住"上面的小元素。
-              const page = currentPage;
-              if (page) {
-                const hostRect = layaHostRef.current!.getBoundingClientRect();
-                const { wx, wy } = clientToWorld(e.clientX, e.clientY, hostRect, world.panX, world.panY, world.zoom);
-                const selectedIdx = page.elements.findIndex(e2 => e2.id === selectedElement.id);
-                for (let i = page.elements.length - 1; i > selectedIdx; i--) {
-                  const el = page.elements[i];
-                  if (CONTAINER_TYPES.has(el.type)) continue;
-                  const elProps = el.props as Record<string, unknown>;
-                  if (elProps._editorHidden === true) continue;
-                  const abs = getAbsoluteWorldRect(el, page.elements);
-                  if (wx >= abs.x && wx <= abs.x + abs.w && wy >= abs.y && wy <= abs.y + abs.h) {
-                    e.stopPropagation();
-                    useEditorStore.getState().selectElement(el.id);
-                    return;
-                  }
-                }
-              }
-              startDrag(e, null, selectedElement.id);
-            }}
-            onDoubleClick={(e) => {
-              e.stopPropagation();
-              if (selectedElement.type === 'NewTextArea' || selectedElement.type === 'Video') {
-                setEditingId(selectedElement.id);
-              }
-            }}
-          >
-            {!isLocked && HANDLE_DEFS.map(def => (
+          <div style={{
+            position: 'absolute',
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            border: isLocked ? '1px solid #f59e0b' : '1px solid #3b82f6',
+            boxSizing: 'border-box',
+            pointerEvents: 'none',
+          }}>
+            {!isLocked && HANDLE_DEFS.map((definition) => (
               <div
-                key={def.id}
+                key={definition.id}
                 style={{
                   position: 'absolute',
-                  left: def.rx * rect.width - HANDLE_SIZE / 2,
-                  top: def.ry * rect.height - HANDLE_SIZE / 2,
-                  width: HANDLE_SIZE, height: HANDLE_SIZE,
+                  left: definition.rx * rect.width - HANDLE_SIZE / 2,
+                  top: definition.ry * rect.height - HANDLE_SIZE / 2,
+                  width: HANDLE_SIZE,
+                  height: HANDLE_SIZE,
                   background: '#fff',
                   border: '2px solid #3b82f6',
-                  cursor: def.cursor,
+                  cursor: definition.cursor,
                   pointerEvents: 'auto',
                   boxSizing: 'border-box',
                 }}
-                onMouseDown={(e) => { if (e.button === 0) startDrag(e, def.id, selectedElement.id); }}
+                data-resize-corner={definition.id}
+                data-element-id={selectedElement.id}
+                onPointerDown={startResize}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={() => finishInteraction(false)}
               />
             ))}
           </div>
         );
       })()}
 
-      {/* ── multi-selection: borders per element ── */}
-      {multiElements.map(el => {
-        const abs = getAbsoluteWorldRect(el, elements);
-        const ex = abs.x + (dragOffset?.dx ?? 0);
-        const ey = abs.y + (dragOffset?.dy ?? 0);
-        const rect = worldRectToScreen(ex, ey, abs.w, abs.h, panX, panY, zoom);
-        let borderColor = '#3b82f6';
-        if (el.groupId && groupColors.has(el.groupId)) {
-          borderColor = groupColors.get(el.groupId)!;
-        }
-        return (
-          <div
-            key={el.id}
-            style={{
-              position: 'absolute',
-              left: rect.left, top: rect.top,
-              width: rect.width, height: rect.height,
-              border: '1.5px solid ' + borderColor,
-              boxSizing: 'border-box',
-              pointerEvents: 'none',
-            }}
-          />
+      {multiElements.map((element) => {
+        const bounds = getElementWorldBounds(element, elements);
+        const rect = worldRectToScreen(
+          bounds.x + (dragOffset?.dx ?? 0),
+          bounds.y + (dragOffset?.dy ?? 0),
+          bounds.width,
+          bounds.height,
+          panX,
+          panY,
+          zoom,
         );
-      })}
-
-      {/* ── marquee rect ── */}
-      {localMarquee && (() => {
-        const startScreen = worldRectToScreen(localMarquee.startWX, localMarquee.startWY, 0, 0, panX, panY, zoom);
-        const endScreen = worldRectToScreen(localMarquee.endWX, localMarquee.endWY, 0, 0, panX, panY, zoom);
-        const left = Math.min(startScreen.left, endScreen.left);
-        const top = Math.min(startScreen.top, endScreen.top);
-        const width = Math.abs(endScreen.left - startScreen.left);
-        const height = Math.abs(endScreen.top - startScreen.top);
+        const borderColor = element.groupId && groupColors.has(element.groupId)
+          ? groupColors.get(element.groupId)
+          : '#3b82f6';
         return (
-          <div style={{
+          <div key={element.id} style={{
             position: 'absolute',
-            left, top, width, height,
-            border: '2px dashed #3b82f6',
-            background: 'rgba(59, 130, 246, 0.12)',
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            border: `1.5px solid ${borderColor}`,
+            boxSizing: 'border-box',
             pointerEvents: 'none',
           }} />
         );
+      })}
+
+      {localMarquee && (() => {
+        const start = worldRectToScreen(localMarquee.startWX, localMarquee.startWY, 0, 0, panX, panY, zoom);
+        const end = worldRectToScreen(localMarquee.endWX, localMarquee.endWY, 0, 0, panX, panY, zoom);
+        return <div style={{
+          position: 'absolute',
+          left: Math.min(start.left, end.left),
+          top: Math.min(start.top, end.top),
+          width: Math.abs(end.left - start.left),
+          height: Math.abs(end.top - start.top),
+          border: '2px dashed #3b82f6',
+          background: 'rgba(59, 130, 246, 0.12)',
+          pointerEvents: 'none',
+        }} />;
       })()}
 
-      {/* ── inline editing textarea ── */}
-      {editingElement && (() => {
-        const p = (editingElement.props ?? {}) as Record<string, unknown>;
-        const fontSize = (p.fontSize as number) ?? 16;
-        const leading = (p.leading as number) ?? 0;
-        const valign = (p.valign as string) ?? 'top';
-        const sx = editingElement.x * zoom + panX;
-        const sy = editingElement.y * zoom + panY;
+      {editingElement && editingElement.type === 'NewTextArea' && (() => {
+        const props = editingElement.props as Record<string, unknown>;
+        const fontSize = (props.fontSize as number) ?? 16;
+        const leading = (props.leading as number) ?? 0;
+        const verticalAlign = (props.valign as string) ?? 'top';
         return (
-          <div
-            style={{
-              position: 'absolute',
-              left: sx, top: sy,
-              width: editingElement.width * zoom,
-              height: editingElement.height * zoom,
-              transform: `scale(${zoom})`,
-              transformOrigin: '0 0',
-              zIndex: 50,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: valign === 'middle' ? 'center' : valign === 'bottom' ? 'flex-end' : 'flex-start',
-              background: '#ffffff',
-              border: '1px solid #3b82f6',
-              boxSizing: 'border-box',
-              pointerEvents: 'auto',
-            }}
-          >
+          <div data-canvas-interactive style={{
+            position: 'absolute',
+            left: editingElement.x * zoom + panX,
+            top: editingElement.y * zoom + panY,
+            width: editingElement.width,
+            height: editingElement.height,
+            transform: `scale(${zoom})`,
+            transformOrigin: '0 0',
+            zIndex: 50,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: verticalAlign === 'middle' ? 'center' : verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
+            background: '#ffffff',
+            border: '1px solid #3b82f6',
+            boxSizing: 'border-box',
+            pointerEvents: 'auto',
+          }}>
             <textarea
               autoFocus
-              value={(p.text as string) ?? ''}
-              onFocus={(e) => e.currentTarget.select()}
-              onChange={(e) => useEditorStore.getState().updateElement(editingElement.id, { props: { ...p, text: e.target.value } })}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
-                  e.preventDefault();
-                  e.currentTarget.blur();
+              value={(props.text as string) ?? ''}
+              onFocus={(event) => event.currentTarget.select()}
+              onChange={(event) => useEditorStore.getState().updateElement(editingElement.id, {
+                props: { ...props, text: event.target.value },
+              })}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' || (event.key === 'Enter' && (event.ctrlKey || event.metaKey))) {
+                  event.preventDefault();
+                  event.currentTarget.blur();
                 }
               }}
-              onBlur={() => { setEditingId(null); useEditorStore.getState().saveHistory(); }}
+              onBlur={() => {
+                setEditingId(null);
+                useEditorStore.getState().saveHistory();
+              }}
               style={{
                 width: '100%',
                 flexShrink: 0,
                 maxHeight: '100%',
-                margin: 0, padding: 0,
-                border: 'none', outline: 'none',
+                margin: 0,
+                padding: 0,
+                border: 'none',
+                outline: 'none',
                 background: 'transparent',
                 resize: 'none',
                 overflow: 'auto',
                 fontFamily: `"${overlayFontFamily}"`,
                 fontSize,
                 lineHeight: `${fontSize + leading}px`,
-                color: (p.color as string) ?? '#333',
-                textAlign: ((p.align as 'left' | 'center' | 'right') ?? 'left'),
-                whiteSpace: p.wordWrap === false ? 'pre' : 'pre-wrap',
-                wordBreak: p.wordWrap === false ? 'normal' : 'break-word',
+                color: (props.color as string) ?? '#333',
+                textAlign: (props.align as 'left' | 'center' | 'right') ?? 'left',
+                whiteSpace: props.wordWrap === false ? 'pre' : 'pre-wrap',
+                wordBreak: props.wordWrap === false ? 'normal' : 'break-word',
               }}
             />
           </div>
         );
       })()}
 
-      {/* ── video playback overlay ── */}
       {editingElement && editingElement.type === 'Video' && (() => {
-        const p = (editingElement.props ?? {}) as Record<string, unknown>;
-        const videoUrl = (p.videoUrl as string) ?? '';
+        const props = editingElement.props as Record<string, unknown>;
+        const videoUrl = (props.videoUrl as string) ?? '';
         if (!videoUrl) return null;
-        // Resolve video URL: Electron forge-local protocol or relative path
         const courseId = useEditorStore.getState().currentCourse?.id ?? '';
-        const src = `forge-local://${courseId}/${videoUrl}`;
-        const sx = editingElement.x * zoom + panX;
-        const sy = editingElement.y * zoom + panY;
         return (
-          <div
-            style={{
-              position: 'absolute',
-              left: sx, top: sy,
-              width: editingElement.width * zoom,
-              height: editingElement.height * zoom,
-              zIndex: 50,
-              background: '#000',
-              border: '1px solid #3b82f6',
-              boxSizing: 'border-box',
-              pointerEvents: 'auto',
-            }}
-            onKeyDown={(e) => { if (e.key === 'Escape') setEditingId(null); }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onMouseMove={(e) => e.stopPropagation()}
-            onMouseUp={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div data-canvas-interactive style={{
+            position: 'absolute',
+            left: editingElement.x * zoom + panX,
+            top: editingElement.y * zoom + panY,
+            width: editingElement.width * zoom,
+            height: editingElement.height * zoom,
+            zIndex: 50,
+            background: '#000',
+            border: '1px solid #3b82f6',
+            boxSizing: 'border-box',
+            pointerEvents: 'auto',
+          }} onKeyDown={(event) => { if (event.key === 'Escape') setEditingId(null); }}>
             <video
               key={`video-${editingElement.id}`}
               autoPlay
               controls
-              src={src}
+              src={`forge-local://${courseId}/${videoUrl}`}
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
           </div>

@@ -5,6 +5,5 @@
 
 export { preloadAtlas, registerObject, getObject, removeObject, clearAllObjects, syncTransform, syncProps, initWorldRoot, worldRoot, canvasRoot, setWorldTransform, getWorldTransform, boundaryFrame } from './laya/core';
 export { createLayaComponent } from './laya/components';
-export { initEditorInteraction, cleanupEditorInteraction, clientToWorld, worldRectToScreen } from './laya/selection';
-export type { EditorCallbacks } from './laya/selection';
+export { clientToWorld, worldRectToScreen } from './laya/selection';
 export { enterPreviewMode, exitPreviewMode, previewGoToPage, resizeStageToContainer } from './laya/preview';

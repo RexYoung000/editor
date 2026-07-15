@@ -2,13 +2,12 @@ import { useEditorStore } from '../store/editorStore';
 import { useRef, useState, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import type { Element } from '../types';
 import {
-  preloadAtlas, initEditorInteraction, removeObject,
+  preloadAtlas, removeObject,
   clearAllObjects, createLayaComponent, registerObject, getObject, syncTransform,
   initWorldRoot, setWorldTransform, getWorldTransform,
 } from '../utils/layaBridge';
 import { applyKlProps, drawPlaceholder } from '../utils/laya/components';
 import { objects, canvasRoot, laya } from '../utils/laya/core';
-import { cleanupEditorInteraction } from '../utils/laya/selection';
 import CanvasOverlay from './CanvasOverlay';
 import { useI18n } from '../i18n';
 import CanvasRuler, { RULER_PX } from './CanvasRuler';
@@ -17,7 +16,7 @@ import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
-import { findActiveElementPage, findCanvasElementPage } from '../utils/internalPages';
+import { findCanvasElementPage } from '../utils/internalPages';
 import {
   CANVAS_ZOOM_BUTTON_STEP,
   constrainViewportToWorkspace,
@@ -62,27 +61,6 @@ function sortChildrenParentFirst(children: Element[], topLevelIds: Set<string>):
   return result;
 }
 
-function getAbsoluteWorldRect(el: Element, allElements: Element[]) {
-  let absX = el.x, absY = el.y;
-  let cur = el;
-  const map = new Map(allElements.map(e => [e.id, e]));
-  while (cur.parentId) {
-    const parent = map.get(cur.parentId);
-    if (!parent) break;
-    absX += parent.x;
-    absY += parent.y;
-    cur = parent;
-  }
-  const props = el.props as Record<string, unknown>;
-  const anchorX = Number(props.anchorX ?? 0);
-  const anchorY = Number(props.anchorY ?? 0);
-  if (anchorX || anchorY) {
-    absX -= anchorX * el.width;
-    absY -= anchorY * el.height;
-  }
-  return { x: absX, y: absY, w: el.width, h: el.height };
-}
-
 export default function Canvas() {
   const { t } = useI18n();
   const currentCourse    = useEditorStore((s) => s.currentCourse);
@@ -90,8 +68,6 @@ export default function Canvas() {
   const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement    = useEditorStore((s) => s.selectElement);
-  const selectElements   = useEditorStore((s) => s.selectElements);
-  const clearSelection   = useEditorStore((s) => s.clearSelection);
   const updateElement    = useEditorStore((s) => s.updateElement);
   const deleteElement    = useEditorStore((s) => s.deleteElement);
   const saveHistory      = useEditorStore((s) => s.saveHistory);
@@ -103,7 +79,6 @@ export default function Canvas() {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [layaReady, setLayaReady] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [marqueeStart, setMarqueeStart] = useState<{ wx: number; wy: number } | null>(null);
   const prevPageIdRef = useRef<string | null>(null);
   const prevElementsRef = useRef<Map<string, Element>>(new Map());
 
@@ -146,11 +121,6 @@ export default function Canvas() {
 
   const showGridRef = useRef(false);
   const snap = (v: number) => showGridRef.current ? Math.round(v / 20) * 20 : Math.round(v);
-
-  const selectElementRef = useRef(selectElement);
-  const clearSelectionRef = useRef(clearSelection);
-  useEffect(() => { selectElementRef.current = selectElement; }, [selectElement]);
-  useEffect(() => { clearSelectionRef.current = clearSelection; }, [clearSelection]);
 
   const layaContainerRef = useRef<HTMLElement | null>(null);
 
@@ -246,14 +216,6 @@ export default function Canvas() {
       const initialViewport = fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H);
       setWorld(initialViewport);
       setWorldTransform(initialViewport.panX, initialViewport.panY, initialViewport.zoom);
-      initEditorInteraction({
-        onSelect:     (id) => selectElementRef.current(id, false),
-        onDeselect:   () => clearSelectionRef.current(),
-        onMarqueeStart: (wx, wy) => setMarqueeStart({ wx, wy }),
-        getStore:     () => useEditorStore,
-        getHostElement: () => layaHostRef.current,
-        isCanvasNavigating: () => spacePressedRef.current || panningRef.current,
-      });
       setLayaReady(true);
     });
   }, [setWorld]);
@@ -474,8 +436,6 @@ export default function Canvas() {
         // Disconnect ResizeObserver
         resizeObserverRef.current?.disconnect();
         resizeObserverRef.current = null;
-        // Remove editor interaction handler from Laya stage
-        cleanupEditorInteraction();
         // Clear all Laya objects
         clearAllObjects();
         // Move layaContainer off-screen and hide it
@@ -524,40 +484,6 @@ export default function Canvas() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedElementIds, deleteElement, currentPage, updateElement, saveHistory]);
-
-  // ─── 双击 NewTextArea 进入行内编辑 ───
-  useEffect(() => {
-    if (!layaReady) return;
-    const host = layaHostRef.current;
-    if (!host) return;
-    const onDblClick = (e: MouseEvent) => {
-      if (spacePressedRef.current || panningRef.current) return;
-      const state = useEditorStore.getState();
-      const page = findActiveElementPage(
-        state.currentCourse,
-        state.currentSubPageId,
-        state.currentInternalPageId,
-      );
-      if (!page) return;
-      // client → world 坐标
-      const rect = host.getBoundingClientRect();
-      const { zoom, panX, panY } = worldRef.current;
-      const wx = (e.clientX - rect.left - panX) / zoom;
-      const wy = (e.clientY - rect.top - panY) / zoom;
-      for (let i = page.elements.length - 1; i >= 0; i--) {
-        const el = page.elements[i];
-        const abs = getAbsoluteWorldRect(el, page.elements);
-        if (wx >= abs.x && wx <= abs.x + abs.w && wy >= abs.y && wy <= abs.y + abs.h) {
-          if (el.type === 'NewTextArea' || el.type === 'Video') {
-            setEditingId(el.id);
-            return;
-          }
-        }
-      }
-    };
-    host.addEventListener('dblclick', onDblClick);
-    return () => host.removeEventListener('dblclick', onDblClick);
-  }, [layaReady]);
 
   const [showGrid, setShowGrid] = useState(false);
   const [showRuler, setShowRuler] = useState(true);
@@ -691,7 +617,6 @@ export default function Canvas() {
     e.stopPropagation();
     panningRef.current = true;
     setIsPanning(true);
-    setMarqueeStart(null);
     panStartRef.current = { mx: e.clientX, my: e.clientY, ox: worldRef.current.panX, oy: worldRef.current.panY };
   }, []);
 
@@ -887,8 +812,6 @@ export default function Canvas() {
   const visiblePageTop = Math.max(0, Math.min(workspaceSize.height, world.panY));
   const visiblePageRight = Math.max(0, Math.min(workspaceSize.width, pageRight));
   const visiblePageBottom = Math.max(0, Math.min(workspaceSize.height, pageBottom));
-  const pageClipPath = `inset(${visiblePageTop}px ${Math.max(0, workspaceSize.width - visiblePageRight)}px ${Math.max(0, workspaceSize.height - visiblePageBottom)}px ${visiblePageLeft}px)`;
-
   return (
     <div ref={canvasRef} className={`flex-1 flex flex-col overflow-hidden bg-slate-800 relative ${isPanning ? 'cursor-grabbing' : spacePressed ? 'cursor-grab' : ''}`}
         onMouseDownCapture={handleMouseDown}
@@ -929,10 +852,7 @@ export default function Canvas() {
           </div>
         )}
         {layaReady && (
-          <div className="absolute inset-0 pointer-events-none" style={{
-            zIndex: 5,
-            clipPath: pageClipPath,
-          }}>
+          <div className="absolute inset-0" style={{ zIndex: 5 }}>
             <CanvasOverlay
               layaHostRef={layaHostRef}
               world={world}
@@ -940,8 +860,6 @@ export default function Canvas() {
               currentPage={currentPage}
               editingElement={editingElement}
               snap={snap}
-              marqueeStart={marqueeStart}
-              onMarqueeComplete={(ids) => { selectElements(ids); setMarqueeStart(null); }}
               setEditingId={setEditingId}
             />
           </div>
