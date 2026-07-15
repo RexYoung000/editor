@@ -2,6 +2,8 @@ import JSZip from 'jszip';
 import type { Course } from '../types';
 import { showToast } from './toast';
 import { getCourseDirPath, readFileAsDataUrl } from './electronFs';
+import { isInternalPagesSubPage, visitCourseElementPages } from './internalPages';
+import { collectResourceRefs } from './collectResourceRefs';
 
 /**
  * 收集课件中所有的资源路径
@@ -9,21 +11,11 @@ import { getCourseDirPath, readFileAsDataUrl } from './electronFs';
 function collectResourcePaths(course: Course): Set<string> {
   const paths = new Set<string>();
 
-  course.stages.forEach((stage) => {
-    stage.subPages.forEach((page) => {
-      page.elements.forEach((el) => {
-        if (!el.props) return;
-
-        for (const value of Object.values(el.props)) {
-          if (typeof value === 'string') {
-            // 收集 images/ 路径（Electron 本地资源）
-            if (value.startsWith('images/')) {
-              paths.add(value);
-            }
-          }
-        }
-      });
-    });
+  visitCourseElementPages(course, (page) => {
+    const refs = collectResourceRefs(page.elements);
+    for (const group of [refs.images, refs.videos, refs.sounds, refs.spineSkPaths]) {
+      group.forEach((path) => paths.add(path));
+    }
   });
 
   return paths;
@@ -116,13 +108,16 @@ export async function importCourseFromZip(file: File): Promise<Course> {
       throw new Error('无效的课件格式：缺少 id 或 stages');
     }
 
-    for (const stage of course.stages) {
+    for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
       if (!Array.isArray(stage.subPages)) {
         throw new Error('无效的大关卡格式：缺少 subPages');
       }
       for (const page of stage.subPages) {
         if (!page.id || !Array.isArray(page.elements)) {
           throw new Error('无效的小关卡格式：缺少 id 或 elements');
+        }
+        if (isInternalPagesSubPage(page) && page.internalPages.some((internalPage) => !internalPage.id || !Array.isArray(internalPage.elements))) {
+          throw new Error('无效的内部页面格式：缺少 id 或 elements');
         }
       }
     }
@@ -171,8 +166,7 @@ export async function importCourseFromZip(file: File): Promise<Course> {
         pathMap.set(oldPath, newPath);
       });
 
-      course.stages.forEach((stage) => {
-        stage.subPages.forEach((page) => {
+      visitCourseElementPages(course, (page) => {
           page.elements.forEach((el) => {
             if (!el.props) return;
 
@@ -185,7 +179,6 @@ export async function importCourseFromZip(file: File): Promise<Course> {
               }
             }
           });
-        });
       });
 
       showToast(`导入成功，已保存 ${saveResults.length} 个资源文件`, 'success');
@@ -230,7 +223,7 @@ export function importCourseFromJSON(file: File): Promise<Course> {
           reject(new Error('无效的课件格式：缺少 id 或 stages'));
           return;
         }
-        for (const stage of course.stages) {
+        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
           if (!Array.isArray(stage.subPages)) {
             reject(new Error('无效的大关卡格式：缺少 subPages'));
             return;
@@ -238,6 +231,10 @@ export function importCourseFromJSON(file: File): Promise<Course> {
           for (const page of stage.subPages) {
             if (!page.id || !Array.isArray(page.elements)) {
               reject(new Error('无效的小关卡格式：缺少 id 或 elements'));
+              return;
+            }
+            if (isInternalPagesSubPage(page) && page.internalPages.some((internalPage) => !internalPage.id || !Array.isArray(internalPage.elements))) {
+              reject(new Error('无效的内部页面格式：缺少 id 或 elements'));
               return;
             }
           }

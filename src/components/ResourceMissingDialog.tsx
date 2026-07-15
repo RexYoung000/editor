@@ -15,7 +15,8 @@ export const ResourceMissingDialog: React.FC<Props> = ({ items, onClose, onConti
 
   const handleJump = (item: ResourceMissingItem) => {
     const store = useEditorStore.getState();
-    store.setCurrentSubPage(item.stageId, item.pageId);
+    store.setCurrentSubPage(item.stageId, item.subPageId);
+    if (item.pageId !== item.subPageId) store.setCurrentInternalPage(item.pageId);
     store.selectElement(item.elementId);
     onClose();
   };

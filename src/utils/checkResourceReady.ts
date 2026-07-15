@@ -1,4 +1,5 @@
 import type { Course, Stage } from '../types';
+import { getElementPages } from './internalPages';
 
 export type ResourceKind = 'video' | 'audio' | 'animation';
 
@@ -9,6 +10,7 @@ export interface ResourceMissingItem {
   stageIndex: number;
   stageName: string;
   pageId: string;
+  subPageId: string;
   pageIndex: number;
   pageName: string;
   elementId: string;
@@ -26,7 +28,7 @@ export function findMissingResourceElements(course: Course): ResourceMissingItem
   const collectFrom = (stages: Stage[], kindFallback: 'normal' | 'preview' | 'homework' | 'sEvaluation' | 'review') => {
     stages.forEach((stage, si) => {
       stage.subPages.forEach((page, pi) => {
-        page.elements.forEach((el) => {
+        getElementPages(page).forEach((elementPage) => elementPage.elements.forEach((el) => {
           const props = el.props as Record<string, unknown> | undefined;
           let kind: ResourceKind | null = null;
           if (el.type === 'Video' && !String(props?.videoUrl ?? '').trim()) {
@@ -43,13 +45,14 @@ export function findMissingResourceElements(course: Course): ResourceMissingItem
             stageId: stage.id,
             stageIndex: si + 1,
             stageName: stage.name ?? '',
-            pageId: page.id,
+            pageId: elementPage.id,
+            subPageId: page.id,
             pageIndex: pi + 1,
-            pageName: page.name ?? '',
+            pageName: elementPage.name,
             elementId: el.id,
             elementName: el.name ?? el.id,
           });
-        });
+        }));
       });
     });
   };

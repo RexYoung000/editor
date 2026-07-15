@@ -12,7 +12,8 @@ import { isFlatLesson } from '../utils/courseKind';
 import { downloadLibraryFile, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './QuickPresetDialog';
-import type { Action, Element, SubPage } from '../types';
+import type { Action, Element } from '../types';
+import { findActiveElementPage, getElementPages, type ElementPageRef } from '../utils/internalPages';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -42,16 +43,13 @@ async function readNaturalSize(courseId: string, relativePath: string): Promise<
   });
 }
 
-function currentSubPage(): SubPage | null {
+function currentElementPage(): ElementPageRef | null {
   const state = useEditorStore.getState();
-  const course = state.currentCourse;
-  if (!course || !state.currentSubPageId) return null;
-  const stages = [...course.stages, ...(course.previewStages ?? [])];
-  for (const stage of stages) {
-    const page = stage.subPages.find((item) => item.id === state.currentSubPageId);
-    if (page) return page;
-  }
-  return null;
+  return findActiveElementPage(
+    state.currentCourse,
+    state.currentSubPageId,
+    state.currentInternalPageId,
+  );
 }
 
 async function findRelatedPreset(kind: 'brush' | 'clear', source: QuickPreset): Promise<QuickPreset | null> {
@@ -149,10 +147,11 @@ export default function ElementToolbar() {
       const course = useEditorStore.getState().currentCourse;
       let existingKbCamp: string | undefined;
       if (course && subPageId) {
-        for (const stage of course.stages) {
+        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
           for (const page of stage.subPages) {
             if (page.id !== subPageId) continue;
-            for (const el of page.elements) {
+            const active = findActiveElementPage(course, page.id, useEditorStore.getState().currentInternalPageId);
+            for (const el of active?.elements ?? []) {
               const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
               if (el.type === 'KlBaseKeyboard' && p?._keyboardPreset?.id === 'preset2') {
                 existingKbCamp = typeof p.camp === 'string' ? p.camp : undefined;
@@ -173,9 +172,9 @@ export default function ElementToolbar() {
           let maxIdx = 0;
           if (course) {
             const re = new RegExp(`^${preset2.campPrefix}-(\\d+)$`);
-            for (const stage of course.stages) {
+            for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
               for (const page of stage.subPages) {
-                for (const el of page.elements) {
+                for (const elementPage of getElementPages(page)) for (const el of elementPage.elements) {
                   const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
                   if (p?._keyboardPreset?.id !== preset2.id) continue;
                   const camp = typeof p.camp === 'string' ? p.camp : '';
@@ -227,7 +226,8 @@ export default function ElementToolbar() {
       const currentStage = [...course.stages, ...(course.previewStages ?? [])].find(s => s.id === currentStageId);
       const currentPage = currentStage?.subPages.find(p => p.id === currentSubPageId);
       if (currentPage) {
-        for (const el of currentPage.elements) {
+        const active = findActiveElementPage(course, currentPage.id, state.currentInternalPageId);
+        for (const el of active?.elements ?? []) {
           const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
           if (p?._keyboardPreset?.id !== preset.id) continue;
           const camp = typeof p.camp === 'string' ? p.camp : '';
@@ -444,10 +444,11 @@ export default function ElementToolbar() {
     // 查找或创建键盘2
     let kbCamp: string | undefined;
     if (course && subPageId) {
-      for (const stage of course.stages) {
+      for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
         for (const page of stage.subPages) {
           if (page.id !== subPageId) continue;
-          for (const el of page.elements) {
+          const active = findActiveElementPage(course, page.id, useEditorStore.getState().currentInternalPageId);
+          for (const el of active?.elements ?? []) {
             const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
             if (el.type === 'KlBaseKeyboard' && p?._keyboardPreset?.id === 'preset2') {
               kbCamp = typeof p.camp === 'string' ? p.camp : undefined;
@@ -463,9 +464,9 @@ export default function ElementToolbar() {
         let maxIdx = 0;
         if (course) {
           const re = new RegExp(`^${preset2.campPrefix}-(\\d+)$`);
-          for (const stage of course.stages) {
+          for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
             for (const page of stage.subPages) {
-              for (const el of page.elements) {
+              for (const elementPage of getElementPages(page)) for (const el of elementPage.elements) {
                 const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
                 if (p?._keyboardPreset?.id !== preset2.id) continue;
                 const camp = typeof p.camp === 'string' ? p.camp : '';
@@ -752,7 +753,7 @@ export default function ElementToolbar() {
   const handleQuickPresetSelected = async (kind: QuickPresetKind, preset: QuickPreset) => {
     const state = useEditorStore.getState();
     const courseId = state.currentCourse?.id;
-    const pageContext = currentSubPage();
+    const pageContext = currentElementPage();
     if (!courseId || !pageContext) {
       showToast('请先打开一个可编辑课件', 'warning');
       return;

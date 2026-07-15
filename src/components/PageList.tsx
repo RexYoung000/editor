@@ -1,5 +1,5 @@
 import { useEditorStore } from '../store/editorStore';
-import { Plus, Trash2, Copy, ChevronDown, ChevronRight, ArrowUp, ArrowDown, BookmarkPlus } from 'lucide-react';
+import { Plus, Trash2, Copy, ChevronDown, ChevronRight, ArrowUp, ArrowDown, BookmarkPlus, PanelTopOpen } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '../i18n';
 import { showToast } from '../utils/toast';
@@ -7,6 +7,7 @@ import { PRESET_TEMPLATES } from '../presets';
 import ConfirmDialog from './ConfirmDialog';
 import NewStageDialog from './NewStageDialog';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
+import { isInternalPagesSubPage } from '../utils/internalPages';
 
 export default function PageList() {
   const { t } = useI18n();
@@ -53,6 +54,7 @@ export default function PageList() {
   const addPreviewStageFromPreset = useEditorStore((state) => state.addPreviewStageFromPreset);
   const togglePreviewShrinked = useEditorStore((state) => state.togglePreviewShrinked);
   const toggleNormalShrinked = useEditorStore((state) => state.toggleNormalShrinked);
+  const enterFocusWorkspace = useEditorStore((state) => state.enterFocusWorkspace);
 
   const [draggedStageIdx, setDraggedStageIdx] = useState<number | null>(null);
   const [draggedSub, setDraggedSub] = useState<{ stageId: string; idx: number } | null>(null);
@@ -233,6 +235,7 @@ export default function PageList() {
                           <div
                             key={sub.id}
                             onClick={() => setCurrentSubPage(stage.id, sub.id)}
+                            onDoubleClick={() => { if (isInternalPagesSubPage(sub)) enterFocusWorkspace(stage.id, sub.id); }}
                             className={`group relative p-1.5 rounded cursor-pointer ${
                               currentSubPageId === sub.id
                                 ? 'bg-rose-600'
@@ -272,6 +275,9 @@ export default function PageList() {
                               {sub.name}
                             </div>
                             <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {isInternalPagesSubPage(sub) && (
+                                <button onClick={(e) => { e.stopPropagation(); enterFocusWorkspace(stage.id, sub.id); }} className="p-0.5 bg-cyan-600 hover:bg-cyan-500 rounded" title="专注编辑"><PanelTopOpen size={10} /></button>
+                              )}
                               {!sub.frozen && (
                               <button
                                 onClick={(e) => {
@@ -478,6 +484,7 @@ export default function PageList() {
                           setDraggedSub(null);
                         }}
                         onClick={() => setCurrentSubPage(stage.id, sub.id)}
+                        onDoubleClick={() => { if (isInternalPagesSubPage(sub)) enterFocusWorkspace(stage.id, sub.id); }}
                         className={`group relative p-1.5 rounded cursor-pointer ${
                           currentSubPageId === sub.id
                             ? 'bg-blue-600'
@@ -518,6 +525,9 @@ export default function PageList() {
                         </div>
                         {!isFlat && (
                         <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {isInternalPagesSubPage(sub) && (
+                            <button onClick={(e) => { e.stopPropagation(); enterFocusWorkspace(stage.id, sub.id); }} className="p-0.5 bg-cyan-600 hover:bg-cyan-500 rounded" title="专注编辑"><PanelTopOpen size={10} /></button>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -660,6 +670,7 @@ export default function PageList() {
           customTemplateDir={customTemplateDir}
           pageThumbnails={pageThumbnails}
           presetTemplates={PRESET_TEMPLATES}
+          supportsInternalPages={kind !== 'review'}
           stageIndexOf={(spId) => {
             for (let i = 0; i < currentCourse.stages.length; i++) {
               if (currentCourse.stages[i].subPages.some((sp) => sp.id === spId)) return i;

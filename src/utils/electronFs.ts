@@ -213,7 +213,8 @@ export function collectImageReferences(course: Course): string[] {
   const collect = (stages: Stage[]) => {
     for (const stage of stages) {
       for (const sub of stage.subPages) {
-        for (const el of sub.elements) {
+        const elementGroups = [sub.elements, ...(sub.internalPages?.map((page) => page.elements) ?? [])];
+        for (const el of elementGroups.flat()) {
           for (const value of Object.values(el.props)) {
             if (typeof value === 'string' && value.startsWith('images/')) {
               refs.push(value);

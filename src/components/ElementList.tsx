@@ -1,9 +1,11 @@
 import { useState, type ReactElement } from 'react';
-import { useEditorStore, findSubPage } from '../store/editorStore';
+import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
 import { showToast } from '../utils/toast';
 import { Trash2, Eye, EyeOff, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
 import { useI18n } from '../i18n';
+import { findActiveElementPage } from '../utils/internalPages';
+import type { Element } from '../types';
 
 const CONTAINER_TYPES = ['Box', 'ContainerBox', 'PageTurnBox', 'HBox', 'VBox', 'Panel', 'DragView', 'DragViewBox', 'DragDropBox', 'DragDragBox', 'ChoiceBox', 'MatchingGame', 'OneStrokeGame', 'MazeView', 'KlInputBox'];
 
@@ -15,6 +17,7 @@ export default function ElementList() {
   const { t } = useI18n();
   const currentCourse = useEditorStore((s) => s.currentCourse);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
+  const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement = useEditorStore((s) => s.selectElement);
   const updateElement = useEditorStore((s) => s.updateElement);
@@ -27,7 +30,7 @@ export default function ElementList() {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 
-  const currentPage = findSubPage(currentCourse, currentSubPageId);
+  const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
   const elements = currentPage?.elements ?? [];
 
   if (!currentPage) return null;
@@ -209,7 +212,7 @@ export default function ElementList() {
                     span.textContent = el.name || meta?.label || el.type;
                     return;
                   }
-                  updateElement(el.id, { name } as any);
+                  updateElement(el.id, { name } as Partial<Element>);
                   useEditorStore.getState().saveHistory();
                 }
               };

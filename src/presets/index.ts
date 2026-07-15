@@ -31,9 +31,19 @@ export interface PresetTemplate {
   /** 创建关卡时的默认名字（不匹配 renumberAll 正则则不会被重编号覆盖） */
   defaultStageName?: string;
   defaultSubPageName?: string;
+  editorModel?: 'internal-pages';
 }
 
 export const PRESET_TEMPLATES: PresetTemplate[] = [
+  {
+    id: 'internal-pages-v1',
+    labelKey: 'presetInternalPages',
+    thumbnail: '',
+    elements: [],
+    editorModel: 'internal-pages',
+    defaultStageName: '内部页面关卡',
+    defaultSubPageName: '内部页面关卡',
+  },
   {
     id: 'video',
     labelKey: 'presetVideo',

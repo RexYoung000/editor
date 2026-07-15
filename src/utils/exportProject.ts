@@ -10,6 +10,13 @@ import { getApiBaseUrl } from './apiConfig';
 import { exportPreviewProject } from './exportPreviewProject';
 import { collectImageSizes, isLargeImage } from './imageSize';
 import { isFlatLesson, isVideoOnlyCourse, namespace, type CourseKind } from './courseKind';
+import { collectInternalPageIssues, getElementPages, isPageAction } from './internalPages';
+import {
+  buildInternalPageActionBindings,
+  buildInternalPageRuntime,
+  compileInternalPagesCourse,
+  internalPageActionBody,
+} from './internalPageCompiler';
 
 // ─── Text 烘焙 ───
 
@@ -25,7 +32,7 @@ async function bakeTextElements(course: Course): Promise<Course> {
   const allStages = [...cloned.stages, ...(cloned.previewStages ?? [])];
   for (const stage of allStages) {
     for (const page of stage.subPages) {
-      for (const el of page.elements) {
+      for (const elementPage of getElementPages(page)) for (const el of elementPage.elements) {
         if (el.type !== 'NewTextArea') continue;
         const text = String((el.props as Record<string, unknown> | undefined)?.text ?? '');
         const dataUrl = await renderTextToImage(
@@ -305,6 +312,7 @@ function collectElementsNeedingVar(page: SubPage): Set<string> {
 
   // 1. 有 actions 的元素 + 它们的 action 目标
   for (const el of elements) {
+    if (typeof el.props?.__internalPageRootVar === 'string') needsVar.add(el.id);
     if (el.actions && el.actions.length > 0) {
       needsVar.add(el.id);
       for (const action of el.actions) {
@@ -458,7 +466,7 @@ function buildSceneNode(
     filterOptionalFileFields(props, MATCHING_GAME_OPTIONAL_FILE_KEYS);
   }
   // MatchingItem：_itemImage 是编辑器专用字段，导出时转换为子 Image 节点
-  let matchingItemImageChild: Record<string, unknown>[] = [];
+  const matchingItemImageChild: Record<string, unknown>[] = [];
   if (element.type === 'MatchingItem') {
     const itemImage = rewritten._itemImage as string | undefined;
     if (typeof itemImage === 'string' && itemImage !== '') {
@@ -537,7 +545,7 @@ function buildSceneNode(
 
   // DragObj/DropObj：若有 skin，生成 Image 子节点（编辑器不创建子元素，发布时才生成）
   // 子 Image 用 anchor 0.5 + 父中心位置实现居中（与编辑器视觉一致）
-  let dragSkinChildren: Record<string, unknown>[] = [];
+  const dragSkinChildren: Record<string, unknown>[] = [];
   if ((element.type === 'DragObj' || element.type === 'DropObj') && props.skin) {
     const skinVal = props.skin as string;
     delete props.skin;
@@ -689,11 +697,13 @@ function buildTopLevelSceneChildren(
       groups.push({ wrapper: null, elements: [el] });
       continue;
     }
-    const idx = wrapperIndex.get(wrapper.type);
+    const pageScope = typeof el.props.__internalPageId === 'string' ? el.props.__internalPageId : '';
+    const wrapperKey = `${pageScope}:${wrapper.type}`;
+    const idx = wrapperIndex.get(wrapperKey);
     if (idx !== undefined) {
       groups[idx].elements.push(el);
     } else {
-      wrapperIndex.set(wrapper.type, groups.length);
+      wrapperIndex.set(wrapperKey, groups.length);
       groups.push({ wrapper, elements: [el] });
     }
   }
@@ -874,6 +884,10 @@ function makeActionBuilder(
     switch (action.actionType) {
       case 'none':
         return '';
+      case 'navigateInternalPage':
+      case 'openInternalDialog':
+      case 'closeInternalDialog':
+        return internalPageActionBody(action);
       case 'toggleVisible':
         return `${t} if (t) t.visible = !t.visible;`;
       case 'setVisible':
@@ -1112,6 +1126,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   };
   const buildActionBody = makeActionBuilder(varAssignment, resourceMap, uiNamespace);
   let initCode = '';
+  const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
 
   // 口才反馈动画：如果有 onClickInitConfirmCH / *WithLock / onClickInitGameConfirmCH / *WithLock 或 playKcRightAni / playKcWrongAni，需要在类末尾追加 playRightAni/playWrongAni
   const hasCHConfirm = page.elements.some(el =>
@@ -1167,6 +1182,8 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
 
     for (const [rawEvent, actions] of groupedByEvent) {
       const event = eventMap[rawEvent] ?? rawEvent;
+
+      if (page.editorModel === 'internal-pages' && rawEvent === 'onLoad') continue;
 
       // onAutoPlay：Spine 直接播放，不绑定事件；循环行为来自 action.spineLoop（默认 true）
       if (rawEvent === 'onAutoPlay') {
@@ -1313,7 +1330,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
 
       // onClickSound：在每个动作前自动播放点击音效
       const clickSoundPrefix = rawEvent === 'onClickSound' ? `this.playSound("${uiNamespace}/sound/btn_click.wav"); ` : '';
-      for (const action of actions) {
+      for (const action of [...actions].sort((a, b) => Number(isPageAction(a)) - Number(isPageAction(b)))) {
         const body = buildActionBody(action, elRef, page, el);
         if (body) initCode += `        ${elRef}.on('${event}', this, function() { ${clickSoundPrefix}${body} });\n`;
       }
@@ -1480,6 +1497,8 @@ import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
 `
     : '';
 
+  initCode += internalRuntime.initCode;
+
   return `import { ui } from "../../ui/layaMaxUI";
 
 import Event = Laya.Event;
@@ -1498,7 +1517,7 @@ export default class ${sceneName} extends ui.${uiNamespace}.${sceneName}UI {
 
 ${initCode}        //add script
     }
-${chFeedbackMethods}    //add function
+${chFeedbackMethods}${internalRuntime.methodsCode}    //add function
 }`;
 }
 
@@ -1507,7 +1526,6 @@ function generateHomeworkSceneTs(
   page: SubPage,
   resourceMap: Map<string, string>,
   varAssignment: Map<string, string>,
-  kind?: CourseKind,
 ): string {
   const getVar = (el: Element): string => {
     return varAssignment.get(el.id) || (el.name || el.id).replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
@@ -1516,6 +1534,8 @@ function generateHomeworkSceneTs(
 
   let initCode = '';
   let checkResultCode = '';
+  const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
 
   // ChoiceBox 自动判定：clickHanler 绑到 checkResult；result 在 checkResult 内根据 isRight/isNull 写值
   for (const el of page.elements) {
@@ -1680,6 +1700,8 @@ import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
 `
     : '';
 
+  initCode += internalRuntime.initCode;
+
   return `import { ui } from "../../ui/layaMaxUI";
 import KlInputImage = com.klzz.ui.custom.KeyBoard.KlInputImage;
 import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
@@ -1723,6 +1745,7 @@ ${initCode}        //add script
         this.currFrame = Laya.timer.currFrame;
 ${checkResultCode}        //add checkResult
     }
+${internalRuntime.methodsCode}
 }`;
 }
 
@@ -2124,7 +2147,7 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
 
 // ─── 复习课 config.json ───
 
-function buildReviewConfigJson(course: Course, resourceMap: Map<string, string>): Record<string, unknown> {
+function buildReviewConfigJson(course: Course): Record<string, unknown> {
   const pages = course.stages.map((stage, si) => {
     const videoPage = stage.subPages.find(p => p.frozen);
     const videoEl = videoPage?.elements.find(e => e.locked && e.type === 'Video');
@@ -2219,6 +2242,14 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
   const dirPath = getCourseDirPath(course.id);
   if (!dirPath) throw new Error('未找到课件目录，请先保存课件');
 
+  if (!options.skipSvn) {
+    const blockingIssues = collectInternalPageIssues(course).filter((issue) => issue.severity === 'blocking');
+    if (blockingIssues.length > 0) {
+      const details = blockingIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+      throw new Error(`内部页面关系尚未完成，不能发布：\n\n${details}`);
+    }
+  }
+
   const eApi = window.electronAPI;
 
   // 写入编辑器版本信息到课件根目录（所有 kind 共用一份，每次发布覆盖）
@@ -2233,7 +2264,6 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
 
   const isFlat = isFlatLesson(course.kind);
   const isReview = isVideoOnlyCourse(course.kind);
-  const isSEvaluation = course.kind === 'sEvaluation';
 
   // 清理整个 project/{courseId}/ 目录，避免残留过期的子工程（如删除预习后 Game1_PREVIEW 还在）
   const projectParent = `${dirPath}/project/${course.id}`;
@@ -2244,7 +2274,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
     await eApi.removeDir(`${dirPath}/esBuild`);
   }
 
-  const baked = await bakeTextElements(course);
+  const baked = compileInternalPagesCourse(await bakeTextElements(course));
   const resourceMap = collectResources(baked, namespace(course.kind));
 
   // 补充 Spine 动画目录中的音频文件到 resourceMap
@@ -2255,7 +2285,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
 
   if (isReview) {
     // ─── 复习课编辑器工程 ───
-    const configJson = buildReviewConfigJson(baked, resourceMap);
+    const configJson = buildReviewConfigJson(baked);
     const projectRoot = `${dirPath}/project/${course.id}/Game1_REVIEW`;
 
     const serverUrl = getApiBaseUrl();
@@ -2290,7 +2320,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
       }
     }
 
-    return;
+    return { svnSubmitted: false };
   } else if (isFlat) {
     // ─── 作业/专题测评编辑器工程 ───
     const scenes: { name: string; json: Record<string, unknown>; page: SubPage; varAssignment: Map<string, string> }[] = [];
@@ -2319,7 +2349,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
         `${projectRoot}/laya/pages/game_hw/${name}.scene`,
         JSON.stringify(json, null, 2),
       );
-      const tsContent = generateHomeworkSceneTs(name, scenePage, resourceMap, varAssignment, course.kind);
+      const tsContent = generateHomeworkSceneTs(name, scenePage, resourceMap, varAssignment);
       await eApi.writeTextFile(
         `${projectRoot}/src/view/game_hw/${name}.ts`,
         tsContent,

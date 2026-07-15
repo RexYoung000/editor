@@ -1,4 +1,4 @@
-import { useEditorStore, findSubPage } from '../store/editorStore';
+import { useEditorStore } from '../store/editorStore';
 import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
 import type { Element } from '../types';
 import {
@@ -7,7 +7,7 @@ import {
   initWorldRoot, setWorldTransform,
 } from '../utils/layaBridge';
 import { applyKlProps, drawPlaceholder } from '../utils/laya/components';
-import { objects, canvasRoot } from '../utils/laya/core';
+import { objects, canvasRoot, laya } from '../utils/laya/core';
 import { cleanupEditorInteraction } from '../utils/laya/selection';
 import CanvasOverlay from './CanvasOverlay';
 import { useI18n } from '../i18n';
@@ -17,6 +17,7 @@ import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
+import { findActiveElementPage, findCanvasElementPage } from '../utils/internalPages';
 
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
@@ -82,6 +83,7 @@ export default function Canvas() {
   const { t } = useI18n();
   const currentCourse    = useEditorStore((s) => s.currentCourse);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
+  const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement    = useEditorStore((s) => s.selectElement);
   const selectElements   = useEditorStore((s) => s.selectElements);
@@ -117,7 +119,7 @@ export default function Canvas() {
   const worldRef = useRef(world);
   useLayoutEffect(() => { worldRef.current = world; }, [world]);
 
-  const currentPage = findSubPage(currentCourse, currentSubPageId);
+  const currentPage = findCanvasElementPage(currentCourse, currentSubPageId, currentInternalPageId);
 
   const showGridRef = useRef(false);
   const snap = (v: number) => showGridRef.current ? Math.round(v / 20) * 20 : Math.round(v);
@@ -145,7 +147,7 @@ export default function Canvas() {
       });
     }
 
-    const L = window.Laya as any;
+    const L = laya();
     L.stage.screenAdaptationEnabled = false;
 
     // Laya 通过 canvas CSS transform 实现 viewport 偏移渲染（如左侧栏宽度 156px），
@@ -248,7 +250,7 @@ export default function Canvas() {
     }
     clearAllObjects();
     prevElementsRef.current = new Map();
-  }, [currentCourse?.id, layaReady]);
+  }, [currentCourse, layaReady]);
 
   // ─── 页面切换：全量重建 ───
   useEffect(() => {
@@ -260,10 +262,10 @@ export default function Canvas() {
       prevElementsRef.current = new Map();
       return;
     }
-    if (prevPageIdRef.current && prevPageIdRef.current !== currentSubPageId) {
+    if (prevPageIdRef.current && prevPageIdRef.current !== currentPage.id) {
       captureThumb(prevPageIdRef.current);
     }
-    prevPageIdRef.current = currentSubPageId;
+    prevPageIdRef.current = currentPage.id;
     clearAllObjects();
     prevElementsRef.current = new Map();
     const topLevel = currentPage.elements.filter(e => !e.parentId);
@@ -287,12 +289,12 @@ export default function Canvas() {
         if (cancelled) return;
         requestAnimationFrame(() => {
           if (cancelled) return;
-          captureThumb(currentSubPageId!);
+          captureThumb(currentPage.id);
         });
       });
     }, 500);
     return () => { cancelled = true; };
-  }, [currentSubPageId, layaReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentPage?.id, layaReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── 统一同步 effect：增删改 + z-order ───
   useEffect(() => {
@@ -425,7 +427,7 @@ export default function Canvas() {
     return () => {
       try {
         // Stop Laya frameLoop
-        const L = window.Laya as any;
+        const L = laya();
         if (L && frameLoopFnRef.current) {
           L.timer.clear(null, frameLoopFnRef.current);
         }
@@ -491,7 +493,11 @@ export default function Canvas() {
     if (!host) return;
     const onDblClick = (e: MouseEvent) => {
       const state = useEditorStore.getState();
-      const page = findSubPage(state.currentCourse, state.currentSubPageId);
+      const page = findActiveElementPage(
+        state.currentCourse,
+        state.currentSubPageId,
+        state.currentInternalPageId,
+      );
       if (!page) return;
       // client → world 坐标
       const rect = host.getBoundingClientRect();
@@ -765,7 +771,7 @@ export default function Canvas() {
         showToast(t('uploadFailed'), 'error');
       }
     }
-  }, [currentCourse, currentSubPageId]);
+  }, [currentCourse, currentSubPageId, currentPage?.frozen, selectElement, t]);
 
   // 行内编辑元素
   const editingElement = editingId
@@ -784,6 +790,11 @@ export default function Canvas() {
         )}
         {/* layaHost 铺满视口 */}
         <div ref={layaHostRef} data-laya-host className="absolute inset-0" />
+        {currentPage?.kind === 'dialog' && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 py-1 rounded-full bg-slate-950/80 border border-violet-400/40 text-[11px] text-violet-200">
+            弹窗编辑 · 主界面底板只读
+          </div>
+        )}
         {layaReady && (
           <CanvasOverlay
             layaHostRef={layaHostRef}

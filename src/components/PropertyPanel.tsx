@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useEditorStore, findSubPage } from '../store/editorStore';
 import { showToast } from '../utils/toast';
 import { elementMeta } from '../elements/elementMeta';
@@ -18,6 +18,7 @@ import { getObject, syncProps } from '../utils/layaBridge';
 import { readFileAsDataUrl } from '../utils/electronFs';
 import { translateLabel } from '../elements/elementMetaI18n';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
+import { collectInternalPageIssues, findActiveElementPage, isInternalPagesSubPage } from '../utils/internalPages';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -26,6 +27,7 @@ export default function PropertyPanel() {
   const { t, language } = useI18n();
   const currentCourse = useEditorStore((s) => s.currentCourse);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
+  const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const updateElement = useEditorStore((s) => s.updateElement);
     const deleteElement = useEditorStore((s) => s.deleteElement);
@@ -42,45 +44,35 @@ export default function PropertyPanel() {
   const removeDragObj = useEditorStore((s) => s.removeDragObj);
   const setProxySkin = useEditorStore((s) => s.setProxySkin);
   const changePageTurnButtonType = useEditorStore((s) => s.changePageTurnButtonType);
+  const renameInternalPage = useEditorStore((s) => s.renameInternalPage);
+  const updateDialogSettings = useEditorStore((s) => s.updateDialogSettings);
+  const setNoEntryDeferred = useEditorStore((s) => s.setNoEntryDeferred);
+  const saveHistory = useEditorStore((s) => s.saveHistory);
 
   const [editingValues, setEditingValues] = useState<Record<string, string>>({});
-  // 缓存待提交的 name：选中变化时先提交再清缓冲，防止 input 被卸载导致修改丢失
-  const pendingNameRef = useRef<{ id: string; name: string } | null>(null);
-  useEffect(() => {
-    // 先提交缓存的 name 修改
-    const pending = pendingNameRef.current;
-    if (pending) {
-      const state = useEditorStore.getState();
-      const course = state.currentCourse;
-      if (course) {
-        for (const stage of course.stages) {
-          for (const sp of stage.subPages) {
-            const el = sp.elements.find(e => e.id === pending.id);
-            if (el) {
-              const newName = pending.name.trim();
-              if (newName && newName !== el.name) {
-                state.updateElement(pending.id, { name: newName });
-                state.saveHistory();
-              }
-              break;
-            }
-          }
-        }
-      }
-      pendingNameRef.current = null;
-    }
-    setEditingValues({});
-    setSkinEditorOpen(false);
-    setBindKeyboardOpen(false);
-    setTabImgPickerOpen(false);
-    setOkBtnPickerOpen(false);
-  }, [selectedElementIds]);
   const [skinEditorOpen, setSkinEditorOpen] = useState(false);
   const [bindKeyboardOpen, setBindKeyboardOpen] = useState(false);
   const [tabImgPickerOpen, setTabImgPickerOpen] = useState(false);
   const [okBtnPickerOpen, setOkBtnPickerOpen] = useState(false);
 
-  const currentPage = findSubPage(currentCourse, currentSubPageId);
+  useEffect(() => {
+    queueMicrotask(() => {
+      setEditingValues({});
+      setSkinEditorOpen(false);
+      setBindKeyboardOpen(false);
+      setTabImgPickerOpen(false);
+      setOkBtnPickerOpen(false);
+    });
+  }, [selectedElementIds]);
+
+  const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
+  const currentSubPage = findSubPage(currentCourse, currentSubPageId);
+  const activeInternalPage = isInternalPagesSubPage(currentSubPage)
+    ? currentSubPage.internalPages.find((page) => page.id === currentInternalPageId) ?? null
+    : null;
+  const activePageIssues = currentCourse
+    ? collectInternalPageIssues(currentCourse).filter((issue) => issue.subPageId === currentSubPageId && issue.pageId === (currentInternalPageId ?? currentSubPageId))
+    : [];
   const currentStage = (() => {
     if (!currentCourse || !currentSubPageId) return undefined;
     const found = currentCourse.stages.find((stage) => stage.subPages.some((sp) => sp.id === currentSubPageId));
@@ -248,7 +240,7 @@ export default function PropertyPanel() {
       // 1) 更新 props._itemImage，并通过 syncProps 触发 applyKlProps 重绘画布（替换占位图为图片）
       selectedElements.forEach((el) => {
         if (el.type !== 'MatchingItem') return;
-        const newProps = { ...el.props, _itemImage: url };
+        const newProps: Record<string, unknown> = { ...el.props, _itemImage: url };
         // 清除图片时，设置 _naturalWidth 和 _naturalHeight 为 undefined，恢复默认 80x80
         if (!url) {
           newProps._naturalWidth = undefined;
@@ -415,9 +407,55 @@ export default function PropertyPanel() {
     <div data-property-panel className="w-64 bg-slate-800 border-l border-slate-700 flex flex-col">
       <div className="flex-1 overflow-y-auto p-3 space-y-1">
         {!hasSelection ? (
-          <div className="flex items-center justify-center h-full">
-            <span className="text-xs text-slate-500">{t('noSelection')}</span>
-          </div>
+          isInternalPagesSubPage(currentSubPage) ? (
+            <div className="space-y-4">
+              <div>
+                <div className="text-[10px] text-slate-500 mb-1">页面类型</div>
+                <div className="text-sm font-medium text-slate-100">{activeInternalPage?.kind === 'dialog' ? '弹窗' : activeInternalPage?.kind === 'content' ? '内容页' : '主界面'}</div>
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-500 mb-1">页面名称</label>
+                <input
+                  key={activeInternalPage?.id ?? 'main'}
+                  defaultValue={activeInternalPage?.name ?? '主界面'}
+                  disabled={!activeInternalPage}
+                  onBlur={(event) => { if (activeInternalPage && !renameInternalPage(activeInternalPage.id, event.target.value)) event.target.value = activeInternalPage.name; }}
+                  onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                  className="w-full px-2 py-1.5 text-xs bg-slate-700 border border-slate-600 rounded disabled:opacity-60"
+                />
+              </div>
+              {activeInternalPage?.kind === 'dialog' && (
+                <div className="space-y-3 border-t border-slate-700 pt-3">
+                  <div className="text-xs font-medium text-slate-300">遮罩设置</div>
+                  <label className="flex items-center justify-between text-xs text-slate-400">
+                    <span>遮罩颜色</span>
+                    <input type="color" value={activeInternalPage.dialogSettings?.maskColor ?? '#000000'} onChange={(event) => updateDialogSettings(activeInternalPage.id, { maskColor: event.target.value })} onBlur={saveHistory} />
+                  </label>
+                  <label className="block text-xs text-slate-400">
+                    <div className="flex justify-between mb-1"><span>遮罩透明度</span><span>{Math.round((activeInternalPage.dialogSettings?.maskOpacity ?? 0.55) * 100)}%</span></div>
+                    <input className="w-full" type="range" min="0" max="1" step="0.05" value={activeInternalPage.dialogSettings?.maskOpacity ?? 0.55} onChange={(event) => updateDialogSettings(activeInternalPage.id, { maskOpacity: Number(event.target.value) })} onMouseUp={saveHistory} onTouchEnd={saveHistory} />
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-slate-300">
+                    <input type="checkbox" checked={activeInternalPage.dialogSettings?.closeOnMask ?? false} onChange={(event) => { updateDialogSettings(activeInternalPage.id, { closeOnMask: event.target.checked }); saveHistory(); }} /> 点击遮罩关闭
+                  </label>
+                  <div className="text-[10px] text-slate-500">底板来源：当前小关卡主界面（实时同步）</div>
+                </div>
+              )}
+              {activeInternalPage?.kind === 'content' && activePageIssues.some((issue) => issue.code === 'no-entry') && (
+                <label className="flex items-center gap-2 text-xs text-slate-300 border-t border-slate-700 pt-3">
+                  <input type="checkbox" checked={activeInternalPage.noEntryDeferred ?? false} onChange={(event) => { setNoEntryDeferred(activeInternalPage.id, event.target.checked); saveHistory(); }} /> 暂不配置进入按钮
+                </label>
+              )}
+              {activePageIssues.length > 0 && (
+                <div className="border-t border-slate-700 pt-3 space-y-2">
+                  <div className="text-xs font-medium text-slate-300">页面提醒</div>
+                  {activePageIssues.map((issue, index) => <div key={`${issue.code}-${index}`} className={`text-[10px] leading-relaxed ${issue.severity === 'blocking' ? 'text-red-300' : 'text-amber-300'}`}>{issue.message}</div>)}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full"><span className="text-xs text-slate-500">{t('noSelection')}</span></div>
+          )
         ) : (
             <>
               {single && (
@@ -440,13 +478,11 @@ export default function PropertyPanel() {
                         onChange={(e) => {
                           const filtered = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
                           setEditingValues(prev => ({ ...prev, name: filtered }));
-                          pendingNameRef.current = { id: single.id, name: filtered };
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             const newName = editingValues.name?.trim();
                             if (!newName) {
-                              pendingNameRef.current = null;
                               setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
                               (e.target as HTMLInputElement).blur();
                               return;
@@ -459,10 +495,8 @@ export default function PropertyPanel() {
                               updateElement(single.id, { name: newName } as Partial<Element>);
                               useEditorStore.getState().saveHistory();
                             }
-                            pendingNameRef.current = null;
                             (e.target as HTMLInputElement).blur();
                           } else if (e.key === 'Escape') {
-                            pendingNameRef.current = null;
                             setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
                             (e.target as HTMLInputElement).blur();
                           }
@@ -470,19 +504,16 @@ export default function PropertyPanel() {
                         onBlur={() => {
                           const newName = editingValues.name?.trim();
                           if (!newName || newName === single.name) {
-                            pendingNameRef.current = null;
                             setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
                             return;
                           }
                           if (/^\d/.test(newName)) {
                             showToast(t('nameStartDigit'), 'error');
-                            pendingNameRef.current = null;
                             setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
                             return;
                           }
                           updateElement(single.id, { name: newName } as Partial<Element>);
                           useEditorStore.getState().saveHistory();
-                          pendingNameRef.current = null;
                           setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
                         }}
                       />

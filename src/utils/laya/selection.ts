@@ -4,9 +4,9 @@
 // (CSS transform reset to none, but _canvasTransform tx/ty kept).
 
 import type { LayaAny } from './core';
-import type { Element } from '../../types';
+import type { Course, Element } from '../../types';
 import { laya, objects, getWorldTransform, setHideSelectionBox } from './core';
-import { findSubPage } from '../findSubPage';
+import { findActiveElementPage } from '../internalPages';
 
 function getAbsoluteWorldRect(el: Element, allElements: Element[]) {
   let absX = el.x, absY = el.y;
@@ -29,11 +29,20 @@ function getAbsoluteWorldRect(el: Element, allElements: Element[]) {
   return { x: absX, y: absY, w: el.width, h: el.height };
 }
 
+type EditorStateSnapshot = {
+  currentCourse: Course | null;
+  currentSubPageId: string | null;
+  currentInternalPageId: string | null;
+  selectedElementIds: string[];
+};
+
+type EditorStoreAccess = EditorStateSnapshot | { getState: () => EditorStateSnapshot };
+
 export type EditorCallbacks = {
   onSelect: (id: string) => void;
   onDeselect: () => void;
   onMarqueeStart: (wx: number, wy: number) => void;
-  getStore: () => any;
+  getStore: () => EditorStoreAccess;
   /** DOM host element — available for external callers that need hostRect */
   getHostElement: () => HTMLElement | null;
 };
@@ -115,11 +124,17 @@ export function initEditorInteraction(cb: EditorCallbacks): void {
 
     // 收集当前选中元素的所有祖先 ID（点击祖先容器不应抢夺子元素的选中）
     const ancestorIds = new Set<string>();
+    let selectableIds: Set<string> | null = null;
     const store = _editorCb?.getStore?.();
     if (store) {
-      const state = store.getState ? store.getState() : store;
-      const page = findSubPage(state.currentCourse, state.currentSubPageId);
+      const state = 'getState' in store ? store.getState() : store;
+      const page = findActiveElementPage(
+        state.currentCourse,
+        state.currentSubPageId,
+        state.currentInternalPageId,
+      );
       if (page) {
+        selectableIds = new Set(page.elements.map((element) => element.id));
         if (_overlayHandling) return;
 
         const selectedIds = state.selectedElementIds || [];
@@ -161,6 +176,7 @@ export function initEditorInteraction(cb: EditorCallbacks): void {
     while (node && node !== L.stage) {
       for (const [id, obj] of _objs) {
         if (obj === node) {
+          if (selectableIds && !selectableIds.has(id)) continue;
           if (ancestorIds.has(id)) return;
           _editorCb?.onSelect(id);
           return;

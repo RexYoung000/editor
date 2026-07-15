@@ -28,7 +28,7 @@ forge 编辑器的"自定义关卡模板"功能。模板**不存 localStorage**�
 <templateRootDir>/
   templates.json           # 索引：[{ id, name, createdAt, elementCount, thumbnail? }]
   <templateId>/
-    template.json          # { id, name, elements, createdAt } —— elements 内引用已映射到模板侧
+    template.json          # 旧格式保存 elements；内部页面格式保存完整 subPage
     thumbnail.png          # 缩略图（保存时由 dataUrl 转 PNG 落盘）
     images/
       img_<32位md5>.<ext>            # 用户上传图片
@@ -70,20 +70,28 @@ forge 编辑器的"自定义关卡模板"功能。模板**不存 localStorage**�
 
 [customTemplateFs.saveTemplate](../src/utils/customTemplateFs.ts) 的去重流程：
 
-1. `collectResourceRefs(elements)` 扫元素树拿到引用集（image / video / sound / spineSkPaths）。
+1. 旧模板扫描 `elements`；内部页面模板同时扫描主界面和全部 `internalPages[].elements`，拿到引用集（image / video / sound / spineSkPaths）。
 2. 对每个普通文件引用：算源 MD5 → 模板侧目标名 `<prefix>_<full-md5>.<ext>` → 已存在则跳过拷贝，否则 `copyLocalFile` 拷过去。
 3. Spine 整目录：按 manifest 反查 `aniN → spineHash`（拿不到则用 `.sk` 文件本身的 MD5 兜底） → 模板侧目录名 `images/animation/<spineHash>/` → 已存在跳过，否则 `copyDir` 整目录拷贝（含 .png 纹理 + 同目录音频）。
-4. 用 `pathMap` 调 `rewriteResourceRefs` 把 elements 内的所有路径换成模板侧路径。
+4. 用 `pathMap` 调 `rewriteResourceRefs` 把所有页面元素内的路径换成模板侧路径。
 5. 写 `template.json`、`thumbnail.png`，更新根目录的 `templates.json` 索引。
 
 ### 加载模板
 
-[customTemplateFs.applyTemplate](../src/utils/customTemplateFs.ts) 是反向流程：
+[customTemplateFs.applyTemplate](../src/utils/customTemplateFs.ts) 是反向流程。缺少 `model` 的历史模板继续按单页元素模板处理；`model: 'internal-pages-v1'` 的模板整体恢复一个小关卡：
 
 1. `collectResourceRefs(template.elements)` 同上。
 2. 普通文件：算源 MD5 → 取 6 位作短 hash → 优先扫课件目录里同前缀的同扩展名文件验完整 hash 一致即复用；不命中再写新文件用 `<prefix>_<6位>.<ext>` 命名；若 6 位前缀已被占用且 hash 不一致（极少见），降级到完整 hash 文件名。
 3. Spine：模板侧路径 `images/animation/<spineHash>/...`，先查课件 `.manifest.json` 是否已有该 spineHash → 有就复用对应 `aniN`，无则扫 animation 子目录分配新的 `aniN` → `copyDir` 整目录拷贝 → 更新 manifest。
-4. `rewriteResourceRefs` 把模板侧路径换成课件侧路径，返回新的 elements 数组（可直接塞进 `SubPage.elements`）。
+4. `rewriteResourceRefs` 把模板侧路径换成课件侧路径；内部页面模板会为小关卡、页面、元素和动作重新生成 ID，并同步重写页面与元素关系。
+5. 模板保存先写临时目录，资源与 JSON 完整成功后再原子进入索引；应用失败不会创建残缺小关卡。
+
+### 内部页面模板结构
+
+- `model: 'internal-pages-v1'` 标记完整小关卡模板；旧格式视为 `legacy-elements`。
+- `subPage.elements` 保存主界面，`subPage.internalPages` 保存内容页和弹窗，遮罩设置和页面动作一并保留。
+- 索引增加 `model`、`pageCount`，`elementCount` 统计全部页面；卡片缩略图仍使用主界面并显示页数。
+- 关系问题的“暂不配置”状态不随模板复制，应用后按新小关卡重新计算提醒。
 
 ---
 
@@ -106,7 +114,7 @@ Spine 元素的 `props.url` 是 `.sk` 文件路径（如 `images/animation/ani1/
 |---|---|---|
 | editorStore | `loadCustomTemplates()` | 读取根目录索引 + 加载缩略图 |
 | editorStore | `setCustomTemplateDir(dir)` | 写入 localStorage 并刷新列表 |
-| editorStore | `saveAsCustomTemplate(subPageId)` | 保存当前小关卡为模板，返回 `{ ok, template }` 或 `{ ok: false, error }` |
+| editorStore | `saveAsCustomTemplate(subPageId)` | 普通小关卡保存单页元素；内部页面小关卡保存主界面、全部内部页、关系与资源 |
 | editorStore | `addStageFromTemplate / addSubPageFromTemplate / addPreviewStageFromTemplate` | 加载模板到当前课件（调 `applyTemplate` 拷资源 + 重写路径，再入 store） |
 | editorStore | `renameCustomTemplate(id, name)` | 同步 `templates.json` 索引和 `template.json` 主体 |
 | editorStore | `removeCustomTemplateAction(id)` | `removeDir` 删整个模板目录 + 更新索引 |

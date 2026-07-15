@@ -1,5 +1,6 @@
 import type { Element, SubPage } from '../types';
 import { collectResourceRefs, rewriteResourceRefs } from './collectResourceRefs';
+import { getElementPages, isInternalPagesSubPage } from './internalPages';
 
 /**
  * 自定义模板（基于本地文件夹）的存取与资源同步。
@@ -66,6 +67,8 @@ export interface TemplateIndexEntry {
   elementCount: number;
   /** 相对路径，相对于模板根目录，如 '<id>/thumbnail.png' */
   thumbnail?: string;
+  model?: 'legacy-elements' | 'internal-pages-v1';
+  pageCount?: number;
 }
 
 export interface CustomTemplate {
@@ -73,6 +76,9 @@ export interface CustomTemplate {
   name: string;
   /** 元素树，资源路径已映射到模板侧（images/img_<full-md5>.png 等） */
   elements: Element[];
+  model?: 'legacy-elements' | 'internal-pages-v1';
+  subPage?: SubPage;
+  pageCount?: number;
   createdAt: number;
   /** dataUrl，模板加载时由 thumbnail.png 转出供 UI 显示 */
   thumbnail?: string;
@@ -173,6 +179,9 @@ export async function listTemplates(): Promise<CustomTemplate[]> {
       id: tmpl.id,
       name: tmpl.name,
       elements: tmpl.elements ?? [],
+      model: tmpl.model ?? 'legacy-elements',
+      subPage: tmpl.subPage,
+      pageCount: tmpl.pageCount ?? ent.pageCount ?? 1,
       createdAt: tmpl.createdAt ?? ent.createdAt,
       thumbnail: thumbDataUrl,
       thumbnailRelPath: ent.thumbnail,
@@ -232,6 +241,35 @@ export interface SaveTemplateOptions {
   name?: string;
 }
 
+export function collectSubPageResourceRefs(subPage: SubPage) {
+  const merged = {
+    images: new Set<string>(),
+    videos: new Set<string>(),
+    sounds: new Set<string>(),
+    spineSkPaths: new Set<string>(),
+  };
+  for (const page of getElementPages(subPage)) {
+    const refs = collectResourceRefs(page.elements);
+    refs.images.forEach((value) => merged.images.add(value));
+    refs.videos.forEach((value) => merged.videos.add(value));
+    refs.sounds.forEach((value) => merged.sounds.add(value));
+    refs.spineSkPaths.forEach((value) => merged.spineSkPaths.add(value));
+  }
+  return merged;
+}
+
+export function rewriteSubPageResources(subPage: SubPage, pathMap: Map<string, string>): SubPage {
+  return {
+    ...subPage,
+    elements: rewriteResourceRefs(subPage.elements, pathMap),
+    internalPages: subPage.internalPages?.map((page) => ({ ...page, elements: rewriteResourceRefs(page.elements, pathMap) })),
+  };
+}
+
+export function customTemplateModel(subPage: SubPage): 'legacy-elements' | 'internal-pages-v1' {
+  return isInternalPagesSubPage(subPage) ? 'internal-pages-v1' : 'legacy-elements';
+}
+
 export async function saveTemplate(opts: SaveTemplateOptions): Promise<CustomTemplate> {
   const rootDir = getTemplateDir();
   if (!rootDir) throw new Error('NO_TEMPLATE_DIR');
@@ -243,15 +281,19 @@ export async function saveTemplate(opts: SaveTemplateOptions): Promise<CustomTem
   const name = opts.name ?? generateAutoName(index);
   if (isNameTaken(name, index)) throw new Error('NAME_TAKEN');
 
-  const tmplDir = joinPath(rootDir, id);
+  const finalTmplDir = joinPath(rootDir, id);
+  const tmplDir = joinPath(rootDir, `${id}.tmp`);
+  let committed = false;
+  try {
+  if (await eApi().pathExists(tmplDir)) await eApi().removeDir(tmplDir);
   await eApi().ensureDir(tmplDir);
   await eApi().ensureDir(joinPath(tmplDir, 'images'));
   await eApi().ensureDir(joinPath(tmplDir, 'images', 'animation'));
   await eApi().ensureDir(joinPath(tmplDir, 'images', 'sound'));
 
   // 1) 扫元素树的资源引用
-  const elements: Element[] = JSON.parse(JSON.stringify(opts.sourceSubPage.elements));
-  const refs = collectResourceRefs(elements);
+  const sourceSubPage: SubPage = JSON.parse(JSON.stringify(opts.sourceSubPage));
+  const refs = collectSubPageResourceRefs(sourceSubPage);
   const pathMap = new Map<string, string>();
 
   // 2) 普通文件资源（图/视频/音频）：MD5 → 模板侧用 32 位 hash 命名
@@ -299,13 +341,16 @@ export async function saveTemplate(opts: SaveTemplateOptions): Promise<CustomTem
   }
 
   // 4) 用映射重写元素引用
-  const remappedElements = rewriteResourceRefs(elements, pathMap);
+  const remappedSubPage = rewriteSubPageResources(sourceSubPage, pathMap);
+  const remappedElements = remappedSubPage.elements;
 
   // 5) 写 template.json
   const template: CustomTemplate = {
     id,
     name,
     elements: remappedElements,
+    model: customTemplateModel(sourceSubPage),
+    ...(isInternalPagesSubPage(sourceSubPage) ? { subPage: remappedSubPage, pageCount: getElementPages(sourceSubPage).length } : {}),
     createdAt: Date.now(),
   };
   await eApi().writeTextFile(joinPath(tmplDir, 'template.json'), JSON.stringify(template, null, 2));
@@ -321,13 +366,22 @@ export async function saveTemplate(opts: SaveTemplateOptions): Promise<CustomTem
     }
   }
 
-  // 7) 更新索引（新模板追加到末尾）
+  // 7) 完整写好临时目录后再原子改名，索引永远不指向半成品
+  if (!(await eApi().renameFile(tmplDir, finalTmplDir))) {
+    await eApi().removeDir(tmplDir);
+    throw new Error('模板临时目录提交失败');
+  }
+  committed = true;
+
+  // 8) 更新索引（新模板追加到末尾）
   index.push({
     id,
     name,
     createdAt: template.createdAt,
-    elementCount: remappedElements.length,
+    elementCount: getElementPages(remappedSubPage).reduce((sum, page) => sum + page.elements.length, 0),
     thumbnail: thumbnailRelPath,
+    model: template.model,
+    pageCount: template.pageCount ?? 1,
   });
   await writeIndex(rootDir, index);
 
@@ -335,10 +389,17 @@ export async function saveTemplate(opts: SaveTemplateOptions): Promise<CustomTem
     id,
     name,
     elements: remappedElements,
+    model: template.model,
+    subPage: template.subPage,
+    pageCount: template.pageCount,
     createdAt: template.createdAt,
     thumbnail: opts.thumbnailDataUrl,
     thumbnailRelPath,
   };
+  } catch (error) {
+    await eApi().removeDir(committed ? finalTmplDir : tmplDir);
+    throw error;
+  }
 }
 
 async function copyFileToTemplate(
@@ -390,11 +451,16 @@ export interface ApplyTemplateOptions {
   template: CustomTemplate;
 }
 
+export interface AppliedTemplate {
+  model: 'legacy-elements' | 'internal-pages-v1';
+  subPage: SubPage;
+}
+
 /**
  * 把模板的 elements 复制一份，并把内部资源引用重写到当前课件的本地路径。
  * 如目标资源不存在则从模板拷贝。返回的 elements 可直接塞进 SubPage.elements。
  */
-export async function applyTemplate(opts: ApplyTemplateOptions): Promise<Element[]> {
+export async function applyTemplate(opts: ApplyTemplateOptions): Promise<AppliedTemplate> {
   const rootDir = getTemplateDir();
   if (!rootDir) throw new Error('NO_TEMPLATE_DIR');
 
@@ -406,8 +472,10 @@ export async function applyTemplate(opts: ApplyTemplateOptions): Promise<Element
   await eApi().ensureDir(joinPath(opts.courseDir, 'images', 'animation'));
   await eApi().ensureDir(joinPath(opts.courseDir, 'images', 'sound'));
 
-  const elements: Element[] = JSON.parse(JSON.stringify(opts.template.elements));
-  const refs = collectResourceRefs(elements);
+  const sourceSubPage: SubPage = opts.template.model === 'internal-pages-v1' && opts.template.subPage
+    ? JSON.parse(JSON.stringify(opts.template.subPage))
+    : { id: `template-${opts.template.id}`, name: opts.template.name, elements: JSON.parse(JSON.stringify(opts.template.elements)) };
+  const refs = collectSubPageResourceRefs(sourceSubPage);
   const pathMap = new Map<string, string>();
 
   for (const ref of refs.images) {
@@ -461,7 +529,10 @@ export async function applyTemplate(opts: ApplyTemplateOptions): Promise<Element
     if (manifestDirty) await writeManifest(opts.courseDir, courseManifest);
   }
 
-  return rewriteResourceRefs(elements, pathMap);
+  return {
+    model: opts.template.model === 'internal-pages-v1' ? 'internal-pages-v1' : 'legacy-elements',
+    subPage: rewriteSubPageResources(sourceSubPage, pathMap),
+  };
 }
 
 /**
