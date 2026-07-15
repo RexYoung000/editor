@@ -1,6 +1,7 @@
 import type { Element } from '../types';
 import {
   doesElementIntersectRect,
+  getElementParentContainment,
   isPointInsideElement,
   type CanvasPoint,
   type CanvasRect,
@@ -37,6 +38,19 @@ export function getSelectionContextContainerIds(elements: Element[], selectedIds
     if (parentId && containerIds.has(parentId) && !selected.has(parentId)) contextIds.add(parentId);
   }
   return contextIds;
+}
+
+export function getSelectionOverflowContextContainerIds(elements: Element[], selectedIds: string[]): Set<string> {
+  const elementMap = new Map(elements.map((element) => [element.id, element]));
+  const containerIds = getContainerIds(elements);
+  const selected = new Set(selectedIds);
+  const overflowIds = new Set<string>();
+  for (const id of selectedIds) {
+    const element = elementMap.get(id);
+    if (!element?.parentId || selected.has(element.parentId) || !containerIds.has(element.parentId)) continue;
+    if (getElementParentContainment(element, elements)?.isOverflowing) overflowIds.add(element.parentId);
+  }
+  return overflowIds;
 }
 
 function isLocked(element: Element, elementMap: Map<string, Element>): boolean {

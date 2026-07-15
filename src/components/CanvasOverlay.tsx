@@ -12,6 +12,7 @@ import {
   findTopElementAtPoint,
   getContainerIds,
   getSelectionContextContainerIds,
+  getSelectionOverflowContextContainerIds,
   getTransformRootIds,
   isElementHidden,
   normalizeSelection,
@@ -545,6 +546,7 @@ export default function CanvasOverlay({
     containerIds.has(element.id) && !isElementHidden(element, elementMap)
   ));
   const contextContainerIds = getSelectionContextContainerIds(displayElements, selectedIds);
+  const overflowContextContainerIds = getSelectionOverflowContextContainerIds(displayElements, selectedIds);
   const selectionFrame = previewFrame ?? getSelectionFrame(displayElements, selectedIds);
   const canTransform = getTransformRootIds(displayElements, selectedIds).length > 0;
 
@@ -574,11 +576,13 @@ export default function CanvasOverlay({
         const rect = worldRectToScreen(bounds.x, bounds.y, bounds.width, bounds.height, panX, panY, zoom);
         const selected = selectedIds.includes(element.id);
         const contextHighlighted = contextContainerIds.has(element.id);
+        const overflowHighlighted = overflowContextContainerIds.has(element.id);
         const label = element.name || element.type;
         return (
           <div
             key={`container-${element.id}`}
             data-container-context={contextHighlighted ? 'true' : undefined}
+            data-container-overflow={overflowHighlighted ? 'true' : undefined}
             style={{
             position: 'absolute',
             left: rect.left,
@@ -587,7 +591,9 @@ export default function CanvasOverlay({
             height: rect.height,
             border: selected
               ? '1px dashed rgba(59, 130, 246, 0.9)'
-              : contextHighlighted
+              : overflowHighlighted
+                ? '2px dashed rgb(245, 158, 11)'
+                : contextHighlighted
                 ? '2px dashed rgb(34, 211, 238)'
                 : '1px dashed rgba(148, 163, 184, 0.55)',
             boxSizing: 'border-box',
@@ -600,14 +606,22 @@ export default function CanvasOverlay({
               maxWidth: Math.max(rect.width, 80),
               padding: '1px 4px',
               overflow: 'hidden',
-              color: selected ? '#bfdbfe' : contextHighlighted ? '#ecfeff' : 'rgba(203, 213, 225, 0.8)',
+              color: selected
+                ? '#bfdbfe'
+                : overflowHighlighted
+                  ? '#fffbeb'
+                  : contextHighlighted
+                    ? '#ecfeff'
+                    : 'rgba(203, 213, 225, 0.8)',
               background: selected
                 ? 'rgba(30, 64, 175, 0.9)'
-                : contextHighlighted
+                : overflowHighlighted
+                  ? 'rgba(146, 64, 14, 0.95)'
+                  : contextHighlighted
                   ? 'rgba(8, 145, 178, 0.95)'
                   : 'rgba(30, 41, 59, 0.78)',
               fontSize: 10,
-              fontWeight: selected || contextHighlighted ? 600 : 400,
+              fontWeight: selected || contextHighlighted || overflowHighlighted ? 600 : 400,
               lineHeight: '15px',
               whiteSpace: 'nowrap',
               textOverflow: 'ellipsis',

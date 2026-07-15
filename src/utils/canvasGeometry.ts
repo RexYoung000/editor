@@ -21,7 +21,24 @@ export interface Matrix2D {
   ty: number;
 }
 
+export interface ParentContainment {
+  parent: Element;
+  bounds: CanvasRect;
+  isOverflowing: boolean;
+  canFit: boolean;
+  correction: CanvasPoint;
+}
+
+export interface ElementGeometryUpdate {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 const IDENTITY_MATRIX: Matrix2D = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+const GEOMETRY_EPSILON = 0.000001;
 
 function multiplyMatrix(left: Matrix2D, right: Matrix2D): Matrix2D {
   return {
@@ -112,6 +129,113 @@ export function getPointsBounds(points: CanvasPoint[]): CanvasRect {
 
 export function getElementWorldBounds(element: Element, elements: Element[]): CanvasRect {
   return getPointsBounds(getElementWorldCorners(element, elements));
+}
+
+export function getElementParentContainment(element: Element, elements: Element[]): ParentContainment | null {
+  if (!element.parentId) return null;
+  const parent = elements.find((item) => item.id === element.parentId);
+  if (!parent) return null;
+  const inverseParent = invertMatrix(getElementWorldMatrix(parent, elements));
+  if (!inverseParent) return null;
+
+  const bounds = getPointsBounds(
+    getElementWorldCorners(element, elements).map((point) => transformPoint(inverseParent, point)),
+  );
+  const maxX = bounds.x + bounds.width;
+  const maxY = bounds.y + bounds.height;
+  const isOverflowing = bounds.x < -GEOMETRY_EPSILON
+    || bounds.y < -GEOMETRY_EPSILON
+    || maxX > parent.width + GEOMETRY_EPSILON
+    || maxY > parent.height + GEOMETRY_EPSILON;
+  const canFit = bounds.width <= parent.width + GEOMETRY_EPSILON
+    && bounds.height <= parent.height + GEOMETRY_EPSILON;
+
+  let correctionX = 0;
+  let correctionY = 0;
+  if (canFit) {
+    if (bounds.x < 0) correctionX = -bounds.x;
+    else if (maxX > parent.width) correctionX = parent.width - maxX;
+    if (bounds.y < 0) correctionY = -bounds.y;
+    else if (maxY > parent.height) correctionY = parent.height - maxY;
+  }
+
+  return {
+    parent,
+    bounds,
+    isOverflowing,
+    canFit,
+    correction: { x: correctionX, y: correctionY },
+  };
+}
+
+function isDescendantOf(element: Element, ancestorId: string, elementMap: Map<string, Element>): boolean {
+  const visited = new Set<string>();
+  let parentId = element.parentId;
+  while (parentId && !visited.has(parentId)) {
+    if (parentId === ancestorId) return true;
+    visited.add(parentId);
+    parentId = elementMap.get(parentId)?.parentId;
+  }
+  return false;
+}
+
+function readAnchor(element: Element, key: 'anchorX' | 'anchorY'): number {
+  const value = Number((element.props as Record<string, unknown>)[key] ?? 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+export function getFitContainerToChildrenUpdates(
+  container: Element,
+  elements: Element[],
+): ElementGeometryUpdate[] | null {
+  const elementMap = new Map(elements.map((element) => [element.id, element]));
+  const descendants = elements.filter((element) => isDescendantOf(element, container.id, elementMap));
+  if (descendants.length === 0) return null;
+
+  const inverseContainer = invertMatrix(getElementWorldMatrix(container, elements));
+  if (!inverseContainer) return null;
+  const descendantBounds = getPointsBounds(descendants.flatMap((element) => (
+    getElementWorldCorners(element, elements).map((point) => transformPoint(inverseContainer, point))
+  )));
+  const minX = Math.min(0, descendantBounds.x);
+  const minY = Math.min(0, descendantBounds.y);
+  const maxX = Math.max(container.width, descendantBounds.x + descendantBounds.width);
+  const maxY = Math.max(container.height, descendantBounds.y + descendantBounds.height);
+  const width = maxX - minX;
+  const height = maxY - minY;
+  if (
+    Math.abs(width - container.width) <= GEOMETRY_EPSILON
+    && Math.abs(height - container.height) <= GEOMETRY_EPSILON
+    && Math.abs(minX) <= GEOMETRY_EPSILON
+    && Math.abs(minY) <= GEOMETRY_EPSILON
+  ) return [];
+
+  const anchorX = readAnchor(container, 'anchorX');
+  const anchorY = readAnchor(container, 'anchorY');
+  const localShiftX = minX + anchorX * width - anchorX * container.width;
+  const localShiftY = minY + anchorY * height - anchorY * container.height;
+  const radians = (container.rotation || 0) * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const updates: ElementGeometryUpdate[] = [{
+    id: container.id,
+    x: container.x + cos * localShiftX - sin * localShiftY,
+    y: container.y + sin * localShiftX + cos * localShiftY,
+    width,
+    height,
+  }];
+
+  for (const child of elements) {
+    if (child.parentId !== container.id) continue;
+    updates.push({
+      id: child.id,
+      x: child.x - minX,
+      y: child.y - minY,
+      width: child.width,
+      height: child.height,
+    });
+  }
+  return updates;
 }
 
 export function isPointInsideElement(point: CanvasPoint, element: Element, elements: Element[]): boolean {

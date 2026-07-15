@@ -18,6 +18,8 @@ import { getCourseDirPath } from '../utils/electronFs';
 import { PRESET_TEMPLATES } from '../presets';
 import { getUniqueElementName, normalizeElementNames, createDefaultElement, elementMeta, rebuildSubPageCounters, getNextNumberedName, getNextItemNameForCenterMatch } from '../elements/elementMeta';
 import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
+import { getElementParentContainment, getFitContainerToChildrenUpdates } from '../utils/canvasGeometry';
+import { isContainerElementType } from '../utils/elementContainers';
 import {
   cloneInternalPageWithinSubPage,
   cloneSubPageWithNewIds,
@@ -39,6 +41,11 @@ export interface ElementPasteResult {
   selectedIds: string[];
   idMap: Record<string, string>;
   elements: Element[];
+}
+
+export interface ContainerGeometryActionResult {
+  ok: boolean;
+  error?: string;
 }
 
 async function loadImageSize(skin: string): Promise<{ w: number; h: number } | null> {
@@ -116,6 +123,8 @@ interface EditorState {
 
   addElement: (element: Element) => void;
   updateElement: (id: string, updates: Partial<Element>) => void;
+  moveElementIntoParent: (id: string) => ContainerGeometryActionResult;
+  fitContainerToChildren: (id: string) => ContainerGeometryActionResult;
   deleteElement: (id: string) => void;
   reorderElement: (id: string, newIndex: number) => void;
   setElementParent: (id: string, newParentId: string | undefined) => void;
@@ -182,6 +191,18 @@ function findCurrentSubPage(state: EditorState): SubPage | InternalPage | null {
   const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
   if (!subPage) return null;
   return getElementPage(subPage, state.currentInternalPageId).internalPage ?? subPage;
+}
+
+function isLockedByHierarchy(element: Element, elements: Element[]): boolean {
+  const elementMap = new Map(elements.map((item) => [item.id, item]));
+  const visited = new Set<string>();
+  let current: Element | undefined = element;
+  while (current && !visited.has(current.id)) {
+    if (current.locked) return true;
+    visited.add(current.id);
+    current = current.parentId ? elementMap.get(current.parentId) : undefined;
+  }
+  return false;
 }
 
 function findStageOfSubPage(course: Course | null, subPageId: string | null): Stage | null {
@@ -1283,6 +1304,82 @@ export const useEditorStore = create<EditorState>()(
           element.props.var = getUniqueElementName(updates.name, otherVars);
         }
       }),
+
+    moveElementIntoParent: (id) => {
+      let result: ContainerGeometryActionResult = { ok: false, error: '未找到子元素' };
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const element = page.elements.find((item) => item.id === id);
+        if (!element?.parentId) {
+          result = { ok: false, error: '当前元素不在容器中' };
+          return;
+        }
+        if (isLockedByHierarchy(element, page.elements)) {
+          result = { ok: false, error: '元素或父容器已锁定，无法移动' };
+          return;
+        }
+        const containment = getElementParentContainment(element, page.elements);
+        if (!containment) {
+          result = { ok: false, error: '无法读取父容器范围' };
+          return;
+        }
+        if (!containment.isOverflowing) {
+          result = { ok: false, error: '子元素已在父容器范围内' };
+          return;
+        }
+        if (!containment.canFit) {
+          result = { ok: false, error: '子元素尺寸超过父容器，请先扩展容器' };
+          return;
+        }
+        element.x += containment.correction.x;
+        element.y += containment.correction.y;
+        changed = true;
+        result = { ok: true };
+      });
+      if (changed) get().saveHistory();
+      return result;
+    },
+
+    fitContainerToChildren: (id) => {
+      let result: ContainerGeometryActionResult = { ok: false, error: '未找到父容器' };
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const container = page.elements.find((item) => item.id === id);
+        if (!container || !isContainerElementType(container.type)) {
+          result = { ok: false, error: '目标元素不是可扩展容器' };
+          return;
+        }
+        if (isLockedByHierarchy(container, page.elements)) {
+          result = { ok: false, error: '父容器已锁定，无法扩展' };
+          return;
+        }
+        const updates = getFitContainerToChildrenUpdates(container, page.elements);
+        if (!updates) {
+          result = { ok: false, error: '父容器中没有可适应的内容' };
+          return;
+        }
+        if (updates.length === 0) {
+          result = { ok: false, error: '全部内容已在父容器范围内' };
+          return;
+        }
+        for (const update of updates) {
+          const element = page.elements.find((item) => item.id === update.id);
+          if (!element) continue;
+          element.x = update.x;
+          element.y = update.y;
+          element.width = update.width;
+          element.height = update.height;
+        }
+        changed = true;
+        result = { ok: true };
+      });
+      if (changed) get().saveHistory();
+      return result;
+    },
 
     deleteElement: (id) =>
       set((state) => {

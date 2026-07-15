@@ -11,7 +11,7 @@ import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import PageTurnPageList from './PageTurnPageList';
 import { KEYBOARD_PRESETS } from '../elements/keyboardPresets';
-import { Trash2, Plus } from 'lucide-react';
+import { CornerDownLeft, Maximize2, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import type { Action, Element } from '../types';
 import { useI18n } from '../i18n';
 import { getObject, syncProps } from '../utils/layaBridge';
@@ -20,6 +20,7 @@ import { translateLabel } from '../elements/elementMetaI18n';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
 import { collectInternalPageIssues, findActiveElementPage, isInternalPagesSubPage } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
+import { getElementParentContainment } from '../utils/canvasGeometry';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -31,7 +32,9 @@ export default function PropertyPanel() {
   const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const updateElement = useEditorStore((s) => s.updateElement);
-    const deleteElement = useEditorStore((s) => s.deleteElement);
+  const deleteElement = useEditorStore((s) => s.deleteElement);
+  const moveElementIntoParent = useEditorStore((s) => s.moveElementIntoParent);
+  const fitContainerToChildren = useEditorStore((s) => s.fitContainerToChildren);
   const clearSelection = useEditorStore((s) => s.clearSelection);
   const addChoiceOption = useEditorStore((s) => s.addChoiceOption);
   const removeChoiceOption = useEditorStore((s) => s.removeChoiceOption);
@@ -83,6 +86,11 @@ export default function PropertyPanel() {
   const elements = currentPage?.elements ?? [];
   const selectedElements = elements.filter((e) => selectedElementIds.includes(e.id));
   const single = selectedElements.length === 1 ? selectedElements[0] : null;
+  const parentContainment = single ? getElementParentContainment(single, elements) : null;
+  const parentOverflow = parentContainment?.isOverflowing
+    && isContainerElementType(parentContainment.parent.type)
+    ? parentContainment
+    : null;
 
   const handleChange = (key: string, value: unknown) => {
     // MatchingItem rightItemNames 双向同步：支持单线/多线模式
@@ -383,6 +391,18 @@ export default function PropertyPanel() {
     if (!window.confirm(t('deleteElementConfirm'))) return;
     selectedElements.forEach((el) => deleteElement(el.id));
     clearSelection();
+  };
+
+  const handleMoveIntoParent = () => {
+    if (!single) return;
+    const result = moveElementIntoParent(single.id);
+    showToast(result.ok ? '已将子元素移回容器范围' : (result.error ?? '无法移回容器'), result.ok ? 'success' : 'warning');
+  };
+
+  const handleFitParentToChildren = () => {
+    if (!single?.parentId) return;
+    const result = fitContainerToChildren(single.parentId);
+    showToast(result.ok ? '已扩展父容器以适应全部内容' : (result.error ?? '无法扩展容器'), result.ok ? 'success' : 'warning');
   };
 
   const meta = single ? elementMeta[single.type] : null;
@@ -712,6 +732,35 @@ export default function PropertyPanel() {
                   </select>
                   </div>
                   {single.parentId && <div className="text-[10px] text-amber-400/70 mt-1">{t('parentContainerHint')}</div>}
+                  {parentOverflow && (
+                    <div className="mt-2 border border-amber-500/40 bg-amber-950/30 p-2">
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-300">
+                        <TriangleAlert size={13} aria-hidden="true" />
+                        <span>子元素超出父容器范围</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleMoveIntoParent}
+                          disabled={!parentOverflow.canFit}
+                          title={parentOverflow.canFit ? '将当前子元素完整移回父容器' : '子元素尺寸超过父容器，请先扩展容器'}
+                          className="flex min-w-0 items-center justify-center gap-1 border border-slate-600 bg-slate-700 px-1.5 py-1 text-[10px] text-slate-100 hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <CornerDownLeft size={12} aria-hidden="true" />
+                          <span>移回容器</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleFitParentToChildren}
+                          title="扩大父容器以包含全部后代内容"
+                          className="flex min-w-0 items-center justify-center gap-1 border border-amber-500/50 bg-amber-900/40 px-1.5 py-1 text-[10px] text-amber-100 hover:bg-amber-900/60"
+                        >
+                          <Maximize2 size={12} aria-hidden="true" />
+                          <span>扩展容器</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
