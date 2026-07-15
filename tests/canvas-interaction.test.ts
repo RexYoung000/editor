@@ -68,14 +68,15 @@ test('编组点击会选择整组，修饰键再次点击会移除整组', () =>
   assert.deepEqual(resolvePointerSelection(elements, ['first', 'second'], 'second', true), []);
 });
 
-test('框选默认完全包含，Alt 模式允许相交且排除锁定元素', () => {
+test('框选默认选择相交元素，并排除锁定元素和拥有子元素的容器', () => {
   const inside = element('inside', { x: 10, y: 10, width: 20, height: 20 });
   const crossing = element('crossing', { x: 25, y: 25, width: 20, height: 20 });
   const locked = element('locked', { x: 12, y: 12, width: 10, height: 10, locked: true });
-  const elements = [inside, crossing, locked];
+  const container = element('container', { width: 100, height: 100 });
+  const child = element('child', { x: 25, y: 5, width: 20, height: 20, parentId: 'container' });
+  const elements = [inside, crossing, locked, container, child];
   const rect = { x: 0, y: 0, width: 30, height: 30 };
-  assert.deepEqual(selectElementsInRect(elements, rect, false), ['inside']);
-  assert.deepEqual(selectElementsInRect(elements, rect, true), ['inside', 'crossing']);
+  assert.deepEqual(selectElementsInRect(elements, rect), ['inside', 'crossing', 'child']);
 });
 
 test('跨父容器移动保持相同画布位移并只修改变换根', () => {

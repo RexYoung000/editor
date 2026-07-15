@@ -11,6 +11,8 @@ import {
 } from '../utils/canvasGeometry';
 import {
   findTopElementAtPoint,
+  getContainerIds,
+  isElementHidden,
   normalizeSelection,
   resolveMarqueeSelection,
   resolvePointerSelection,
@@ -67,7 +69,6 @@ interface MarqueePointer extends PointerBase {
   kind: 'marquee';
   startWorld: CanvasPoint;
   initialSelection: string[];
-  intersect: boolean;
   toggle: boolean;
 }
 
@@ -252,7 +253,7 @@ export default function CanvasOverlay({
       width: Math.abs(marquee.endWX - marquee.startWX),
       height: Math.abs(marquee.endWY - marquee.startWY),
     };
-    const hits = selectElementsInRect(page.elements, rect, interaction.intersect);
+    const hits = selectElementsInRect(page.elements, rect);
     store.selectElements(resolveMarqueeSelection(
       page.elements,
       interaction.initialSelection,
@@ -263,7 +264,9 @@ export default function CanvasOverlay({
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || interactionRef.current) return;
-    if ((event.target as HTMLElement).closest('[data-canvas-interactive]')) return;
+    const target = event.target as HTMLElement;
+    const containerHandle = target.closest<HTMLElement>('[data-container-handle]');
+    if (target.closest('[data-canvas-interactive]') && !containerHandle) return;
     const page = currentPageRef.current;
     const point = pointerToWorld(event.clientX, event.clientY);
     if (!page || !point) return;
@@ -272,9 +275,17 @@ export default function CanvasOverlay({
 
     const store = useEditorStore.getState();
     const currentIds = store.selectedElementIds;
-    const hit = findTopElementAtPoint(page.elements, point, currentIds);
+    const hit = containerHandle
+      ? page.elements.find((element) => element.id === containerHandle.dataset.containerHandle) ?? null
+      : findTopElementAtPoint(page.elements, point, currentIds);
+    const hitIsUnselectedContainerInterior = Boolean(
+      hit
+      && !containerHandle
+      && getContainerIds(page.elements).has(hit.id)
+      && !currentIds.includes(hit.id),
+    );
     const toggle = event.metaKey || event.ctrlKey;
-    if (hit) {
+    if (hit && !hitIsUnselectedContainerInterior) {
       const hitWasSelected = currentIds.includes(hit.id);
       const pointerSelection = hitWasSelected && !toggle
         ? normalizeSelection(page.elements, currentIds)
@@ -308,7 +319,6 @@ export default function CanvasOverlay({
       startClientY: event.clientY,
       startWorld: point,
       initialSelection: currentIds,
-      intersect: event.altKey,
       toggle,
       started: false,
     };
@@ -470,6 +480,11 @@ export default function CanvasOverlay({
   const multiElements = selectedIds.length > 1
     ? elements.filter((element) => selectedIds.includes(element.id))
     : [];
+  const elementMap = new Map(elements.map((element) => [element.id, element]));
+  const containerIds = getContainerIds(elements);
+  const containerElements = elements.filter((element) => (
+    containerIds.has(element.id) && !isElementHidden(element, elementMap)
+  ));
 
   const groupColors = new Map<string, string>();
   const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -492,6 +507,57 @@ export default function CanvasOverlay({
       onPointerCancel={() => finishInteraction(false)}
       onDoubleClick={handleDoubleClick}
     >
+      {containerElements.map((element) => {
+        const bounds = getElementWorldBounds(element, elements);
+        const rect = worldRectToScreen(bounds.x, bounds.y, bounds.width, bounds.height, panX, panY, zoom);
+        const selected = selectedIds.includes(element.id);
+        const label = element.name || element.type;
+        return (
+          <div key={`container-${element.id}`} style={{
+            position: 'absolute',
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            border: selected ? '1px dashed rgba(59, 130, 246, 0.9)' : '1px dashed rgba(148, 163, 184, 0.55)',
+            boxSizing: 'border-box',
+            pointerEvents: 'none',
+          }}>
+            <div data-container-handle={element.id} style={{
+              position: 'absolute',
+              left: -1,
+              top: -18,
+              maxWidth: Math.max(rect.width, 80),
+              padding: '1px 4px',
+              overflow: 'hidden',
+              color: selected ? '#bfdbfe' : 'rgba(203, 213, 225, 0.8)',
+              background: selected ? 'rgba(30, 64, 175, 0.9)' : 'rgba(30, 41, 59, 0.78)',
+              fontSize: 10,
+              lineHeight: '15px',
+              whiteSpace: 'nowrap',
+              textOverflow: 'ellipsis',
+              boxSizing: 'border-box',
+              pointerEvents: 'auto',
+              cursor: 'move',
+            }}>
+              {label}
+            </div>
+            <div data-container-handle={element.id} style={{
+              position: 'absolute', left: -4, right: -4, top: -4, height: 8, pointerEvents: 'auto', cursor: 'move',
+            }} />
+            <div data-container-handle={element.id} style={{
+              position: 'absolute', left: -4, right: -4, bottom: -4, height: 8, pointerEvents: 'auto', cursor: 'move',
+            }} />
+            <div data-container-handle={element.id} style={{
+              position: 'absolute', top: 4, bottom: 4, left: -4, width: 8, pointerEvents: 'auto', cursor: 'move',
+            }} />
+            <div data-container-handle={element.id} style={{
+              position: 'absolute', top: 4, bottom: 4, right: -4, width: 8, pointerEvents: 'auto', cursor: 'move',
+            }} />
+          </div>
+        );
+      })}
+
       {selectedElement && !(editingElement && editingElement.id === selectedElement.id) && (() => {
         const bounds = getElementWorldBounds(selectedElement, elements);
         const rect = worldRectToScreen(

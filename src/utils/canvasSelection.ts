@@ -1,13 +1,12 @@
 import type { Element } from '../types';
 import {
   doesElementIntersectRect,
-  isElementInsideRect,
   isPointInsideElement,
   type CanvasPoint,
   type CanvasRect,
 } from './canvasGeometry';
 
-function isHidden(element: Element, elementMap: Map<string, Element>): boolean {
+export function isElementHidden(element: Element, elementMap: Map<string, Element>): boolean {
   let current: Element | undefined = element;
   const visited = new Set<string>();
   while (current && !visited.has(current.id)) {
@@ -16,6 +15,10 @@ function isHidden(element: Element, elementMap: Map<string, Element>): boolean {
     current = current.parentId ? elementMap.get(current.parentId) : undefined;
   }
   return false;
+}
+
+export function getContainerIds(elements: Element[]): Set<string> {
+  return new Set(elements.flatMap((element) => element.parentId ? [element.parentId] : []));
 }
 
 function isLocked(element: Element, elementMap: Map<string, Element>): boolean {
@@ -127,7 +130,7 @@ export function findTopElementAtPoint(
   selectedIds: string[],
 ): Element | null {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
-  const hits = elements.filter((element) => !isHidden(element, elementMap) && isPointInsideElement(point, element, elements));
+  const hits = elements.filter((element) => !isElementHidden(element, elementMap) && isPointInsideElement(point, element, elements));
   const chooseTop = (candidates: Element[]) => {
     for (let index = candidates.length - 1; index >= 0; index--) {
       const candidate = candidates[index];
@@ -155,14 +158,13 @@ export function getTransformRootIds(elements: Element[], selectedIds: string[]):
 export function selectElementsInRect(
   elements: Element[],
   rect: CanvasRect,
-  intersect: boolean,
 ): string[] {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
+  const containerIds = getContainerIds(elements);
   const hits = elements.filter((element) => {
-    if (isHidden(element, elementMap) || isLocked(element, elementMap)) return false;
-    return intersect
-      ? doesElementIntersectRect(element, elements, rect)
-      : isElementInsideRect(element, elements, rect);
+    if (containerIds.has(element.id)) return false;
+    if (isElementHidden(element, elementMap) || isLocked(element, elementMap)) return false;
+    return doesElementIntersectRect(element, elements, rect);
   });
   return normalizeSelection(elements, hits.map((element) => element.id));
 }
