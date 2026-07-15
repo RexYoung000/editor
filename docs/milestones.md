@@ -50,18 +50,20 @@
 - setProperty 从目标组件属性列表选择
 - 导出生成正确的 JS 事件绑定代码（VipThink.viewMgr.setCurrPageIdx / Laya.SoundManager 等）
 
-### M7: 编辑体验 ✅
+### M7: 编辑体验（基础能力已存在，画布真实交互待重构验收）
 - 复制/粘贴（Ctrl+C/V/D）+ ID 映射更新（targetId/parentId）
 - 全选（Ctrl+A）
 - 方向键微调（1px / Shift+10px）
 - 对齐（6 种）+ 等间距分布（2 种）+ 画布实时同步
 - 编组/取消编组（Ctrl+G / Ctrl+Shift+G）
-- 多选拖动（所有选中元素一起移动）
+- 多选拖动底层分支已存在，但当前画布无法从真实指针手势触发
 - 多选蓝色边框视觉反馈
 - 网格覆盖层（20px 细线 + 100px 粗线）+ 网格吸附
 - 标尺（水平 + 垂直，百分比定位）
 - Ctrl+S 保存
-- Shift+点击多选
+- 元素列表支持修饰键多选；画布多选、首次拖动和统一命中待按新设计重构
+
+后续实施与验收以 [画布与图层基础交互整体优化设计](./roadmap/canvas-layer-interaction-design.md) 为准，不再把存在数据分支等同于真实用户能力完成。
 
 ### M8: Store ↔ Canvas 统一同步 ✅
 - React 驱动，Laya 跟随（Store 只管数据，Canvas.tsx 统一同步）
