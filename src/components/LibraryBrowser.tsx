@@ -1,5 +1,6 @@
 ﻿import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Check, ChevronDown, ChevronUp, FolderOpen, LoaderCircle, Music, Search, Video, X } from 'lucide-react';
+import { displayLibraryDirectoryName, displayLibraryPath } from '../utils/librarySearch';
 
 // ─── 类型 ───
 
@@ -163,6 +164,7 @@ function QuickTagButton(props: {
 // ─── 主组件 ───
 
 const TAB_LEVELS_MAX = 3;
+const LIBRARY_SEARCH_LIMIT = 500;
 
 export default function LibraryBrowser(props: LibraryBrowserProps) {
   const { mode, fileFilter, onSelect, onClose } = props;
@@ -320,7 +322,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
       color,
       language,
       quickTag,
-      limit: requestActive ? '200' : '0',
+      limit: requestActive ? String(LIBRARY_SEARCH_LIMIT) : '0',
     });
     const controller = new AbortController();
 
@@ -385,6 +387,11 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
   const currentEntries = cache[currentPath] ?? null;
   const currentError = errors[currentPath];
   const inDeepMode = pathStack.length > TAB_LEVELS_MAX;
+  const directoryShortcutLevel = tabsAtLevel[1]?.length ? 1 : 0;
+  const directoryShortcuts = tabsAtLevel[directoryShortcutLevel] ?? [];
+  const currentDirectoryLabel = pathStack.length > 0
+    ? displayLibraryPath(pathStack)
+    : '资源库首页';
 
   // 切换某一级 Tab
   const selectTab = (level: number, name: string) => {
@@ -418,6 +425,21 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
     if (busy) return;
     setPathStack((prev) => prev.slice(0, index + 1));
     setSelected(null);
+  };
+
+  const clearSearchFilters = () => {
+    setQuery('');
+    setDebouncedQuery('');
+    setSeries('');
+    setColor('');
+    setLanguage('');
+    setQuickTag('');
+    setSelected(null);
+  };
+
+  const browseDirectoryShortcut = (name: string) => {
+    clearSearchFilters();
+    selectTab(directoryShortcutLevel, name);
   };
 
   const triggerConfirm = async (nextSelected: LibrarySelection | null = selected) => {
@@ -470,7 +492,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
                 setQuery(event.target.value);
                 setSelected(null);
               }}
-              placeholder="全库搜索文件名"
+              placeholder="搜索文件名、目录或用途"
               className="h-9 w-full rounded border border-slate-700 bg-slate-800 pl-8 pr-8 text-xs text-white outline-none focus:border-blue-500"
             />
             {query && (
@@ -552,6 +574,34 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
           </div>
         )}
 
+        {/* 搜索期间保留目录入口，允许返回原目录或直接切换分类。 */}
+        {searchActive && (
+          <div className="flex shrink-0 items-center gap-2 border-b border-slate-700 bg-slate-900/70 px-6 py-2">
+            <span className="shrink-0 text-xs text-slate-500">目录浏览</span>
+            <button
+              type="button"
+              onClick={clearSearchFilters}
+              className="max-w-[320px] shrink-0 truncate rounded border border-blue-500/50 bg-blue-950/40 px-2.5 py-1 text-xs text-blue-200 hover:bg-blue-900/50"
+              title={`返回：${currentDirectoryLabel}`}
+            >
+              ← 返回：{currentDirectoryLabel}
+            </button>
+            <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto py-0.5">
+              {directoryShortcuts.map((item) => (
+                <button
+                  key={item.name}
+                  type="button"
+                  onClick={() => browseDirectoryShortcut(item.name)}
+                  className="shrink-0 rounded bg-slate-800 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-700 hover:text-white"
+                  title={`浏览目录：${displayLibraryDirectoryName(item.name)}`}
+                >
+                  {displayLibraryDirectoryName(item.name)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 三级 Tab 栏 */}
         {!searchActive && tabsAtLevel.map((tabs, level) => {
           if (!tabs || tabs.length === 0) return null;
@@ -589,7 +639,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
                   onClick={() => jumpToBreadcrumb(TAB_LEVELS_MAX + i)}
                   disabled={i === pathStack.length - TAB_LEVELS_MAX - 1}
                 >
-                  {seg}
+                    {displayLibraryDirectoryName(seg)}
                 </button>
               </span>
             ))}
@@ -642,7 +692,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
             {selected
               ? `已选: ${selected.name}`
               : searchActive
-                ? searchTruncated ? `显示前 200 个，共 ${searchTotal} 个结果` : `${searchTotal} 个结果`
+                ? searchTruncated ? `显示前 ${LIBRARY_SEARCH_LIMIT} 个，共 ${searchTotal} 个结果` : `${searchTotal} 个结果`
                 : '未选'}
           </div>
           <div className="space-x-3">
@@ -717,7 +767,9 @@ function LibrarySearchGrid({ results, selected, setSelected, onConfirm, busy }: 
               {result.type === 'spine' && <FolderOpen size={34} className="text-slate-400" />}
             </div>
             <div className="mt-2 line-clamp-2 min-h-8 text-xs leading-4 text-slate-100">{result.name}</div>
-            <div className="mt-1 truncate text-[10px] text-slate-500">{result.directory}</div>
+            <div className="mt-1 truncate text-[10px] text-slate-500">
+              {displayLibraryPath(result.directory.split('/').filter(Boolean))}
+            </div>
             <div className="mt-1 truncate text-[10px] text-slate-500">
               {[result.series, result.color, result.language].filter(Boolean).join(' / ')}
             </div>
@@ -814,10 +866,10 @@ function FolderAndFileGrid(props: FolderAndFileGridProps) {
                   className={`${baseCls} ${selectedCls} ${interactCls}`}
                   onClick={handleClick}
                   onDoubleClick={handleDoubleClick}
-                  title={isSpineProj ? `${f.name} (Spine 工程)` : f.name}
+                  title={isSpineProj ? `${displayLibraryDirectoryName(f.name)} (Spine 工程)` : displayLibraryDirectoryName(f.name)}
                   disabled={busy}
                 >
-                  <div>{isSpineProj ? '🦴' : '📁'} {f.name}</div>
+                  <div>{isSpineProj ? '🦴' : '📁'} {displayLibraryDirectoryName(f.name)}</div>
                   {isSpineProj && <div className="text-xs text-slate-400 mt-1">(Spine)</div>}
                 </button>
               );
@@ -1024,7 +1076,7 @@ function ScrollableTabRow(props: ScrollableTabRowProps) {
               className={makeTabClass(level, isSelected)}
               onClick={() => onSelect(it.name)}
             >
-              {it.name}
+              {displayLibraryDirectoryName(it.name)}
             </button>
           );
         })}

@@ -6,6 +6,7 @@ import * as crypto from 'node:crypto'
 import { createRequire } from 'module'
 import { LIBRARY_QUICK_TAGS, matchesLibraryQuickTag } from './src/utils/libraryQuickTags'
 import type { LibraryQuickTagId } from './src/utils/libraryQuickTags'
+import { detectLibrarySeries, matchesLibrarySearchQuery } from './src/utils/librarySearch'
 
 // 本地定义 lessonSuffix 函数（避免引入跨模块构建依赖）
 function lessonSuffix(kind?: string): string {
@@ -117,7 +118,7 @@ type LibrarySearchEntry = {
 };
 
 const LIBRARY_SEARCH_INDEX_TTL = 2_000;
-const LIBRARY_SEARCH_RESULT_LIMIT = 200;
+const LIBRARY_SEARCH_RESULT_LIMIT = 500;
 let librarySearchIndex: LibrarySearchEntry[] = [];
 let librarySearchIndexBuiltAt = 0;
 
@@ -126,11 +127,6 @@ function detectLibraryResourceType(name: string): Exclude<LibraryResourceType, '
   if (/\.(mp3|wav|ogg)$/i.test(name)) return 'audio';
   if (/\.(mp4|webm|mov)$/i.test(name)) return 'video';
   return null;
-}
-
-function detectLibrarySeries(text: string): string {
-  const matches = text.match(/S\d+(?:\s*[-–—~至]\s*S?\d+)?/gi);
-  return matches?.at(-1)?.replace(/[–—~至]/g, '-').replace(/\s+/g, '').toUpperCase() ?? '';
 }
 
 function makeLibrarySearchEntry(
@@ -633,8 +629,7 @@ function forgePlugin() {
               return jsonError(res, 400, '不支持的资源类型');
             }
 
-            const query = (urlObj.searchParams.get('q') ?? '').trim().toLocaleLowerCase('zh-CN');
-            const keywords = query.split(/\s+/).filter(Boolean);
+            const query = (urlObj.searchParams.get('q') ?? '').trim();
             const series = urlObj.searchParams.get('series') ?? '';
             const color = urlObj.searchParams.get('color') ?? '';
             const language = urlObj.searchParams.get('language') ?? '';
@@ -656,8 +651,7 @@ function forgePlugin() {
               if (color && entry.color !== color) return false;
               if (language && entry.language !== language) return false;
               if (quickTag && !matchesLibraryQuickTag(entry, quickTag)) return false;
-              const normalizedName = entry.name.toLocaleLowerCase('zh-CN');
-              return keywords.every((keyword) => normalizedName.includes(keyword));
+              return matchesLibrarySearchQuery(entry, query);
             });
 
             return jsonOk(res, {

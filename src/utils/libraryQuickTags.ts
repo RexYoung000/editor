@@ -47,6 +47,20 @@ export const LIBRARY_QUICK_TAGS = [
   { id: 'input-frame', label: '输入框', group: '基础框体', primary: false, pathPattern: /^通用素材\/通用框\/.*输入框\//u },
   { id: 'content-frame', label: '内容底框', group: '基础框体', primary: false, pathPattern: /^通用素材\/通用框\/S4-S7通用框\/三色矩形底框\//u },
   { id: 'secondary-dialog', label: '二级弹窗', group: '基础框体', primary: false, pathPattern: /^通用素材\/二级窗口\//u },
+
+  { id: 'ip-characters', label: 'IP人物', group: '素材资源', primary: true, pathPattern: /^通用素材\/icon纸片人\//u },
+  { id: 'props', label: '道具', group: '素材资源', primary: true, pathPattern: /^通用素材\/道具素材\//u },
+  { id: 'ip-dalixiong', label: '大力熊', group: '素材资源', primary: false, pathPattern: /^通用素材\/icon纸片人\/(?:S7大力熊|dlx)/iu },
+  { id: 'ip-pipihu', label: '皮皮虎', group: '素材资源', primary: false, pathPattern: /^通用素材\/icon纸片人\/(?:S7皮皮虎|pph)/iu },
+  { id: 'ip-mimimao', label: '眯眯猫', group: '素材资源', primary: false, pathPattern: /^通用素材\/icon纸片人\/(?:S7眯眯猫|[ab]\.png$)/iu },
+  { id: 'ip-congminglu', label: '聪明鹿', group: '素材资源', primary: false, pathPattern: /^通用素材\/icon纸片人\/(?:S7聪明鹿|cml)/iu },
+  { id: 'ip-shanyanglaoshi', label: '山羊老师', group: '素材资源', primary: false, pathPattern: /^通用素材\/icon纸片人\/syls/iu },
+  { id: 'ip-wandoujingling', label: '豌豆精灵', group: '素材资源', primary: false, pathPattern: /^通用素材\/icon纸片人\/wdjl/iu },
+  { id: 'props-life', label: '生活用品', group: '素材资源', primary: false, pathPattern: /^通用素材\/道具素材\/生活用品\//u },
+  { id: 'props-transport', label: '交通工具', group: '素材资源', primary: false, pathPattern: /^通用素材\/道具素材\/交通工具\//u },
+  { id: 'props-school', label: '学习用品', group: '素材资源', primary: false, pathPattern: /^通用素材\/道具素材\/学习用品\//u },
+  { id: 'props-animal', label: '动物', group: '素材资源', primary: false, pathPattern: /^通用素材\/道具素材\/动物\//u },
+  { id: 'props-building', label: '建筑', group: '素材资源', primary: false, pathPattern: /^通用素材\/道具素材\/建筑\//u },
 ] as const satisfies readonly LibraryQuickTagDefinition[];
 
 export type LibraryQuickTagId = (typeof LIBRARY_QUICK_TAGS)[number]['id'];

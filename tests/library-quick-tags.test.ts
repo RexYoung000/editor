@@ -34,3 +34,25 @@ test('二级弹窗覆盖二级窗口全部后代目录，但不混入普通通�
     libraryPath: '通用素材/通用框/S4-S7通用框/标题框/切图/标准版/蓝-三排字.png',
   }, tag), false);
 });
+
+test('素材资源提供一级聚合和角色、道具二级细分', () => {
+  const ipTag = findTag('ip-characters');
+  const bearTag = findTag('ip-dalixiong');
+  const propsTag = findTag('props');
+  const transportTag = findTag('props-transport');
+
+  assert.equal(ipTag.group, '素材资源');
+  assert.equal(ipTag.primary, true);
+  assert.equal(matchesLibraryQuickTag({
+    name: 'dlx1.png',
+    libraryPath: '通用素材/icon纸片人/dlx1.png',
+  }, bearTag), true);
+  assert.equal(matchesLibraryQuickTag({
+    name: '公交车.png',
+    libraryPath: '通用素材/道具素材/交通工具/公交车.png',
+  }, propsTag), true);
+  assert.equal(matchesLibraryQuickTag({
+    name: '公交车.png',
+    libraryPath: '通用素材/道具素材/交通工具/公交车.png',
+  }, transportTag), true);
+});
