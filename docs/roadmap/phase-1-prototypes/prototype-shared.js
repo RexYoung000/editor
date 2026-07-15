@@ -16,6 +16,7 @@
   let pendingScrollTarget = null;
   let layoutState = null;
   let panelResize = null;
+  let lastSubPageSelectClick = { id: null, at: 0 };
 
   const LAYOUT_DEFAULTS = {
     inline: { left: 300, inspector: 280 },
@@ -96,7 +97,15 @@
     const el = root.querySelector(`[data-scroll-target="${pendingScrollTarget}"]`);
     pendingScrollTarget = null;
     if (!el) return;
-    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    const scroll = el.closest('.scroll');
+    if (!scroll) return;
+    const targetRect = el.getBoundingClientRect();
+    const scrollRect = scroll.getBoundingClientRect();
+    if (targetRect.top < scrollRect.top) {
+      scroll.scrollTop -= scrollRect.top - targetRect.top + 8;
+    } else if (targetRect.bottom > scrollRect.bottom) {
+      scroll.scrollTop += targetRect.bottom - scrollRect.bottom + 8;
+    }
   }
 
   function layoutStorageKey() {
@@ -403,11 +412,12 @@
       return `
         <header class="editor-topbar focus-topbar">
           <button class="top-button" data-action="exit-focus" type="button">← 返回工作台</button>
-          <div class="breadcrumb"><span>图形变化课程</span><b>›</b><span>${esc(stage?.title || '关卡')}</span><b>›</b><span>${esc(Core.subPageLabel(state, subPage.id))}</span><b>›</b><span>${esc(currentView()?.title || '主界面')}</span></div>
+          <div class="breadcrumb"><span>图形变化课程</span><b>›</b><span>${esc(stage?.title || '关卡')}</span><b>›</b><button class="breadcrumb-switch" data-action="open-focus-switcher" type="button" title="切换同一大关卡中的小关卡">${esc(Core.subPageLabel(state, subPage.id))}</button><b>›</b><span>${esc(currentView()?.title || '主界面')}</span></div>
           ${schemeSwitcher()}
           <div class="top-spacer"></div>
           ${pendingBadge()}
           ${undoButton()}
+          <button class="top-button" data-action="run-from-main" type="button" ${state.mode === 'run' ? 'disabled' : ''}>从主界面测试</button>
           <button class="top-button ${state.mode === 'run' ? 'active' : 'primary'}" data-action="toggle-run" type="button">${state.mode === 'run' ? '退出试运行' : '试运行当前界面'}</button>
           <button class="top-button" data-action="reset-scheme" type="button">重新开始</button>
         </header>`;
@@ -428,7 +438,7 @@
 
   function pendingBadge() {
     const count = Core.pendingIssues(state).length;
-    return count ? `<button class="mode-badge issue-badge" data-action="open-issues" type="button">${count} 项待处理</button>` : '';
+    return count ? `<span class="mode-badge issue-summary" role="status" title="请通过页面或按钮旁的警告点处理">${count} 项需处理</span>` : '';
   }
 
   function stagePanel() {
@@ -508,7 +518,7 @@
         <div class="subpage-row">
           <button class="drag-handle" data-subpage-drag="${esc(subPageId)}" type="button" aria-label="拖拽小关卡">⠿</button>
           ${leadingControl}
-          <button class="view-select subpage-main" data-action="select-subpage" data-subpage="${esc(subPageId)}" type="button">
+          <button class="view-select subpage-main" data-action="select-subpage" data-subpage="${esc(subPageId)}" type="button" title="${scheme === 'focus' && subPage.kind === 'managed' ? '双击或按 Enter 进入专注工作区' : ''}">
             <strong>${esc(Core.subPageLabel(state, subPageId))}</strong>
             <small>${esc(subPageTypeLabel(subPage))}${hint}</small>
           </button>
@@ -533,8 +543,9 @@
   }
 
   function internalPageSection(subPage, context) {
-    const contentIds = subPage.viewOrder.filter((id) => state.views[id]?.kind !== 'dialog');
-    const dialogIds = subPage.viewOrder.filter((id) => state.views[id]?.kind === 'dialog');
+    const visibleIds = arguments.length > 2 && Array.isArray(arguments[2]) ? arguments[2] : subPage.viewOrder;
+    const contentIds = visibleIds.filter((id) => state.views[id]?.kind !== 'dialog');
+    const dialogIds = visibleIds.filter((id) => state.views[id]?.kind === 'dialog');
     const dragView = dragState?.type === 'view' ? Core.getView(state, dragState.id) : null;
     const dragGroup = dragView ? Core.viewGroupOf(dragView) : null;
     const draggingHere = Boolean(dragState?.type === 'view' && dragState.targetSubPageId === subPage.id);
@@ -555,7 +566,54 @@
         ${showDialog ? viewGroup('弹窗', dialogIds, subPage, context) : ''}
         ${showDialogEnd ? pageDropPlaceholder(subPage.id, dialogEndIndex, '放到这里') : ''}
         ${showAdd ? `<button class="add-view" data-action="open-add-view" data-subpage="${esc(subPage.id)}" type="button">＋ 新增内部页面</button>` : ''}
+        ${!contentIds.length && !dialogIds.length && !dragPreview ? '<div class="empty-mini">没有符合条件的页面</div>' : ''}
       </div>`;
+  }
+
+  function viewHasIssue(viewId) {
+    const view = Core.getView(state, viewId);
+    if (!view) return false;
+    if (view.kind === 'dialog' && Core.inboundButtons(state, viewId).length === 0) return true;
+    return Core.viewElements(state, viewId).some((element) => Core.relationForElement(state, element.id)?.status === 'pending');
+  }
+
+  function focusFilteredViewIds(subPage) {
+    const query = String(state.focusQuery || '').trim().toLowerCase();
+    const filter = state.focusFilter || 'all';
+    return subPage.viewOrder.filter((viewId) => {
+      const view = Core.getView(state, viewId);
+      if (!view) return false;
+      if (filter === 'content' && Core.viewGroupOf(view) !== 'content') return false;
+      if (filter === 'dialog' && view.kind !== 'dialog') return false;
+      if (filter === 'issues' && !viewHasIssue(viewId)) return false;
+      if (!query) return true;
+      const elementText = Core.viewElements(state, viewId).map((element) => element.label).join(' ');
+      return `${view.title} ${elementText}`.toLowerCase().includes(query);
+    });
+  }
+
+  function focusSearchControls(subPage) {
+    if (subPage.viewOrder.length < 6) return '';
+    const filters = [['all', '全部'], ['content', '内容页'], ['dialog', '弹窗'], ['issues', '有问题']];
+    return `<div class="focus-search-panel">
+      <label for="focusSearch">搜索页面或元素</label>
+      <input id="focusSearch" data-focus-search type="search" value="${esc(state.focusQuery || '')}" placeholder="输入名称定位" autocomplete="off" />
+      <div class="focus-filter-row">${filters.map(([id, label]) => `<button class="focus-filter ${state.focusFilter === id ? 'active' : ''}" data-action="focus-filter" data-filter="${id}" type="button">${label}</button>`).join('')}</div>
+    </div>`;
+  }
+
+  function focusSelectedElements(subPage) {
+    const view = currentView();
+    if (!view || view.subPageId !== subPage.id) return '';
+    const elements = Core.viewElements(state, view.id);
+    return `<div class="selected-elements-inline" data-scroll-target="elements:${esc(view.id)}">
+      <div class="section-label"><span>当前页面元素</span><span>${elements.length}</span></div>
+      <div class="elements-list">${elements.map((element) => elementRow(element)).join('') || '<div class="empty-mini">当前页面没有组件</div>'}</div>
+    </div>`;
+  }
+
+  function viewThumbnail(view) {
+    return `<span class="view-thumbnail ${view.kind}" aria-hidden="true"><i></i><b></b><em></em></span>`;
   }
 
   function viewGroup(label, ids, subPage, context) {
@@ -575,10 +633,10 @@
       ${pageDropPlaceholder(subPage.id, index)}
       <div class="view-row ${active ? 'active' : ''} ${dragging ? 'dragging' : ''}" data-page-drop-view="${esc(viewId)}" data-subpage="${esc(subPage.id)}" data-index="${index}" data-view-group="${esc(Core.viewGroupOf(view))}" data-scroll-target="view:${esc(viewId)}">
         ${view.kind === 'main' ? '<span class="view-lock" title="主界面固定">◆</span>' : `<button class="page-drag-handle" data-page-drag="${esc(viewId)}" type="button" aria-label="拖拽页面">⠿</button>`}
-        <button class="view-select" data-action="select-view" data-view="${esc(viewId)}" type="button">
-          <span class="view-title"><span class="type-dot ${view.kind}"></span><span><strong>${esc(view.title)}</strong>${baseLabel}</span></span>
+          <button class="view-select" data-action="select-view" data-view="${esc(viewId)}" type="button">
+          <span class="view-title">${viewThumbnail(view)}<span class="type-dot ${view.kind}"></span><span><strong>${esc(view.title)}</strong>${baseLabel}</span></span>
         </button>
-        <div class="view-actions">${pending ? '<span class="status-dot warn" title="待处理"></span>' : ''}${view.kind !== 'main' ? `<button class="more-button" data-action="view-more" data-view="${esc(viewId)}" type="button" aria-label="${esc(view.title)}更多操作">⋯</button>` : ''}</div>
+        <div class="view-actions">${pending ? `<button class="status-dot warn" data-action="open-view-issues" data-subpage="${esc(subPage.id)}" type="button" title="查看待处理问题" aria-label="查看${esc(view.title)}待处理问题"></button>` : ''}${view.kind !== 'main' ? `<button class="more-button" data-action="view-more" data-view="${esc(viewId)}" type="button" aria-label="${esc(view.title)}更多操作">⋯</button>` : ''}</div>
       </div>`;
   }
 
@@ -669,14 +727,13 @@
   function focusNavigator() {
     const subPage = activeSubPage();
     if (!subPage) return '';
-    const tabs = [['views', '页面'], ['elements', '元素']];
-    const content = state.focusTab === 'elements'
-      ? `<div class="scroll" data-scroll-key="focus-elements">${drawerElementsContent(subPage)}</div>`
-      : `<div class="scroll drawer-view-content" data-scroll-key="focus-views">${internalPageSection(subPage, 'focus')}</div>`;
+    const visibleIds = dragState ? null : focusFilteredViewIds(subPage);
+    const issueCount = Core.pendingIssues(state, subPage.id).length;
+    const content = `<div class="scroll drawer-view-content" data-scroll-key="focus-views">${internalPageSection(subPage, 'focus', visibleIds || subPage.viewOrder)}${focusSelectedElements(subPage)}</div>`;
     return `
-      <section class="panel drawer-panel focus-navigator">
-        <div class="panel-head"><div><h2>${esc(Core.subPageLabel(state, subPage.id))}</h2><p>只显示当前小关卡内容</p></div></div>
-        <div class="focus-tabs">${tabs.map(([id, label]) => `<button class="focus-tab ${state.focusTab === id ? 'active' : ''}" data-action="focus-tab" data-tab="${id}" type="button">${label}</button>`).join('')}<button class="focus-tab" data-action="open-issues" type="button">待处理 ${Core.pendingIssues(state, subPage.id).length}</button></div>
+      <section class="panel drawer-panel focus-navigator ${subPage.viewOrder.length >= 6 ? 'has-search' : ''} ${dragState?.type === 'view' ? 'has-cross' : ''} ${state.mode === 'run' ? 'run-locked' : ''}">
+        <div class="panel-head"><div><h2>${esc(Core.subPageLabel(state, subPage.id))}</h2><p>${state.mode === 'run' ? '试运行中，左侧结构已锁定' : '内容页、弹窗与当前页面元素'}</p></div>${issueCount ? `<span class="focus-issue-summary" role="status">${issueCount} 项需处理</span>` : '<span class="focus-issue-summary quiet">结构完整</span>'}</div>
+        ${focusSearchControls(subPage)}
         ${content}
         ${focusCrossTargetsHtml()}
       </section>`;
@@ -706,7 +763,7 @@
     return `
       <section class="panel canvas-panel">
         <div class="canvas-head"><div><strong>${state.mode === 'run' ? '试运行' : '编辑'}：${esc((dialogId ? Core.getView(state, dialogId) : view)?.title || '主界面')}</strong><br><span>${state.mode === 'run' ? '按钮会执行已配置的事件' : '点击画布按钮只会选中，事件跳转在右侧配置'}</span></div><div class="canvas-spacer"></div>${state.bindingDialogId ? '<span class="binding-text">正在选择弹窗入口</span>' : ''}${state.mode === 'edit' ? '<button class="run-button" data-action="open-component" type="button">＋ 添加组件</button>' : ''}</div>
-        <div class="canvas-wrap">
+        <div class="canvas-wrap" data-action="clear-selection">
           <div class="canvas">
             ${state.bindingDialogId ? `<div class="binding-banner"><span>请选择打开【${esc(Core.getView(state, state.bindingDialogId)?.title)}】的按钮</span><button data-action="cancel-binding" type="button">取消</button></div>` : ''}
             <div class="lesson-bg">
@@ -770,6 +827,18 @@
       </section>`;
   }
 
+  function eventTargetOptions(element) {
+    const found = Core.findElement(state, element.id);
+    const subPage = found ? Core.getSubPage(state, found.view.subPageId) : null;
+    if (!subPage) return '';
+    const targets = subPage.viewOrder.filter((id) => id !== found.viewId).map((id) => Core.getView(state, id)).filter(Boolean);
+    if (!targets.length) return '<div class="event-target-empty">当前小关卡还没有其他内容页或弹窗。</div>';
+    const content = targets.filter((view) => Core.viewGroupOf(view) === 'content');
+    const dialogs = targets.filter((view) => view.kind === 'dialog');
+    const group = (label, views) => views.length ? `<div class="event-target-group"><strong>${label}</strong>${views.map((view) => `<button class="event-target-option ${element.targetView === view.id ? 'active' : ''}" data-action="save-event-target" data-element="${esc(element.id)}" data-view="${esc(view.id)}" type="button"><span>${esc(view.title)}</span><small>${view.kind === 'dialog' ? '打开弹窗' : '跳转内容页'}</small></button>`).join('')}</div>` : '';
+    return `<div class="event-target-list">${group('内容页', content)}${group('弹窗', dialogs)}</div><button class="event-clear-button" data-action="clear-event" data-element="${esc(element.id)}" type="button">清除当前事件</button>`;
+  }
+
   function propertyInspector(title, subtitle, view, element) {
     const relation = element ? Core.relationForElement(state, element.id) : null;
     const relationClass = relation?.status === 'pending' ? 'warn' : '';
@@ -777,7 +846,7 @@
       ? `<div class="property-group"><h4>弹窗底板</h4><div class="property-row"><span>背景来源</span><span class="property-value">${esc(Core.subPageLabel(state, view.subPageId))} 主界面</span></div></div>`
       : '';
     const eventBlock = element?.type === '按钮'
-      ? `<div class="property-group"><h4>事件链接</h4><div class="relation-summary ${relationClass}"><span>${esc(relation?.text || '当前按钮还没有配置点击事件。')}</span>${element.role === 'close' ? '' : `<button data-action="configure-event" data-element="${esc(element.id)}" type="button">${element.targetView ? '修改目标' : '配置目标'}</button>`}</div></div>`
+      ? `<div class="property-group"><h4>事件链接</h4><div class="relation-summary ${relationClass}"><span>${esc(relation?.text || '当前按钮还没有配置点击事件。')}</span>${element.role === 'close' ? '' : `<button data-action="configure-event" data-element="${esc(element.id)}" type="button">${state.eventEditorElementId === element.id ? '收起目标' : element.targetView ? '修改目标' : '配置目标'}</button>`}</div>${state.eventEditorElementId === element.id ? eventTargetOptions(element) : ''}</div>`
       : '';
     return `
       <div class="object-title"><strong>${esc(title)}</strong><span>${esc(subtitle)}</span></div>
@@ -855,6 +924,12 @@
     return `<div class="context-menu" style="left:${menu.x}px;top:${menu.y}px"><button data-action="duplicate-view" data-view="${esc(view.id)}" type="button">复制到下方</button><button data-action="rename-view" data-view="${esc(view.id)}" type="button">重命名</button><button class="danger" data-action="confirm-delete" data-view="${esc(view.id)}" type="button">删除页面</button></div>`;
   }
 
+  function defaultNewViewTitle(subPage, kind) {
+    if (!subPage) return '';
+    const count = subPage.viewOrder.filter((viewId) => state.views[viewId]?.kind === kind).length;
+    return kind === 'dialog' ? `弹窗 ${count + 1}` : `第 ${count + 2} 题`;
+  }
+
   function modalHtml() {
     if (!modal) return '<div class="modal-backdrop" hidden></div>';
     if (modal.type === 'template') {
@@ -866,7 +941,10 @@
       </div>`, `<button class="modal-button" data-action="close-modal" type="button">取消</button><button class="modal-button primary" data-action="confirm-template" type="button" ${selected ? '' : 'disabled'}>确认创建</button>`);
     }
     if (modal.type === 'add-view') {
-      return modalShell('新增内部页面', `<div class="choice-grid"><button class="choice-card" data-action="add-view" data-kind="peer" type="button"><strong>同级页面</strong><span>内容移动到其他兼容小关卡后保持不变。</span></button><button class="choice-card" data-action="add-view" data-kind="dialog" type="button"><strong>弹窗</strong><span>移动后自动使用目标小关卡主界面作为底板。</span></button></div>`, '<button class="modal-button" data-action="close-modal" type="button">取消</button>');
+      const subPage = Core.getSubPage(state, modal.subPageId || state.activeSubPageId);
+      const kind = modal.kind || 'peer';
+      const title = modal.value || defaultNewViewTitle(subPage, kind);
+      return modalShell('新增内部页面', `<div class="choice-grid"><button class="choice-card ${kind === 'peer' ? 'selected' : ''}" data-action="choose-view-kind" data-kind="peer" type="button"><strong>内容页</strong><span>内容移动到其他兼容小关卡后保持不变。</span></button><button class="choice-card ${kind === 'dialog' ? 'selected' : ''}" data-action="choose-view-kind" data-kind="dialog" type="button"><strong>弹窗</strong><span>移动后自动使用目标小关卡主界面作为底板。</span></button></div><label class="form-label" for="newViewName">页面名称</label><input id="newViewName" class="rename-input" data-add-view-name value="${esc(title)}" maxlength="28" />`, `<button class="modal-button" data-action="close-modal" type="button">取消</button><button class="modal-button primary" data-action="confirm-add-view" type="button">创建</button>`);
     }
     if (modal.type === 'component') {
       return modalShell('添加组件', `<div class="choice-grid"><button class="choice-card" data-action="add-component" data-kind="jump-button" type="button"><strong>页面跳转按钮</strong><span>仍然是普通按钮，添加后在右侧配置跳转目标。</span></button><button class="choice-card" data-action="add-component" data-kind="button" type="button"><strong>普通按钮</strong><span>可以配置打开弹窗或跳转页面。</span></button><button class="choice-card" data-action="add-component" data-kind="text" type="button"><strong>文本</strong><span>添加一段当前页面独立拥有的文字。</span></button><button class="choice-card" data-action="add-component" data-kind="image" type="button"><strong>图片</strong><span>添加当前页面独立拥有的图片。</span></button></div>`, '<button class="modal-button" data-action="close-modal" type="button">取消</button>');
@@ -886,7 +964,14 @@
     }
     if (modal.type === 'delete') {
       const view = Core.getView(state, modal.viewId);
-      return modalShell('删除内部页面', `<div class="issue-card"><strong>确认删除“${esc(view?.title)}”吗？</strong><p>指向它的按钮会进入待处理状态，可以通过撤销恢复。</p></div>`, `<button class="modal-button" data-action="close-modal" type="button">取消</button><button class="modal-button danger" data-action="delete-view" data-view="${esc(modal.viewId)}" type="button">删除</button>`);
+      const inboundCount = view ? Core.inboundButtons(state, view.id).length : 0;
+      const impact = inboundCount ? `有 ${inboundCount} 个按钮会失去目标并进入待处理状态。` : '当前没有按钮引用它。';
+      return modalShell('删除内部页面', `<div class="issue-card"><strong>确认删除“${esc(view?.title)}”吗？</strong><p>${impact}删除后可以通过撤销恢复。</p></div>`, `<button class="modal-button" data-action="close-modal" type="button">取消</button><button class="modal-button danger" data-action="delete-view" data-view="${esc(modal.viewId)}" type="button">删除</button>`);
+    }
+    if (modal.type === 'focus-switch') {
+      const stage = activeStage();
+      const options = (stage?.subPageIds || []).filter((id) => id !== state.activeSubPageId).map((id) => `<button class="choice-card" data-action="switch-focus-page" data-subpage="${esc(id)}" type="button"><strong>${esc(Core.subPageLabel(state, id))}</strong><span>继续编辑这个小关卡的内部页面</span></button>`).join('');
+      return modalShell('切换同一大关卡的小关卡', options || '<div class="empty-state"><div><h2>没有其他可切换的小关卡</h2><p>可以先返回工作台新增兼容小关卡。</p></div></div>', '<button class="modal-button" data-action="close-modal" type="button">取消</button>');
     }
     if (modal.type === 'issues') {
       return modalShell('待处理关系', `<div class="issues-list">${issuesContent(modal.subPageId || null)}</div>`, '<button class="modal-button primary" data-action="close-modal" type="button">完成</button>');
@@ -929,8 +1014,23 @@
     requestScrollTo(`subpage:${subPageId}`);
   }
 
+  function enterFocusWorkspace(subPageId) {
+    const subPage = Core.getSubPage(state, subPageId);
+    if (!subPage || subPage.kind !== 'managed') return false;
+    const stageList = root?.querySelector('[data-scroll-key="stage-list"]');
+    state.focusReturnStageScrollTop = stageList?.scrollTop || 0;
+    Core.activateSubPage(state, subPageId);
+    state.focusActive = true;
+    state.focusQuery = '';
+    state.focusFilter = 'all';
+    state.focusTab = 'views';
+    state.mode = 'edit';
+    return true;
+  }
+
   function handleAction(action, target) {
     if (Date.now() < suppressClickUntil) return;
+    if (state.mode === 'run' && ['select-subpage', 'select-view', 'select-element', 'view-more', 'open-add-view', 'focus-filter', 'open-focus-switcher', 'switch-focus-page'].includes(action)) return;
     if (action === 'open-template') { modal = { type: 'template', selected: null, purpose: target.dataset.purpose || 'stage' }; render(); return; }
     if (action === 'select-template') { modal.selected = target.dataset.template; render(); return; }
     if (action === 'confirm-template') {
@@ -1008,24 +1108,64 @@
     if (action === 'drawer-tab') { state.drawerTab = target.dataset.tab; update(); return; }
     if (action === 'focus-tab') { state.focusTab = target.dataset.tab; update(); return; }
     if (action === 'enter-focus') {
-      Core.activateSubPage(state, target.dataset.subpage);
-      state.focusActive = true;
-      state.focusTab = 'views';
-      update();
+      if (enterFocusWorkspace(target.dataset.subpage)) update();
       return;
     }
-    if (action === 'exit-focus') { state.focusActive = false; update(); showToast('已返回工作台，当前位置已保留。'); return; }
+    if (action === 'exit-focus') {
+      state.focusActive = false;
+      state.focusQuery = '';
+      state.focusFilter = 'all';
+      requestScrollTo(`subpage:${state.activeSubPageId}`);
+      update();
+      const stageList = root?.querySelector('[data-scroll-key="stage-list"]');
+      if (stageList) stageList.scrollTop = state.focusReturnStageScrollTop || 0;
+      showToast('已返回工作台，当前位置已保留。');
+      return;
+    }
+    if (action === 'open-focus-switcher') { modal = { type: 'focus-switch' }; render(); return; }
+    if (action === 'switch-focus-page') {
+      const subPage = Core.getSubPage(state, target.dataset.subpage);
+      if (subPage?.kind === 'managed') {
+        Core.activateSubPage(state, subPage.id);
+        state.focusActive = true;
+        state.focusQuery = '';
+        state.focusFilter = 'all';
+        modal = null;
+        update();
+        showToast(`已切换到${Core.subPageLabel(state, subPage.id)}。`);
+      }
+      return;
+    }
     if (action === 'open-add-view') {
       activateSubPageWithUi(target.dataset.subpage || state.activeSubPageId);
-      modal = { type: 'add-view' };
+      const subPage = activeSubPage();
+      modal = { type: 'add-view', subPageId: subPage?.id, kind: 'peer', value: defaultNewViewTitle(subPage, 'peer') };
       render();
       return;
     }
-    if (action === 'add-view') {
-      const id = Core.addView(state, target.dataset.kind);
+    if (action === 'choose-view-kind') {
+      if (modal?.type !== 'add-view') return;
+      const subPage = Core.getSubPage(state, modal.subPageId || state.activeSubPageId);
+      modal.kind = target.dataset.kind;
+      modal.value = defaultNewViewTitle(subPage, modal.kind);
+      render();
+      const input = root?.querySelector('[data-add-view-name]');
+      input?.focus();
+      input?.select();
+      return;
+    }
+    if (action === 'confirm-add-view') {
+      const input = root?.querySelector('[data-add-view-name]');
+      const title = input?.value?.trim() || '';
+      const id = Core.addView(state, modal?.kind || 'peer', title);
+      if (!id) {
+        showToast('页面名称不能为空，且不能与当前小关卡重复。', 'warn');
+        return;
+      }
+      modal = null;
       requestScrollTo(`view:${id}`);
-      modal = { type: 'rename', viewId: id, value: Core.getView(state, id)?.title || '' };
       update();
+      showToast(`已创建“${Core.getView(state, id).title}”。`);
       return;
     }
     if (action === 'confirm-rename') {
@@ -1099,9 +1239,15 @@
       update();
       return;
     }
-    if (action === 'configure-event') { modal = { type: 'event', elementId: target.dataset.element }; render(); return; }
+    if (action === 'configure-event') {
+      state.eventEditorElementId = state.eventEditorElementId === target.dataset.element ? null : target.dataset.element;
+      modal = null;
+      render();
+      return;
+    }
     if (action === 'save-event-target') {
       Core.configureButtonEvent(state, target.dataset.element, target.dataset.view);
+      state.eventEditorElementId = null;
       modal = null;
       update();
       showToast('按钮事件链接已保存。');
@@ -1109,6 +1255,7 @@
     }
     if (action === 'clear-event') {
       Core.clearButtonEvent(state, target.dataset.element);
+      state.eventEditorElementId = null;
       modal = null;
       update();
       showToast('按钮事件已清除。');
@@ -1128,6 +1275,24 @@
     }
     if (action === 'cancel-binding') { state.bindingDialogId = null; update(); showToast('已取消选择。'); return; }
     if (action === 'open-issues') { modal = { type: 'issues', subPageId: state.focusActive ? state.activeSubPageId : null }; render(); return; }
+    if (action === 'open-view-issues') { modal = { type: 'issues', subPageId: target.dataset.subpage || state.activeSubPageId }; render(); return; }
+    if (action === 'clear-selection') {
+      if (state.mode !== 'run') {
+        state.selectedElementId = null;
+        state.eventEditorElementId = null;
+        state.inspectorTab = 'properties';
+        update();
+      }
+      return;
+    }
+    if (action === 'focus-filter') { state.focusFilter = target.dataset.filter || 'all'; update(); return; }
+    if (action === 'run-from-main') {
+      if (state.mode !== 'run') {
+        Core.startRun(state, activeSubPage()?.mainViewId);
+        update();
+      }
+      return;
+    }
     if (action === 'toggle-run') {
       if (state.mode === 'run') Core.stopRun(state);
       else Core.startRun(state);
@@ -1143,7 +1308,44 @@
     if (!actionTarget) { if (menu) { menu = null; render(); } return; }
     event.preventDefault();
     event.stopPropagation();
+    if (scheme === 'focus' && !state.focusActive && actionTarget.dataset.action === 'select-subpage') {
+      const now = Date.now();
+      const isDoubleSelect = event.detail >= 2
+        || (lastSubPageSelectClick.id === actionTarget.dataset.subpage && now - lastSubPageSelectClick.at < 500);
+      if (isDoubleSelect) {
+        lastSubPageSelectClick = { id: null, at: 0 };
+        if (enterFocusWorkspace(actionTarget.dataset.subpage)) update();
+        return;
+      }
+      lastSubPageSelectClick = { id: actionTarget.dataset.subpage, at: now };
+    }
     handleAction(actionTarget.dataset.action, actionTarget);
+  }
+
+  function inputHandler(event) {
+    const input = event.target.closest?.('[data-focus-search], [data-add-view-name]');
+    if (!input) return;
+    const selector = input.hasAttribute('data-focus-search') ? '[data-focus-search]' : '[data-add-view-name]';
+    const caret = input.selectionStart ?? input.value.length;
+    if (input.hasAttribute('data-focus-search')) state.focusQuery = input.value;
+    else if (modal?.type === 'add-view') modal.value = input.value;
+    render();
+    const nextInput = root?.querySelector(selector);
+    if (nextInput) {
+      nextInput.focus();
+      try { nextInput.setSelectionRange(caret, caret); } catch {}
+    }
+  }
+
+  function doubleClickHandler(event) {
+    if (scheme !== 'focus' || state.focusActive) return;
+    const row = event.target.closest?.('[data-subpage-drop-row]');
+    if (!row || !root.contains(row)) return;
+    const subPage = Core.getSubPage(state, row.dataset.subpageDropRow);
+    if (subPage?.kind === 'managed' && enterFocusWorkspace(subPage.id)) {
+      event.preventDefault();
+      update();
+    }
   }
 
   function pointerDownHandler(event) {
@@ -1516,6 +1718,14 @@
   }
 
   function keyHandler(event) {
+    if (event.key === 'Enter' && scheme === 'focus' && !state.focusActive && !modal && !menu && !dragState && !pressState) {
+      const tag = event.target?.tagName?.toLowerCase();
+      if (!['input', 'textarea', 'button', 'select'].includes(tag) && activeSubPage()?.kind === 'managed' && enterFocusWorkspace(state.activeSubPageId)) {
+        event.preventDefault();
+        update();
+        return;
+      }
+    }
     if (event.key !== 'Escape') return;
     if (panelResize) {
       endPanelResize(false);
@@ -1623,9 +1833,11 @@
     state = Core.load(scheme);
     layoutState = loadLayoutState();
     root.addEventListener('click', clickHandler);
+    root.addEventListener('input', inputHandler);
     root.addEventListener('pointerdown', pointerDownHandler);
     root.addEventListener('pointerdown', resizePointerDownHandler, true);
     root.addEventListener('dblclick', resizeDblClickHandler, true);
+    root.addEventListener('dblclick', doubleClickHandler);
     document.addEventListener('pointermove', pointerMoveHandler, { passive: false });
     document.addEventListener('pointermove', resizePointerMoveHandler, { passive: false });
     document.addEventListener('pointerup', pointerUpHandler);

@@ -127,7 +127,11 @@
       drawerTab: 'views',
       focusTab: 'views',
       focusActive: false,
+      focusQuery: '',
+      focusFilter: 'all',
+      focusReturnStageScrollTop: 0,
       inspectorTab: 'properties',
+      eventEditorElementId: null,
       mode: 'edit',
       runViewId: null,
       runDialogId: null,
@@ -244,6 +248,7 @@
     if (!subPage.viewOrder.includes(state.currentViewId)) state.currentViewId = subPage.mainViewId;
     state.selectedElementId = null;
     state.bindingDialogId = null;
+    state.eventEditorElementId = null;
     if (!state.expandedSubPageIds.includes(subPageId)) state.expandedSubPageIds.push(subPageId);
     return true;
   }
@@ -254,6 +259,7 @@
     activateSubPage(state, view.subPageId);
     state.currentViewId = viewId;
     state.selectedElementId = null;
+    state.eventEditorElementId = null;
     return true;
   }
 
@@ -361,12 +367,14 @@
     return issues;
   }
 
-  function addView(state, kind) {
+  function addView(state, kind, requestedTitle = '') {
     const subPage = getActiveSubPage(state);
     if (!subPage || subPage.kind !== 'managed') return null;
     const id = nextId(state, 'view');
     const sameKindCount = subPage.viewOrder.filter((viewId) => state.views[viewId]?.kind === kind).length;
-    const title = kind === 'dialog' ? `弹窗 ${sameKindCount + 1}` : `第 ${sameKindCount + 2} 题`;
+    const title = (requestedTitle || (kind === 'dialog' ? `弹窗 ${sameKindCount + 1}` : `第 ${sameKindCount + 2} 题`)).trim();
+    if (!title || subPage.viewOrder.some((viewId) => state.views[viewId]?.title === title)) return null;
+    rememberUndo(state, '新增内部页面');
     const view = {
       id,
       subPageId: subPage.id,
@@ -401,8 +409,11 @@
 
   function renameView(state, viewId, title) {
     const view = getView(state, viewId);
-    if (!view || !title.trim()) return false;
-    view.title = title.trim();
+    const nextTitle = title.trim();
+    const subPage = view ? getSubPage(state, view.subPageId) : null;
+    if (!view || view.kind === 'main' || !nextTitle || subPage?.viewOrder.some((id) => id !== viewId && state.views[id]?.title === nextTitle)) return false;
+    rememberUndo(state, '重命名页面');
+    view.title = nextTitle;
     return true;
   }
 
@@ -624,6 +635,7 @@
     if (!found || found.element.type !== '按钮' || !target) return false;
     const sourceSubPage = getSubPage(state, found.view.subPageId);
     if (!sourceSubPage || target.subPageId !== sourceSubPage.id) return false;
+    rememberUndo(state, '配置按钮事件');
     found.element.targetView = targetViewId;
     found.element.eventType = target.kind === 'dialog' ? 'openDialog' : 'jump';
     delete found.element.brokenTargetTitle;
@@ -633,6 +645,7 @@
   function clearButtonEvent(state, elementId) {
     const found = findElement(state, elementId);
     if (!found || found.element.type !== '按钮' || found.element.role === 'close') return false;
+    rememberUndo(state, '清除按钮事件');
     found.element.targetView = null;
     found.element.eventType = 'none';
     delete found.element.brokenTargetTitle;
@@ -671,6 +684,7 @@
     const found = findElement(state, elementId);
     if (!dialog || dialog.kind !== 'dialog' || !found || found.element.type !== '按钮') return false;
     if (found.view.subPageId !== dialog.subPageId || found.element.role === 'close') return false;
+    rememberUndo(state, '配置弹窗入口');
     found.element.eventType = 'openDialog';
     found.element.targetView = dialogViewId;
     delete found.element.brokenTargetTitle;
@@ -678,11 +692,11 @@
     return true;
   }
 
-  function startRun(state) {
+  function startRun(state, startViewId = null) {
     const subPage = getActiveSubPage(state);
     if (!subPage) return false;
     state.mode = 'run';
-    state.runViewId = state.currentViewId || subPage.mainViewId;
+    state.runViewId = startViewId || state.currentViewId || subPage.mainViewId;
     state.runDialogId = null;
     state.bindingDialogId = null;
     state.selectedElementId = null;
@@ -690,7 +704,9 @@
   }
 
   function stopRun(state) {
+    const returnViewId = state.runDialogId || state.runViewId;
     state.mode = 'edit';
+    if (returnViewId && getView(state, returnViewId)) activateView(state, returnViewId);
     state.runDialogId = null;
     state.bindingDialogId = null;
     return true;
