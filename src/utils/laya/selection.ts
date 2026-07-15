@@ -45,6 +45,8 @@ export type EditorCallbacks = {
   getStore: () => EditorStoreAccess;
   /** DOM host element — available for external callers that need hostRect */
   getHostElement: () => HTMLElement | null;
+  /** 空格拖拽或中键拖拽期间，阻止 Laya 命中检测与框选。 */
+  isCanvasNavigating?: () => boolean;
 };
 
 let _editorCb: EditorCallbacks | null = null;
@@ -98,7 +100,7 @@ export function initEditorInteraction(cb: EditorCallbacks): void {
 
   _stageMouseDownHandler = (e: LayaAny) => {
     // overlay 正在处理拖拽/选中时，跳过 stage 的命中检测
-    if (_overlayHandling) return;
+    if (_overlayHandling || _editorCb?.isCanvasNavigating?.()) return;
     const wt = getWorldTransform();
 
     // Use native DOM MouseEvent clientX/clientY for coordinate conversion.

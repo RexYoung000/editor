@@ -154,7 +154,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // 画布
     canvas: '画布',
-    canvasHint: '方向键微调位置 · Shift+方向键 10px · Delete 删除',
+    canvasHint: '空格+左键拖动画布 · ⌘/Ctrl+滚轮缩放 · 方向键微调位置',
     layaInitializing: 'Laya 初始化中...',
     addComponentsHint: '从上方工具栏添加组件',
     keyboardShortcuts: 'Ctrl+S 保存 · Ctrl+Z 撤销 · Ctrl+C/V 复制粘贴',
@@ -703,7 +703,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // Canvas
     canvas: 'Canvas',
-    canvasHint: 'Arrow keys to nudge · Shift+Arrow 10px · Delete to remove',
+    canvasHint: 'Space+drag to pan · Ctrl/Cmd+wheel to zoom · Arrow keys to nudge',
     layaInitializing: 'Laya initializing...',
     addComponentsHint: 'Add components from the toolbar above',
     keyboardShortcuts: 'Ctrl+S Save · Ctrl+Z Undo · Ctrl+C/V Copy/Paste',

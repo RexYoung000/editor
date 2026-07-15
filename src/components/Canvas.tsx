@@ -1,10 +1,10 @@
 import { useEditorStore } from '../store/editorStore';
-import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
+import { useRef, useState, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import type { Element } from '../types';
 import {
   preloadAtlas, initEditorInteraction, removeObject,
   clearAllObjects, createLayaComponent, registerObject, getObject, syncTransform,
-  initWorldRoot, setWorldTransform,
+  initWorldRoot, setWorldTransform, getWorldTransform,
 } from '../utils/layaBridge';
 import { applyKlProps, drawPlaceholder } from '../utils/laya/components';
 import { objects, canvasRoot, laya } from '../utils/laya/core';
@@ -18,13 +18,16 @@ import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
 import { findActiveElementPage, findCanvasElementPage } from '../utils/internalPages';
+import {
+  CANVAS_ZOOM_BUTTON_STEP,
+  fitCanvasViewport,
+  panViewportByWheel,
+  zoomViewportAtPoint,
+  zoomViewportByWheel,
+} from '../utils/canvasViewport';
 
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
-
-function centerCanvas(hostW: number, hostH: number, zoom: number) {
-  return { panX: (hostW - CANVAS_W * zoom) / 2, panY: (hostH - CANVAS_H * zoom) / 2 };
-}
 
 /**
  * 按"父先于子"的拓扑顺序排序子元素列表。
@@ -105,21 +108,35 @@ export default function Canvas() {
 
   // ─── world state：pan/zoom 由 worldRoot 控制 ───
   const [world, setWorldRaw] = useState({ zoom: 0.4, panX: 0, panY: 0 });
-  const setWorld = (w: { zoom: number; panX: number; panY: number }) => {
+  const worldRef = useRef(world);
+  const setWorld = useCallback((w: { zoom: number; panX: number; panY: number }) => {
     if (isNaN(w.zoom) || isNaN(w.panX) || isNaN(w.panY)) {
       console.warn('[forge] setWorld NaN detected:', w);
       console.trace('[forge] NaN callstack');
       const host = layaHostRef.current;
-      const fallback = host ? centerCanvas(host.clientWidth, host.clientHeight, 0.4) : { panX: 0, panY: 0 };
-      setWorldRaw({ zoom: 0.4, panX: fallback.panX, panY: fallback.panY });
+      const fallback = host
+        ? fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H)
+        : { zoom: 0.4, panX: 0, panY: 0 };
+      worldRef.current = fallback;
+      setWorldRaw(fallback);
       return;
     }
+    worldRef.current = w;
     setWorldRaw(w);
-  };
-  const worldRef = useRef(world);
+  }, []);
   useLayoutEffect(() => { worldRef.current = world; }, [world]);
 
-  const currentPage = findCanvasElementPage(currentCourse, currentSubPageId, currentInternalPageId);
+  const currentPage = useMemo(
+    () => findCanvasElementPage(currentCourse, currentSubPageId, currentInternalPageId),
+    [currentCourse, currentSubPageId, currentInternalPageId],
+  );
+
+  const spacePressedRef = useRef(false);
+  const panningRef = useRef(false);
+  const panStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const [spacePressed, setSpacePressed] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
 
   const showGridRef = useRef(false);
   const snap = (v: number) => showGridRef.current ? Math.round(v / 20) * 20 : Math.round(v);
@@ -151,7 +168,8 @@ export default function Canvas() {
     L.stage.screenAdaptationEnabled = false;
 
     // Laya 通过 canvas CSS transform 实现 viewport 偏移渲染（如左侧栏宽度 156px），
-    // 导致 Laya 渲染和 DOM overlay 不对齐。用 Laya timer 每帧强制 canvas.style.transform = none。
+    // 导致 Laya 渲染和 DOM overlay 不对齐。用 Laya timer 每帧强制 canvas.style.transform = none，
+    // 并守护 worldRoot 变换，避免内部页面重建或预览返回后标尺与实际画布采用不同视口。
     // 注意：_canvasTransform.tx/ty 不重置！它们是 Laya 鼠标坐标转换所需的，
     // 清零会导致命中检测偏移。
     const resetCanvasRendering = () => {
@@ -159,6 +177,15 @@ export default function Canvas() {
       if (canvasEl && canvasEl.style.transform && canvasEl.style.transform !== 'none') {
         canvasEl.style.transform = 'none';
         canvasEl.style.transformOrigin = '0 0';
+      }
+      const expected = worldRef.current;
+      const actual = getWorldTransform();
+      if (
+        Math.abs(actual.panX - expected.panX) > 0.01
+        || Math.abs(actual.panY - expected.panY) > 0.01
+        || Math.abs(actual.zoom - expected.zoom) > 0.0001
+      ) {
+        setWorldTransform(expected.panX, expected.panY, expected.zoom);
       }
     };
     L.timer.frameLoop(1, null, resetCanvasRendering);
@@ -204,20 +231,21 @@ export default function Canvas() {
       resizeStage();
       // worldRoot + boundaryFrame
       initWorldRoot();
-      // 初始居中
-      const { panX, panY } = centerCanvas(host.clientWidth, host.clientHeight, 0.4);
-      setWorld({ zoom: 0.4, panX, panY });
-      setWorldTransform(panX, panY, 0.4);
+      // 初始按当前可用区域适应画布，不写死缩放比例
+      const initialViewport = fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H);
+      setWorld(initialViewport);
+      setWorldTransform(initialViewport.panX, initialViewport.panY, initialViewport.zoom);
       initEditorInteraction({
         onSelect:     (id) => selectElementRef.current(id, false),
         onDeselect:   () => clearSelectionRef.current(),
         onMarqueeStart: (wx, wy) => setMarqueeStart({ wx, wy }),
         getStore:     () => useEditorStore,
         getHostElement: () => layaHostRef.current,
+        isCanvasNavigating: () => spacePressedRef.current || panningRef.current,
       });
       setLayaReady(true);
     });
-  }, []);
+  }, [setWorld]);
 
   useEffect(() => {
     const start = Date.now();
@@ -492,6 +520,7 @@ export default function Canvas() {
     const host = layaHostRef.current;
     if (!host) return;
     const onDblClick = (e: MouseEvent) => {
+      if (spacePressedRef.current || panningRef.current) return;
       const state = useEditorStore.getState();
       const page = findActiveElementPage(
         state.currentCourse,
@@ -524,48 +553,40 @@ export default function Canvas() {
   const [dragHover, setDragHover] = useState(false);
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
 
-  // ─── 缩放/平移 ───
-  const zoomIn  = () => {
+  // ─── Axure 风格画布导航：空格拖拽、滚轮平移、修饰键缩放 ───
+  const getZoomAnchor = useCallback(() => {
     const host = layaHostRef.current;
-    const r = host?.getBoundingClientRect();
-    if (!r) return;
-    const { zoom, panX, panY } = worldRef.current;
-    const newZoom = Math.min(2, Math.round((zoom + 0.1) * 10) / 10);
-    // 以视口中心为锚点
-    const cx = r.width / 2, cy = r.height / 2;
-    const worldX = (cx - panX) / zoom, worldY = (cy - panY) / zoom;
-    setWorld({ zoom: newZoom, panX: cx - worldX * newZoom, panY: cy - worldY * newZoom });
-  };
-  const zoomOut = () => {
+    if (!host) return null;
+    return lastPointerRef.current ?? { x: host.clientWidth / 2, y: host.clientHeight / 2 };
+  }, []);
+
+  const zoomByStep = useCallback((direction: -1 | 1) => {
+    const anchor = getZoomAnchor();
+    if (!anchor) return;
+    const viewport = worldRef.current;
+    const nextZoom = Math.round((viewport.zoom + direction * CANVAS_ZOOM_BUTTON_STEP) * 100) / 100;
+    setWorld(zoomViewportAtPoint(viewport, nextZoom, anchor));
+  }, [getZoomAnchor, setWorld]);
+
+  const zoomIn = useCallback(() => zoomByStep(1), [zoomByStep]);
+  const zoomOut = useCallback(() => zoomByStep(-1), [zoomByStep]);
+
+  const handleWheel = useCallback((e: WheelEvent) => {
     const host = layaHostRef.current;
-    const r = host?.getBoundingClientRect();
-    if (!r) return;
-    const { zoom, panX, panY } = worldRef.current;
-    const newZoom = Math.max(0.1, Math.round((zoom - 0.1) * 10) / 10);
-    const cx = r.width / 2, cy = r.height / 2;
-    const worldX = (cx - panX) / zoom, worldY = (cy - panY) / zoom;
-    setWorld({ zoom: newZoom, panX: cx - worldX * newZoom, panY: cy - worldY * newZoom });
-  };
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    e.preventDefault();
+    const anchor = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    lastPointerRef.current = anchor;
+    const viewport = worldRef.current;
+    const next = e.metaKey || e.ctrlKey
+      ? zoomViewportByWheel(viewport, e.deltaY, e.deltaMode, rect.height, anchor)
+      : panViewportByWheel(viewport, e.deltaX, e.deltaY, e.deltaMode, rect.width, rect.height, e.shiftKey);
+    setWorld(next);
+  }, [setWorld]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const panningRef = useRef(false);
-  const panStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
-
-  // ─── 滚轮缩放（以鼠标为锚点） ───
-  const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    const { zoom, panX, panY } = worldRef.current;
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    const newZoom = Math.min(2, Math.max(0.1, Math.round((zoom + delta) * 10) / 10));
-    if (newZoom === zoom) return;
-
-    const rect = layaHostRef.current!.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    // world 坐标不变 → 新 panX/panY
-    const worldX = (mx - panX) / zoom;
-    const worldY = (my - panY) / zoom;
-    setWorld({ zoom: newZoom, panX: mx - worldX * newZoom, panY: my - worldY * newZoom });
-  }, []);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -574,31 +595,90 @@ export default function Canvas() {
     return () => el.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  // ─── 中键拖动平移 ───
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const element = target as HTMLElement | null;
+      return element?.tagName === 'INPUT' || element?.tagName === 'TEXTAREA' || element?.isContentEditable;
+    };
+    const releaseNavigation = () => {
+      spacePressedRef.current = false;
+      panningRef.current = false;
+      setSpacePressed(false);
+      setIsPanning(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || isEditableTarget(event.target)) return;
+      event.preventDefault();
+      if (!spacePressedRef.current) {
+        spacePressedRef.current = true;
+        setSpacePressed(true);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') releaseNavigation();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', releaseNavigation);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', releaseNavigation);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      const host = layaHostRef.current;
+      if (host) {
+        const rect = host.getBoundingClientRect();
+        if (event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) {
+          lastPointerRef.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        }
+      }
+      if (!panningRef.current) return;
+      setWorld({
+        ...worldRef.current,
+        panX: panStartRef.current.ox + event.clientX - panStartRef.current.mx,
+        panY: panStartRef.current.oy + event.clientY - panStartRef.current.my,
+      });
+    };
+    const onMouseUp = () => {
+      if (!panningRef.current) return;
+      panningRef.current = false;
+      setIsPanning(false);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [setWorld]);
+
+  useEffect(() => {
+    if (!isPanning) return;
+    const previous = document.body.style.cursor;
+    document.body.style.cursor = 'grabbing';
+    return () => { document.body.style.cursor = previous; };
+  }, [isPanning]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 1) return;
+    const shouldPan = e.button === 1 || (e.button === 0 && spacePressedRef.current);
+    if (!shouldPan) return;
     e.preventDefault();
+    e.stopPropagation();
     panningRef.current = true;
+    setIsPanning(true);
+    setMarqueeStart(null);
     panStartRef.current = { mx: e.clientX, my: e.clientY, ox: worldRef.current.panX, oy: worldRef.current.panY };
   }, []);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!panningRef.current) return;
-    setWorld({
-      ...worldRef.current,
-      panX: panStartRef.current.ox + e.clientX - panStartRef.current.mx,
-      panY: panStartRef.current.oy + e.clientY - panStartRef.current.my,
-    });
-  }, []);
-
-  const handleMouseUp = useCallback(() => { panningRef.current = false; }, []);
 
   const handleFitZoom = useCallback(() => {
     const host = layaHostRef.current;
     if (!host) return;
-    const { panX, panY } = centerCanvas(host.clientWidth, host.clientHeight, 0.4);
-    setWorld({ zoom: 0.4, panX, panY });
-  }, []);
+    setWorld(fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H));
+  }, [setWorld]);
 
   // ─── 拖拽图片到画布 ───
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -779,11 +859,14 @@ export default function Canvas() {
     : null;
 
   return (
-    <div ref={canvasRef} className="flex-1 flex flex-col overflow-hidden bg-slate-800 relative"
-        onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+    <div ref={canvasRef} className={`flex-1 flex flex-col overflow-hidden bg-slate-800 relative ${isPanning ? 'cursor-grabbing' : spacePressed ? 'cursor-grab' : ''}`}
+        onMouseDownCapture={handleMouseDown}
         onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
         onContextMenu={(e) => e.preventDefault()}>
       <div className="flex-1 overflow-hidden relative">
+        {spacePressed && (
+          <div className={`absolute inset-0 z-50 ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`} aria-hidden="true" />
+        )}
         {/* 拖拽图片高亮 */}
         {dragHover && (
           <div className="absolute inset-0 border-2 border-blue-400 bg-blue-400/10 rounded pointer-events-none z-20" />
@@ -851,7 +934,7 @@ export default function Canvas() {
       <div className="h-8 bg-slate-900 border-t border-slate-700 flex items-center justify-center gap-3 px-4 shrink-0">
         <button onClick={handleFitZoom} className="text-xs text-slate-400 hover:text-white px-2 py-0.5 rounded hover:bg-slate-700">{t('fit')}</button>
         <button onClick={zoomOut} className="text-slate-400 hover:text-white w-5 h-5 flex items-center justify-center rounded hover:bg-slate-700 text-sm">−</button>
-        <span className="text-xs text-slate-300 w-12 text-center">{Math.round(world.zoom * 100)}%</span>
+        <span className="text-xs text-slate-300 w-12 text-center" title="⌘/Ctrl + 滚轮缩放 · 空格 + 左键拖拽">{Math.round(world.zoom * 100)}%</span>
         <button onClick={zoomIn} className="text-slate-400 hover:text-white w-5 h-5 flex items-center justify-center rounded hover:bg-slate-700 text-sm">+</button>
         <span className="text-xs text-slate-600 ml-2">1920 × 1080</span>
         <button onClick={() => setShowGrid(!showGrid)} className={`ml-2 text-xs px-2 py-0.5 rounded ${showGrid ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
