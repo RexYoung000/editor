@@ -39,7 +39,7 @@ forge 没有独立的 Node 服务，所有"后端"能力都由 [vite.config.ts](
 | `POST /api/upload-resource` | multipart 上传，**100MB 上限**，让远程 Electron 把视频等大文件直接写进对应 lesson 目录的 `destPath`，要求 lesson 目录已存在（即先发布过） |
 | `POST /api/save-preset-thumbnail` | 把 canvas 截图（`{ name, dataUrl }`）写到 `public/builtin/editor/<name>.png`，预设缩略图用 |
 | `GET /api/library/list?path=<rel>` | 列出 `public/builtin/library/<rel>` 目录条目，目录会判 Spine 工程，文件返回 size/mtime；路径过 `sanitizeLibraryPath` 防越界 |
-| `GET /api/library/search?q=<关键词>&type=<类型>` | 全库搜索受支持资源；关键词只匹配文件名，多个空格关键词按无序 AND 匹配，并支持 `series/color/language/quickTag` 筛选；响应返回当前资源类型可用的快捷标签及数量，结果最多 200 条 |
+| `GET /api/library/search?q=<关键词>&type=<类型>` | 全库搜索受支持资源；自由关键词只匹配文件名，多个空格关键词按无序 AND 匹配；`series/color/language` 与用途 `quickTag` 读取完整相对路径，因此目录归类可参与筛选；响应返回当前资源类型可用的快捷标签及数量，结果最多 200 条 |
 | `GET /api/library/file-info?path=<rel>` | 取单文件 SHA-256 前 8 字符 hash + size/mtime，hash 缓存在 `public/builtin/library/.cache/hash.json`（按 mtime+size 失效） |
 | `GET /api/library/spine-files?path=<rel>` | 传入 Spine 工程目录，递归列出 `.json/.atlas/.png/.mp3/.wav/.ogg` 文件 |
 | `GET /api/library/quick-presets?kind=<kind>` | 递归扫描 `public/builtin/library/通用素材/控件/`，返回快捷组件候选图片及系列、颜色、语言标签；`kind` 首批支持 `confirm/previous/next/audio/brush/clear` |
