@@ -102,6 +102,15 @@ function listQuickPresets(kind: QuickPresetKind) {
 
 type LibraryResourceType = 'image' | 'audio' | 'video' | 'spine';
 
+type LibraryQuickTagDefinition = {
+  id: string;
+  label: string;
+  group: string;
+  primary: boolean;
+  pattern?: RegExp;
+  pathPattern?: RegExp;
+};
+
 const LIBRARY_QUICK_TAGS = [
   { id: 'highlight', label: '点亮一下', group: '教学内容', primary: true, pattern: /点亮一下/ },
   { id: 'method-summary', label: '方法小结', group: '教学内容', primary: true, pattern: /方法小结/ },
@@ -137,7 +146,11 @@ const LIBRARY_QUICK_TAGS = [
   { id: 'sequence', label: '题号/序号', group: '编辑工具', primary: false, pattern: /题号|序号/ },
   { id: 'add', label: '添加', group: '编辑工具', primary: false, pattern: /添加/ },
   { id: 'delete', label: '删除', group: '编辑工具', primary: false, pattern: /删除|垃圾桶/ },
-] as const;
+
+  { id: 'title-frame', label: '标题框', group: '基础框体', primary: false, pathPattern: /^通用素材\/通用框\/.*标题框\//u },
+  { id: 'input-frame', label: '输入框', group: '基础框体', primary: false, pathPattern: /^通用素材\/通用框\/.*输入框\//u },
+  { id: 'content-frame', label: '内容底框', group: '基础框体', primary: false, pathPattern: /^通用素材\/通用框\/S4-S7通用框\/三色矩形底框\//u },
+] as const satisfies readonly LibraryQuickTagDefinition[];
 
 type LibraryQuickTagId = (typeof LIBRARY_QUICK_TAGS)[number]['id'];
 
@@ -152,6 +165,13 @@ type LibrarySearchEntry = {
   color: string;
   language: string;
 };
+
+function matchesLibraryQuickTag(entry: LibrarySearchEntry, tag: LibraryQuickTagDefinition): boolean {
+  return Boolean(
+    (tag.pattern?.test(entry.name) ?? false)
+    || (tag.pathPattern?.test(entry.libraryPath) ?? false),
+  );
+}
 
 const LIBRARY_SEARCH_INDEX_TTL = 2_000;
 const LIBRARY_SEARCH_RESULT_LIMIT = 200;
@@ -692,7 +712,7 @@ function forgePlugin() {
               if (series && entry.series !== series) return false;
               if (color && entry.color !== color) return false;
               if (language && entry.language !== language) return false;
-              if (quickTag && !quickTag.pattern.test(entry.name)) return false;
+              if (quickTag && !matchesLibraryQuickTag(entry, quickTag)) return false;
               const normalizedName = entry.name.toLocaleLowerCase('zh-CN');
               return keywords.every((keyword) => normalizedName.includes(keyword));
             });
@@ -713,7 +733,7 @@ function forgePlugin() {
                 label: tag.label,
                 group: tag.group,
                 primary: tag.primary,
-                count: sameType.filter((entry) => tag.pattern.test(entry.name)).length,
+                count: sameType.filter((entry) => matchesLibraryQuickTag(entry, tag)).length,
               })),
             });
           } catch (e: any) {
