@@ -154,7 +154,7 @@ forge 当前不是需要全面重写的失控代码库。项目已有统一状�
 
 | Issue | 类型 | 目标 | 依赖 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| [#31](https://github.com/RexYoung000/editor/issues/31) | 文档 | 建立本路线、导航和持续维护机制 | 无 | 开发中 |
+| [#31](https://github.com/RexYoung000/editor/issues/31) | 文档 | 建立本路线、导航和持续维护机制 | 无 | 评审中 |
 | [#32](https://github.com/RexYoung000/editor/issues/32) | 测试 | 建立导出结果回归保护 | 无 | 待对齐 |
 | [#33](https://github.com/RexYoung000/editor/issues/33) | 技术债 | 收敛共享导出规则 | #32 | 待对齐 |
 
