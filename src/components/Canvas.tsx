@@ -859,6 +859,8 @@ export default function Canvas() {
               selectedIds={selectedElementIds}
               currentPage={currentPage}
               editingElement={editingElement}
+              pageWidth={CANVAS_W}
+              pageHeight={CANVAS_H}
               snap={snap}
               setEditingId={setEditingId}
             />

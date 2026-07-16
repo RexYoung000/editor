@@ -24,10 +24,12 @@ import {
   createMoveTransaction,
   createResizeTransaction,
   createRotateTransaction,
+  getFrameHandleWorldPoint,
   getSelectionFrame,
   previewMoveTransaction,
   previewResizeTransaction,
   previewRotateTransaction,
+  translateMoveTransaction,
   transactionHasChanges,
   type CanvasTransformTransaction,
   type MoveTransaction,
@@ -37,9 +39,20 @@ import {
   type TransformHandle,
   type TransformSnapshot,
 } from '../utils/canvasTransformTransaction';
+import {
+  createSmartSnapCandidates,
+  getResizeSnapAxes,
+  getSelectionFrameBounds,
+  snapBoundsToCandidates,
+  snapPointToCandidates,
+  type SnapCandidate,
+  type SnapGuide,
+  type SnapLocks,
+} from '../utils/canvasSnap';
 
 const HANDLE_SIZE = 10;
 const POINTER_START_THRESHOLD = 3;
+const NO_SNAP = (value: number) => value;
 const HANDLE_DEFS: Array<{ id: TransformHandle; rx: number; ry: number; cursor: string }> = [
   { id: 'nw', rx: 0, ry: 0, cursor: 'nw-resize' },
   { id: 'n', rx: 0.5, ry: 0, cursor: 'n-resize' },
@@ -81,6 +94,8 @@ interface MovePointer extends PointerBase {
   duplicateIds: string[] | null;
   originalSelection: string[];
   transactionElements: Element[] | null;
+  snapCandidates: SnapCandidate[] | null;
+  snapLocks: SnapLocks;
 }
 
 interface MarqueePointer extends PointerBase {
@@ -93,6 +108,8 @@ interface MarqueePointer extends PointerBase {
 interface ResizePointer extends PointerBase {
   kind: 'resize';
   transaction: ResizeTransaction;
+  snapCandidates: SnapCandidate[] | null;
+  snapLocks: SnapLocks;
 }
 
 interface RotatePointer extends PointerBase {
@@ -112,6 +129,8 @@ interface CanvasOverlayProps {
   selectedIds: string[];
   currentPage: { elements: Element[] } | null;
   editingElement: Element | null;
+  pageWidth: number;
+  pageHeight: number;
   snap: (value: number) => number;
   setEditingId: (id: string | null) => void;
 }
@@ -122,6 +141,8 @@ export default function CanvasOverlay({
   selectedIds,
   currentPage,
   editingElement,
+  pageWidth,
+  pageHeight,
   snap,
   setEditingId,
 }: CanvasOverlayProps) {
@@ -131,6 +152,7 @@ export default function CanvasOverlay({
   const [previewTransforms, setPreviewTransforms] = useState<TransformSnapshot[] | null>(null);
   const [previewFrame, setPreviewFrame] = useState<SelectionFrame | null>(null);
   const [previewAngle, setPreviewAngle] = useState<number | null>(null);
+  const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const worldRef = useRef(world);
   const currentPageRef = useRef(currentPage);
   const snapRef = useRef(snap);
@@ -213,6 +235,7 @@ export default function CanvasOverlay({
     setPreviewTransforms(null);
     setPreviewFrame(null);
     setPreviewAngle(null);
+    setSnapGuides([]);
 
     const page = currentPageRef.current;
     const store = useEditorStore.getState();
@@ -295,9 +318,10 @@ export default function CanvasOverlay({
     const duplicateOnDrag = IS_MAC ? event.altKey : event.ctrlKey;
     if (hit) {
       const hitWasSelected = currentIds.includes(hit.id);
+      const delayedMacToggle = IS_MAC && event.metaKey && hitWasSelected;
       const pointerSelection = duplicateOnDrag && hitWasSelected
         ? normalizeSelection(page.elements, currentIds)
-        : hitWasSelected && !toggle
+        : hitWasSelected && (!toggle || delayedMacToggle)
         ? normalizeSelection(page.elements, currentIds)
         : resolvePointerSelection(page.elements, currentIds, hit.id, toggle);
       store.selectElements(pointerSelection);
@@ -314,7 +338,9 @@ export default function CanvasOverlay({
         startWorld: point,
         started: false,
         transaction,
-        clickSelection: duplicateOnDrag && toggle
+        clickSelection: delayedMacToggle
+          ? resolvePointerSelection(page.elements, currentIds, hit.id, true)
+          : duplicateOnDrag && toggle
           ? resolvePointerSelection(page.elements, currentIds, hit.id, true)
           : hitWasSelected && !toggle
             ? resolvePointerSelection(page.elements, currentIds, hit.id, false)
@@ -323,6 +349,8 @@ export default function CanvasOverlay({
         duplicateIds: null,
         originalSelection: currentIds,
         transactionElements: null,
+        snapCandidates: null,
+        snapLocks: {},
       };
       return;
     }
@@ -361,6 +389,8 @@ export default function CanvasOverlay({
       startClientY: event.clientY,
       started: false,
       transaction,
+      snapCandidates: null,
+      snapLocks: {},
     };
   }, []);
 
@@ -401,6 +431,7 @@ export default function CanvasOverlay({
     const point = pointerToWorld(event.clientX, event.clientY);
     const page = currentPageRef.current;
     if (!point || !page) return;
+    const smartSnapDisabled = IS_MAC ? event.metaKey : event.altKey;
 
     if (interaction.kind === 'move') {
       if (justStarted && interaction.duplicateOnDrag && !interaction.duplicateIds) {
@@ -421,13 +452,54 @@ export default function CanvasOverlay({
         }
       }
       const transactionElements = interaction.transactionElements ?? page.elements;
-      interaction.transaction = previewMoveTransaction(
+      const requestedWorldDelta = {
+        x: point.x - interaction.startWorld.x,
+        y: point.y - interaction.startWorld.y,
+      };
+      let nextTransaction = previewMoveTransaction(
         interaction.transaction,
         transactionElements,
-        { x: point.x - interaction.startWorld.x, y: point.y - interaction.startWorld.y },
+        requestedWorldDelta,
         snapRef.current,
         event.shiftKey,
       );
+      if (smartSnapDisabled) {
+        interaction.snapLocks = {};
+        setSnapGuides([]);
+      } else {
+        const candidates = interaction.snapCandidates ?? createSmartSnapCandidates(
+          transactionElements,
+          nextTransaction.roots.map((root) => root.id),
+          pageWidth,
+          pageHeight,
+        );
+        interaction.snapCandidates = candidates;
+        const snapResult = snapBoundsToCandidates(
+          getSelectionFrameBounds(nextTransaction.previewFrame),
+          candidates,
+          { zoom: worldRef.current.zoom, previous: interaction.snapLocks },
+        );
+        if (event.shiftKey) {
+          const horizontal = Math.abs(requestedWorldDelta.x) >= Math.abs(requestedWorldDelta.y);
+          if (horizontal) {
+            snapResult.correction.y = 0;
+            snapResult.guides = snapResult.guides.filter((guide) => guide.axis === 'x');
+            snapResult.locks.y = undefined;
+          } else {
+            snapResult.correction.x = 0;
+            snapResult.guides = snapResult.guides.filter((guide) => guide.axis === 'y');
+            snapResult.locks.x = undefined;
+          }
+        }
+        nextTransaction = translateMoveTransaction(
+          nextTransaction,
+          transactionElements,
+          snapResult.correction,
+        );
+        interaction.snapLocks = snapResult.locks;
+        setSnapGuides(snapResult.guides);
+      }
+      interaction.transaction = nextTransaction;
       for (const preview of interaction.transaction.preview) {
         const object = getObject(preview.id);
         if (object) {
@@ -447,6 +519,7 @@ export default function CanvasOverlay({
     }
 
     if (interaction.kind === 'marquee') {
+      setSnapGuides([]);
       setLocalMarquee({
         startWX: interaction.startWorld.x,
         startWY: interaction.startWorld.y,
@@ -457,14 +530,61 @@ export default function CanvasOverlay({
     }
 
     if (interaction.kind === 'resize') {
-      interaction.transaction = previewResizeTransaction(
+      let nextTransaction = previewResizeTransaction(
         interaction.transaction,
         page.elements,
         point,
         event.shiftKey,
         snapRef.current,
       );
+      if (smartSnapDisabled) {
+        interaction.snapLocks = {};
+        setSnapGuides([]);
+      } else {
+        const candidates = interaction.snapCandidates ?? createSmartSnapCandidates(
+          page.elements,
+          nextTransaction.roots.map((root) => root.id),
+          pageWidth,
+          pageHeight,
+        );
+        interaction.snapCandidates = candidates;
+        const axes = getResizeSnapAxes(nextTransaction.handle, nextTransaction.frame.rotation);
+        let snapResult = snapPointToCandidates(
+          getFrameHandleWorldPoint(nextTransaction.previewFrame, nextTransaction.handle),
+          axes,
+          candidates,
+          { zoom: worldRef.current.zoom, previous: interaction.snapLocks },
+        );
+        let adjustedPoint = {
+          x: point.x + snapResult.correction.x,
+          y: point.y + snapResult.correction.y,
+        };
+        for (let index = 0; index < 4; index++) {
+          if (Math.hypot(snapResult.correction.x, snapResult.correction.y) <= 0.001) break;
+          nextTransaction = previewResizeTransaction(
+            interaction.transaction,
+            page.elements,
+            adjustedPoint,
+            event.shiftKey,
+            NO_SNAP,
+          );
+          snapResult = snapPointToCandidates(
+            getFrameHandleWorldPoint(nextTransaction.previewFrame, nextTransaction.handle),
+            axes,
+            candidates,
+            { zoom: worldRef.current.zoom, previous: snapResult.locks },
+          );
+          adjustedPoint = {
+            x: adjustedPoint.x + snapResult.correction.x,
+            y: adjustedPoint.y + snapResult.correction.y,
+          };
+        }
+        interaction.snapLocks = snapResult.locks;
+        setSnapGuides(snapResult.guides);
+      }
+      interaction.transaction = nextTransaction;
     } else {
+      setSnapGuides([]);
       interaction.transaction = previewRotateTransaction(
         interaction.transaction,
         page.elements,
@@ -485,7 +605,7 @@ export default function CanvasOverlay({
     setPreviewTransforms(interaction.transaction.preview);
     setPreviewFrame(interaction.transaction.previewFrame);
     setPreviewAngle(interaction.kind === 'rotate' ? interaction.transaction.angleDelta : null);
-  }, [pointerToWorld, setLocalMarquee]);
+  }, [pageHeight, pageWidth, pointerToWorld, setLocalMarquee]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (interactionRef.current?.pointerId !== event.pointerId) return;
@@ -571,6 +691,29 @@ export default function CanvasOverlay({
       onPointerCancel={() => finishInteraction(false)}
       onDoubleClick={handleDoubleClick}
     >
+      {snapGuides.map((guide, index) => {
+        const vertical = guide.axis === 'x';
+        const start = Math.min(guide.start, guide.end);
+        const length = Math.max(1, Math.abs(guide.end - guide.start) * zoom);
+        return (
+          <div
+            key={`${guide.axis}-${guide.position}-${index}`}
+            data-smart-snap-guide={guide.axis}
+            style={{
+              position: 'absolute',
+              left: vertical ? guide.position * zoom + panX : start * zoom + panX,
+              top: vertical ? start * zoom + panY : guide.position * zoom + panY,
+              width: vertical ? 1 : length,
+              height: vertical ? length : 1,
+              background: '#22d3ee',
+              boxShadow: '0 0 0 1px rgba(8, 145, 178, 0.28), 0 0 6px rgba(34, 211, 238, 0.72)',
+              pointerEvents: 'none',
+              zIndex: 20,
+            }}
+          />
+        );
+      })}
+
       {containerElements.map((element) => {
         const bounds = getElementWorldBounds(element, displayElements);
         const rect = worldRectToScreen(bounds.x, bounds.y, bounds.width, bounds.height, panX, panY, zoom);

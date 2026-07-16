@@ -88,6 +88,17 @@ function framePointToWorld(frame: SelectionFrame, point: CanvasPoint): CanvasPoi
   return { x: frame.origin.x + rotated.x, y: frame.origin.y + rotated.y };
 }
 
+export function getFrameHandleWorldPoint(
+  frame: SelectionFrame,
+  handle: TransformHandle,
+): CanvasPoint {
+  const ratio = HANDLE_POSITION[handle];
+  return framePointToWorld(frame, {
+    x: ratio.x * frame.width,
+    y: ratio.y * frame.height,
+  });
+}
+
 function worldPointToFrame(frame: SelectionFrame, point: CanvasPoint): CanvasPoint {
   return rotateVector({ x: point.x - frame.origin.x, y: point.y - frame.origin.y }, -frame.rotation);
 }
@@ -159,6 +170,37 @@ export function createMoveTransaction(
   };
 }
 
+function previewMoveWithWorldDelta(
+  transaction: MoveTransaction,
+  elements: Element[],
+  worldDelta: CanvasPoint,
+): MoveTransaction {
+  const elementMap = new Map(elements.map((element) => [element.id, element]));
+  const preview = transaction.roots.map((start) => {
+    const element = elementMap.get(start.id);
+    if (!element) return { ...start };
+    const localDelta = worldDeltaToElementParent(element, elements, worldDelta);
+    return {
+      ...start,
+      x: start.x + localDelta.x,
+      y: start.y + localDelta.y,
+      worldPivot: { x: start.worldPivot.x + worldDelta.x, y: start.worldPivot.y + worldDelta.y },
+    };
+  });
+  return {
+    ...transaction,
+    preview,
+    previewFrame: {
+      ...transaction.frame,
+      origin: {
+        x: transaction.frame.origin.x + worldDelta.x,
+        y: transaction.frame.origin.y + worldDelta.y,
+      },
+    },
+    worldDelta,
+  };
+}
+
 export function previewMoveTransaction(
   transaction: MoveTransaction,
   elements: Element[],
@@ -183,30 +225,18 @@ export function previewMoveTransaction(
     y: snap(primaryStart.y + primaryLocalDelta.y) - primaryStart.y,
   };
   worldDelta = elementParentDeltaToWorld(primaryElement, elements, snappedLocalDelta);
+  return previewMoveWithWorldDelta(transaction, elements, worldDelta);
+}
 
-  const preview = transaction.roots.map((start) => {
-    const element = elementMap.get(start.id);
-    if (!element) return { ...start };
-    const localDelta = worldDeltaToElementParent(element, elements, worldDelta);
-    return {
-      ...start,
-      x: start.x + localDelta.x,
-      y: start.y + localDelta.y,
-      worldPivot: { x: start.worldPivot.x + worldDelta.x, y: start.worldPivot.y + worldDelta.y },
-    };
+export function translateMoveTransaction(
+  transaction: MoveTransaction,
+  elements: Element[],
+  correction: CanvasPoint,
+): MoveTransaction {
+  return previewMoveWithWorldDelta(transaction, elements, {
+    x: transaction.worldDelta.x + correction.x,
+    y: transaction.worldDelta.y + correction.y,
   });
-  return {
-    ...transaction,
-    preview,
-    previewFrame: {
-      ...transaction.frame,
-      origin: {
-        x: transaction.frame.origin.x + worldDelta.x,
-        y: transaction.frame.origin.y + worldDelta.y,
-      },
-    },
-    worldDelta,
-  };
 }
 
 export function createResizeTransaction(
