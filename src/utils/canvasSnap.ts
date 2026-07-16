@@ -211,13 +211,11 @@ function buildSimultaneousGuides(
   anchors: MovingAnchor[],
   candidates: SnapCandidate[],
   correction: number,
-  primaryPriority: number,
   movingExtentStart: number,
   movingExtentEnd: number,
 ): SnapGuide[] {
   const relations = candidates.flatMap((candidate) => anchors.flatMap((anchor) => (
-    candidate.priority === primaryPriority
-      && Math.abs(candidate.value - anchor.value - correction) <= 0.000001
+    Math.abs(candidate.value - anchor.value - correction) <= 0.000001
       ? [{ candidate, anchor }]
       : []
   )));
@@ -239,9 +237,17 @@ function buildSimultaneousGuides(
     }
     return true;
   });
+  const positionsWithSpecificRelations = new Set(
+    visibleRelations.flatMap(({ candidate }) => (
+      candidate.sourceKey && candidate.sourceKey !== 'page'
+        ? [candidate.value.toFixed(6)]
+        : []
+    )),
+  );
   const guidesByPosition = new Map<string, SnapGuide>();
   for (const { candidate } of visibleRelations) {
     const positionKey = candidate.value.toFixed(6);
+    if (candidate.sourceKey === 'page' && positionsWithSpecificRelations.has(positionKey)) continue;
     const existing = guidesByPosition.get(positionKey);
     const start = Math.min(movingExtentStart, candidate.extentStart);
     const end = Math.max(movingExtentEnd, candidate.extentEnd);
@@ -284,7 +290,6 @@ function matchAxis(
             anchors,
             axisCandidates,
             correction,
-            candidate.priority,
             movingExtentStart,
             movingExtentEnd,
           ),
@@ -310,7 +315,6 @@ function matchAxis(
       anchors,
       axisCandidates,
       best.correction,
-      best.candidate.priority,
       movingExtentStart,
       movingExtentEnd,
     ),

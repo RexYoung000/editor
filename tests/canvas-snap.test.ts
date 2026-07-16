@@ -109,6 +109,26 @@ test('不同尺寸只有中心重合时继续显示单条中心线', () => {
   );
 });
 
+test('页面中心与组件边线同位置时仍显示完整组件关系而非贯穿页面线', () => {
+  const target = element('target', { x: 100, y: 460, width: 120, height: 80 });
+  const candidates = createSmartSnapCandidates([target], [], 1920, 1080);
+  const result = snapBoundsToCandidates(
+    { x: 300, y: 464, width: 120, height: 80 },
+    candidates,
+    { zoom: 1 },
+  );
+  assert.equal(result.correction.y, -4);
+  const horizontalGuides = result.guides.filter((guide) => guide.axis === 'y');
+  assert.deepEqual(horizontalGuides.map((guide) => guide.position), [460, 540]);
+  assert.deepEqual(
+    horizontalGuides.map((guide) => ({ start: guide.start, end: guide.end })),
+    [
+      { start: 100, end: 420 },
+      { start: 100, end: 420 },
+    ],
+  );
+});
+
 test('可见锁定元素参与候选，隐藏元素与隐藏后代被排除', () => {
   const locked = element('locked', { x: 300, locked: true });
   const hidden = element('hidden', { x: 500, props: { _editorHidden: true } });
