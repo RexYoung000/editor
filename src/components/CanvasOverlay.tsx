@@ -694,21 +694,26 @@ export default function CanvasOverlay({
       {snapGuides.map((guide, index) => {
         const vertical = guide.axis === 'x';
         const start = Math.min(guide.start, guide.end);
-        const length = Math.max(1, Math.abs(guide.end - guide.start) * zoom);
+        const guideOverhang = 10;
+        const length = Math.max(1, Math.abs(guide.end - guide.start) * zoom) + guideOverhang * 2;
         return (
           <div
             key={`${guide.axis}-${guide.position}-${index}`}
             data-smart-snap-guide={guide.axis}
             style={{
               position: 'absolute',
-              left: vertical ? guide.position * zoom + panX : start * zoom + panX,
-              top: vertical ? start * zoom + panY : guide.position * zoom + panY,
+              left: vertical
+                ? guide.position * zoom + panX
+                : start * zoom + panX - guideOverhang,
+              top: vertical
+                ? start * zoom + panY - guideOverhang
+                : guide.position * zoom + panY,
               width: vertical ? 1 : length,
               height: vertical ? length : 1,
-              background: '#22d3ee',
-              boxShadow: '0 0 0 1px rgba(8, 145, 178, 0.28), 0 0 6px rgba(34, 211, 238, 0.72)',
+              background: '#ff3366',
+              boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.78), 0 0 5px rgba(255, 51, 102, 0.9)',
               pointerEvents: 'none',
-              zIndex: 20,
+              zIndex: 40,
             }}
           />
         );

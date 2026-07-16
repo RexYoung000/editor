@@ -62,6 +62,53 @@ test('页面四边和中心作为移动吸附目标', () => {
   assert.equal(center.guides.some((guide) => guide.axis === 'x' && guide.position === 960), true);
 });
 
+test('同尺寸组件整体对齐时同时显示两条外边线并省略重复中心线', () => {
+  const target = element('target', { x: 100, y: 200, width: 120, height: 80 });
+  const candidates = createSmartSnapCandidates([target], [], 1920, 1080);
+  const verticallyAligned = snapBoundsToCandidates(
+    { x: 300, y: 204, width: 120, height: 80 },
+    candidates,
+    { zoom: 1 },
+  );
+  assert.equal(verticallyAligned.correction.y, -4);
+  assert.deepEqual(
+    verticallyAligned.guides
+      .filter((guide) => guide.axis === 'y')
+      .map((guide) => guide.position),
+    [200, 280],
+  );
+
+  const horizontallyAligned = snapBoundsToCandidates(
+    { x: 104, y: 400, width: 120, height: 80 },
+    candidates,
+    { zoom: 1 },
+  );
+  assert.equal(horizontallyAligned.correction.x, -4);
+  assert.deepEqual(
+    horizontallyAligned.guides
+      .filter((guide) => guide.axis === 'x')
+      .map((guide) => guide.position),
+    [100, 220],
+  );
+});
+
+test('不同尺寸只有中心重合时继续显示单条中心线', () => {
+  const target = element('target', { x: 100, y: 200, width: 120, height: 80 });
+  const candidates = createSmartSnapCandidates([target], [], 1920, 1080);
+  const result = snapBoundsToCandidates(
+    { x: 300, y: 224, width: 60, height: 40 },
+    candidates,
+    { zoom: 1 },
+  );
+  assert.equal(result.correction.y, -4);
+  assert.deepEqual(
+    result.guides
+      .filter((guide) => guide.axis === 'y')
+      .map((guide) => guide.position),
+    [240],
+  );
+});
+
 test('可见锁定元素参与候选，隐藏元素与隐藏后代被排除', () => {
   const locked = element('locked', { x: 300, locked: true });
   const hidden = element('hidden', { x: 500, props: { _editorHidden: true } });

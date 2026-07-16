@@ -13,7 +13,9 @@ export type SnapAnchorKind = 'start' | 'center' | 'end';
 
 export interface SnapCandidate {
   key: string;
+  sourceKey?: string;
   axis: SnapAxis;
+  kind?: SnapAnchorKind;
   value: number;
   extentStart: number;
   extentEnd: number;
@@ -57,7 +59,7 @@ interface MovingAnchor {
 
 interface AxisMatch {
   correction: number;
-  guide: SnapGuide;
+  guides: SnapGuide[];
   lock: SnapLock;
 }
 
@@ -88,7 +90,9 @@ function addBoundsCandidates(
   candidates.push(
     {
       key: `${keyPrefix}:x:start`,
+      sourceKey: keyPrefix,
       axis: 'x',
+      kind: 'start',
       value: bounds.x,
       extentStart: bounds.y,
       extentEnd: bounds.y + bounds.height,
@@ -96,7 +100,9 @@ function addBoundsCandidates(
     },
     {
       key: `${keyPrefix}:x:center`,
+      sourceKey: keyPrefix,
       axis: 'x',
+      kind: 'center',
       value: bounds.x + bounds.width / 2,
       extentStart: bounds.y,
       extentEnd: bounds.y + bounds.height,
@@ -104,7 +110,9 @@ function addBoundsCandidates(
     },
     {
       key: `${keyPrefix}:x:end`,
+      sourceKey: keyPrefix,
       axis: 'x',
+      kind: 'end',
       value: bounds.x + bounds.width,
       extentStart: bounds.y,
       extentEnd: bounds.y + bounds.height,
@@ -112,7 +120,9 @@ function addBoundsCandidates(
     },
     {
       key: `${keyPrefix}:y:start`,
+      sourceKey: keyPrefix,
       axis: 'y',
+      kind: 'start',
       value: bounds.y,
       extentStart: bounds.x,
       extentEnd: bounds.x + bounds.width,
@@ -120,7 +130,9 @@ function addBoundsCandidates(
     },
     {
       key: `${keyPrefix}:y:center`,
+      sourceKey: keyPrefix,
       axis: 'y',
+      kind: 'center',
       value: bounds.y + bounds.height / 2,
       extentStart: bounds.x,
       extentEnd: bounds.x + bounds.width,
@@ -128,7 +140,9 @@ function addBoundsCandidates(
     },
     {
       key: `${keyPrefix}:y:end`,
+      sourceKey: keyPrefix,
       axis: 'y',
+      kind: 'end',
       value: bounds.y + bounds.height,
       extentStart: bounds.x,
       extentEnd: bounds.x + bounds.width,
@@ -192,6 +206,60 @@ function compareMatches(
     || left.anchor.kind.localeCompare(right.anchor.kind);
 }
 
+function buildSimultaneousGuides(
+  axis: SnapAxis,
+  anchors: MovingAnchor[],
+  candidates: SnapCandidate[],
+  correction: number,
+  primaryPriority: number,
+  movingExtentStart: number,
+  movingExtentEnd: number,
+): SnapGuide[] {
+  const relations = candidates.flatMap((candidate) => anchors.flatMap((anchor) => (
+    candidate.priority === primaryPriority
+      && Math.abs(candidate.value - anchor.value - correction) <= 0.000001
+      ? [{ candidate, anchor }]
+      : []
+  )));
+  const outerKindsBySource = new Map<string, Set<SnapAnchorKind>>();
+  for (const { candidate, anchor } of relations) {
+    if (!candidate.sourceKey || candidate.kind !== anchor.kind) continue;
+    const kinds = outerKindsBySource.get(candidate.sourceKey) ?? new Set<SnapAnchorKind>();
+    kinds.add(anchor.kind);
+    outerKindsBySource.set(candidate.sourceKey, kinds);
+  }
+  const visibleRelations = relations.filter(({ candidate, anchor }) => {
+    if (
+      candidate.sourceKey
+      && candidate.kind === 'center'
+      && anchor.kind === 'center'
+    ) {
+      const kinds = outerKindsBySource.get(candidate.sourceKey);
+      if (kinds?.has('start') && kinds.has('end')) return false;
+    }
+    return true;
+  });
+  const guidesByPosition = new Map<string, SnapGuide>();
+  for (const { candidate } of visibleRelations) {
+    const positionKey = candidate.value.toFixed(6);
+    const existing = guidesByPosition.get(positionKey);
+    const start = Math.min(movingExtentStart, candidate.extentStart);
+    const end = Math.max(movingExtentEnd, candidate.extentEnd);
+    if (existing) {
+      existing.start = Math.min(existing.start, start);
+      existing.end = Math.max(existing.end, end);
+    } else {
+      guidesByPosition.set(positionKey, {
+        axis,
+        position: candidate.value,
+        start,
+        end,
+      });
+    }
+  }
+  return [...guidesByPosition.values()].sort((left, right) => left.position - right.position);
+}
+
 function matchAxis(
   axis: SnapAxis,
   anchors: MovingAnchor[],
@@ -211,12 +279,15 @@ function matchAxis(
       if (Math.abs(correction) <= releaseThreshold) {
         return {
           correction,
-          guide: {
+          guides: buildSimultaneousGuides(
             axis,
-            position: candidate.value,
-            start: Math.min(movingExtentStart, candidate.extentStart),
-            end: Math.max(movingExtentEnd, candidate.extentEnd),
-          },
+            anchors,
+            axisCandidates,
+            correction,
+            candidate.priority,
+            movingExtentStart,
+            movingExtentEnd,
+          ),
           lock: previous,
         };
       }
@@ -234,12 +305,15 @@ function matchAxis(
   if (!best) return null;
   return {
     correction: best.correction,
-    guide: {
+    guides: buildSimultaneousGuides(
       axis,
-      position: best.candidate.value,
-      start: Math.min(movingExtentStart, best.candidate.extentStart),
-      end: Math.max(movingExtentEnd, best.candidate.extentEnd),
-    },
+      anchors,
+      axisCandidates,
+      best.correction,
+      best.candidate.priority,
+      movingExtentStart,
+      movingExtentEnd,
+    ),
     lock: { anchor: best.anchor.kind, candidateKey: best.candidate.key },
   };
 }
@@ -280,7 +354,7 @@ export function snapBoundsToCandidates(
   );
   return {
     correction: { x: xMatch?.correction ?? 0, y: yMatch?.correction ?? 0 },
-    guides: [xMatch?.guide, yMatch?.guide].filter((guide): guide is SnapGuide => Boolean(guide)),
+    guides: [...(xMatch?.guides ?? []), ...(yMatch?.guides ?? [])],
     locks: { x: xMatch?.lock, y: yMatch?.lock },
   };
 }
@@ -319,7 +393,7 @@ export function snapPointToCandidates(
     : null;
   return {
     correction: { x: xMatch?.correction ?? 0, y: yMatch?.correction ?? 0 },
-    guides: [xMatch?.guide, yMatch?.guide].filter((guide): guide is SnapGuide => Boolean(guide)),
+    guides: [...(xMatch?.guides ?? []), ...(yMatch?.guides ?? [])],
     locks: { x: xMatch?.lock, y: yMatch?.lock },
   };
 }
