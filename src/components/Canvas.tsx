@@ -25,9 +25,26 @@ import {
   zoomViewportAtPoint,
   zoomViewportByWheel,
 } from '../utils/canvasViewport';
+import {
+  loadCanvasAssistPreferences,
+  resetCanvasAssistPreferences,
+  saveCanvasAssistPreferences,
+  type CanvasAssistPreferences,
+} from '../utils/canvasAssistPreferences';
 
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
+const ASSIST_SETTING_OPTIONS: Array<{
+  key: keyof CanvasAssistPreferences;
+  label: string;
+  description: string;
+}> = [
+  { key: 'showGrid', label: '网格显示', description: '显示 20px / 100px 画布网格' },
+  { key: 'snapToGrid', label: '网格吸附', description: '移动与缩放吸附到 20px 网格' },
+  { key: 'smartSnap', label: '智能吸附', description: '吸附页面、元素和父容器位置' },
+  { key: 'showSnapGuides', label: '参考线', description: '显示智能吸附命中的对齐线' },
+  { key: 'showDistanceHints', label: '距离提示', description: '显示相邻距离与三元素等距反馈' },
+];
 
 /**
  * 按"父先于子"的拓扑顺序排序子元素列表。
@@ -119,8 +136,11 @@ export default function Canvas() {
   const [spacePressed, setSpacePressed] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
 
-  const showGridRef = useRef(false);
-  const snap = (v: number) => showGridRef.current ? Math.round(v / 20) * 20 : Math.round(v);
+  const gridSnapRef = useRef(false);
+  const snap = useCallback(
+    (value: number) => gridSnapRef.current ? Math.round(value / 20) * 20 : Math.round(value),
+    [],
+  );
 
   const layaContainerRef = useRef<HTMLElement | null>(null);
 
@@ -485,10 +505,43 @@ export default function Canvas() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedElementIds, deleteElement, currentPage, updateElement, saveHistory]);
 
-  const [showGrid, setShowGrid] = useState(false);
+  const [assistPreferences, setAssistPreferences] = useState(loadCanvasAssistPreferences);
+  const [assistPanelOpen, setAssistPanelOpen] = useState(false);
   const [showRuler, setShowRuler] = useState(true);
   const [dragHover, setDragHover] = useState(false);
-  useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
+  const assistPanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { gridSnapRef.current = assistPreferences.snapToGrid; }, [assistPreferences.snapToGrid]);
+
+  const updateAssistPreference = useCallback((
+    key: keyof CanvasAssistPreferences,
+    value: boolean,
+  ) => {
+    setAssistPreferences((current) => {
+      const next = { ...current, [key]: value };
+      saveCanvasAssistPreferences(next);
+      return next;
+    });
+  }, []);
+
+  const resetAssistPreferences = useCallback(() => {
+    setAssistPreferences(resetCanvasAssistPreferences());
+  }, []);
+
+  useEffect(() => {
+    if (!assistPanelOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!assistPanelRef.current?.contains(event.target as Node)) setAssistPanelOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAssistPanelOpen(false);
+    };
+    window.addEventListener('pointerdown', closeOnOutsidePointer);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeOnOutsidePointer);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [assistPanelOpen]);
 
   // ─── Axure 风格画布导航：空格拖拽、滚轮平移、修饰键缩放 ───
   const getZoomAnchor = useCallback(() => {
@@ -797,7 +850,7 @@ export default function Canvas() {
         showToast(t('uploadFailed'), 'error');
       }
     }
-  }, [currentCourse, currentSubPageId, currentPage?.frozen, selectElement, t]);
+  }, [currentCourse, currentSubPageId, currentPage?.frozen, selectElement, snap, t]);
 
   // 行内编辑元素
   const editingElement = editingId
@@ -862,6 +915,9 @@ export default function Canvas() {
               pageWidth={CANVAS_W}
               pageHeight={CANVAS_H}
               snap={snap}
+              smartSnapEnabled={assistPreferences.smartSnap}
+              showSnapGuides={assistPreferences.showSnapGuides}
+              distanceHintsEnabled={assistPreferences.showDistanceHints}
               setEditingId={setEditingId}
             />
           </div>
@@ -888,7 +944,7 @@ export default function Canvas() {
             </div>
           </div>
         )}
-        {showGrid && (
+        {assistPreferences.showGrid && (
           <div className="absolute pointer-events-none overflow-hidden" style={{
             left: world.panX,
             top: world.panY,
@@ -908,6 +964,81 @@ export default function Canvas() {
             }} />
           </div>
         )}
+        <div
+          ref={assistPanelRef}
+          className="absolute top-3 right-3 z-[60]"
+          data-canvas-interactive
+        >
+          <button
+            type="button"
+            onClick={() => setAssistPanelOpen((open) => !open)}
+            className={`h-8 px-3 rounded-lg border text-xs font-medium shadow-lg backdrop-blur flex items-center gap-2 transition-colors ${
+              assistPanelOpen
+                ? 'bg-blue-600 border-blue-400 text-white'
+                : 'bg-slate-950/85 border-slate-600 text-slate-200 hover:bg-slate-800 hover:border-slate-500'
+            }`}
+            aria-expanded={assistPanelOpen}
+            aria-haspopup="dialog"
+          >
+            <span className="text-sm leading-none" aria-hidden="true">⌗</span>
+            辅助工具
+          </button>
+          {assistPanelOpen && (
+            <div
+              role="dialog"
+              aria-label="画布辅助工具"
+              className="absolute right-0 top-10 w-72 rounded-xl border border-slate-600 bg-slate-950/95 p-2 shadow-2xl backdrop-blur"
+            >
+              <div className="px-2 py-1.5">
+                <div className="text-sm font-semibold text-slate-100">画布辅助工具</div>
+                <div className="mt-0.5 text-[11px] leading-4 text-slate-500">
+                  设置保存在当前电脑，不写入课件
+                </div>
+              </div>
+              <div className="mt-1 space-y-0.5">
+                {ASSIST_SETTING_OPTIONS.map((option) => {
+                  const enabled = assistPreferences[option.key];
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => updateAssistPreference(option.key, !enabled)}
+                      className="w-full rounded-lg px-2 py-2 text-left hover:bg-slate-800/90 flex items-center gap-3"
+                      role="switch"
+                      aria-checked={enabled}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-xs font-medium text-slate-200">{option.label}</span>
+                        <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">{option.description}</span>
+                      </span>
+                      <span
+                        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                          enabled ? 'bg-blue-500' : 'bg-slate-700'
+                        }`}
+                        aria-hidden="true"
+                      >
+                        <span
+                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                            enabled ? 'translate-x-[18px]' : 'translate-x-0.5'
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-2 border-t border-slate-800 pt-2">
+                <button
+                  type="button"
+                  onClick={resetAssistPreferences}
+                  className="w-full rounded-lg px-2 py-1.5 text-xs text-slate-400 hover:bg-slate-800 hover:text-white"
+                >
+                  恢复默认
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         {/* 标尺 */}
         {showRuler && (
           <>
@@ -924,10 +1055,7 @@ export default function Canvas() {
         <span className="text-xs text-slate-300 w-12 text-center" title="⌘/Ctrl + 滚轮缩放 · 空格 + 左键拖拽">{Math.round(world.zoom * 100)}%</span>
         <button onClick={zoomIn} className="text-slate-400 hover:text-white w-5 h-5 flex items-center justify-center rounded hover:bg-slate-700 text-sm">+</button>
         <span className="text-xs text-slate-600 ml-2">1920 × 1080</span>
-        <button onClick={() => setShowGrid(!showGrid)} className={`ml-2 text-xs px-2 py-0.5 rounded ${showGrid ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
-          {t('grid')}
-        </button>
-        <button onClick={() => setShowRuler(!showRuler)} className={`text-xs px-2 py-0.5 rounded ${showRuler ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+        <button onClick={() => setShowRuler(!showRuler)} className={`ml-2 text-xs px-2 py-0.5 rounded ${showRuler ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
           {t('ruler')}
         </button>
       </div>

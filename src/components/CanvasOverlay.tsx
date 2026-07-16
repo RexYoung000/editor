@@ -48,7 +48,20 @@ import {
   type SnapCandidate,
   type SnapGuide,
   type SnapLocks,
+  type SnapResult,
 } from '../utils/canvasSnap';
+import {
+  createEqualSpacingItems,
+  getDistanceHintBetweenRects,
+  getEqualSpacingHints,
+  getNearestDistanceHint,
+  snapBoundsToEqualSpacing,
+  type DistanceHint,
+  type EqualSpacingHint,
+  type EqualSpacingResult,
+  type SpacingItem,
+  type SpacingLocks,
+} from '../utils/canvasSpacing';
 
 const HANDLE_SIZE = 10;
 const POINTER_START_THRESHOLD = 3;
@@ -64,6 +77,25 @@ const HANDLE_DEFS: Array<{ id: TransformHandle; rx: number; ry: number; cursor: 
   { id: 'w', rx: 0, ry: 0.5, cursor: 'w-resize' },
 ];
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+
+function chooseAxisCorrection(
+  smartCorrection: number,
+  smartMatched: boolean,
+  spacingCorrection: number,
+  spacingMatched: boolean,
+): { correction: number; source: 'smart' | 'spacing' | null } {
+  if (!smartMatched && !spacingMatched) return { correction: 0, source: null };
+  if (!spacingMatched) return { correction: smartCorrection, source: 'smart' };
+  if (!smartMatched) return { correction: spacingCorrection, source: 'spacing' };
+  return Math.abs(smartCorrection) <= Math.abs(spacingCorrection)
+    ? { correction: smartCorrection, source: 'smart' }
+    : { correction: spacingCorrection, source: 'spacing' };
+}
+
+function formatSpacingDistance(distance: number): string {
+  const rounded = Math.round(distance);
+  return Math.abs(distance - rounded) < 0.05 ? String(rounded) : distance.toFixed(1);
+}
 
 interface WorldState {
   zoom: number;
@@ -96,6 +128,8 @@ interface MovePointer extends PointerBase {
   transactionElements: Element[] | null;
   snapCandidates: SnapCandidate[] | null;
   snapLocks: SnapLocks;
+  spacingItems: SpacingItem[] | null;
+  spacingLocks: SpacingLocks;
 }
 
 interface MarqueePointer extends PointerBase {
@@ -132,6 +166,9 @@ interface CanvasOverlayProps {
   pageWidth: number;
   pageHeight: number;
   snap: (value: number) => number;
+  smartSnapEnabled: boolean;
+  showSnapGuides: boolean;
+  distanceHintsEnabled: boolean;
   setEditingId: (id: string | null) => void;
 }
 
@@ -144,6 +181,9 @@ export default function CanvasOverlay({
   pageWidth,
   pageHeight,
   snap,
+  smartSnapEnabled,
+  showSnapGuides,
+  distanceHintsEnabled,
   setEditingId,
 }: CanvasOverlayProps) {
   const interactionRef = useRef<PointerInteraction | null>(null);
@@ -153,13 +193,21 @@ export default function CanvasOverlay({
   const [previewFrame, setPreviewFrame] = useState<SelectionFrame | null>(null);
   const [previewAngle, setPreviewAngle] = useState<number | null>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
+  const [spacingHints, setSpacingHints] = useState<EqualSpacingHint[]>([]);
+  const [distanceHint, setDistanceHint] = useState<DistanceHint | null>(null);
   const worldRef = useRef(world);
   const currentPageRef = useRef(currentPage);
   const snapRef = useRef(snap);
+  const smartSnapEnabledRef = useRef(smartSnapEnabled);
+  const showSnapGuidesRef = useRef(showSnapGuides);
+  const distanceHintsEnabledRef = useRef(distanceHintsEnabled);
 
   useEffect(() => { worldRef.current = world; }, [world]);
   useEffect(() => { currentPageRef.current = currentPage; }, [currentPage]);
   useEffect(() => { snapRef.current = snap; }, [snap]);
+  useEffect(() => { smartSnapEnabledRef.current = smartSnapEnabled; }, [smartSnapEnabled]);
+  useEffect(() => { showSnapGuidesRef.current = showSnapGuides; }, [showSnapGuides]);
+  useEffect(() => { distanceHintsEnabledRef.current = distanceHintsEnabled; }, [distanceHintsEnabled]);
 
   const setLocalMarquee = useCallback((value: MarqueeState | null) => {
     localMarqueeRef.current = value;
@@ -236,6 +284,8 @@ export default function CanvasOverlay({
     setPreviewFrame(null);
     setPreviewAngle(null);
     setSnapGuides([]);
+    setSpacingHints([]);
+    setDistanceHint(null);
 
     const page = currentPageRef.current;
     const store = useEditorStore.getState();
@@ -300,6 +350,8 @@ export default function CanvasOverlay({
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || interactionRef.current) return;
+    setDistanceHint(null);
+    setSpacingHints([]);
     const target = event.target as HTMLElement;
     const containerHandle = target.closest<HTMLElement>('[data-container-handle]');
     if (target.closest('[data-canvas-interactive]') && !containerHandle) return;
@@ -351,6 +403,8 @@ export default function CanvasOverlay({
         transactionElements: null,
         snapCandidates: null,
         snapLocks: {},
+        spacingItems: null,
+        spacingLocks: {},
       };
       return;
     }
@@ -418,9 +472,38 @@ export default function CanvasOverlay({
     };
   }, [pointerToWorld]);
 
+  const updateHoverDistance = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!distanceHintsEnabledRef.current || !event.altKey || selectedIds.length === 0) {
+      setDistanceHint(null);
+      return;
+    }
+    const page = currentPageRef.current;
+    const point = pointerToWorld(event.clientX, event.clientY);
+    if (!page || !point) {
+      setDistanceHint(null);
+      return;
+    }
+    const frame = getSelectionFrame(page.elements, selectedIds);
+    const hit = findTopElementAtPoint(page.elements, point, []);
+    if (!frame || !hit || selectedIds.includes(hit.id)) {
+      setDistanceHint(null);
+      return;
+    }
+    setSpacingHints([]);
+    setDistanceHint(getDistanceHintBetweenRects(
+      getSelectionFrameBounds(frame),
+      getElementWorldBounds(hit, page.elements),
+      hit.id,
+    ));
+  }, [pointerToWorld, selectedIds]);
+
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const interaction = interactionRef.current;
-    if (!interaction || interaction.pointerId !== event.pointerId) return;
+    if (!interaction) {
+      updateHoverDistance(event);
+      return;
+    }
+    if (interaction.pointerId !== event.pointerId) return;
     const distance = Math.hypot(
       event.clientX - interaction.startClientX,
       event.clientY - interaction.startClientY,
@@ -431,7 +514,7 @@ export default function CanvasOverlay({
     const point = pointerToWorld(event.clientX, event.clientY);
     const page = currentPageRef.current;
     if (!point || !page) return;
-    const smartSnapDisabled = IS_MAC ? event.metaKey : event.altKey;
+    const smartSnapTemporarilyDisabled = IS_MAC ? event.metaKey : event.altKey;
 
     if (interaction.kind === 'move') {
       if (justStarted && interaction.duplicateOnDrag && !interaction.duplicateIds) {
@@ -463,41 +546,120 @@ export default function CanvasOverlay({
         snapRef.current,
         event.shiftKey,
       );
-      if (smartSnapDisabled) {
-        interaction.snapLocks = {};
-        setSnapGuides([]);
-      } else {
-        const candidates = interaction.snapCandidates ?? createSmartSnapCandidates(
+      const movingBounds = getSelectionFrameBounds(nextTransaction.previewFrame);
+      const smartSnapActive = smartSnapEnabledRef.current && !smartSnapTemporarilyDisabled;
+      const distanceAssistActive = distanceHintsEnabledRef.current;
+      const candidates = smartSnapActive
+        ? interaction.snapCandidates ?? createSmartSnapCandidates(
           transactionElements,
           nextTransaction.roots.map((root) => root.id),
           pageWidth,
           pageHeight,
-        );
-        interaction.snapCandidates = candidates;
-        const snapResult = snapBoundsToCandidates(
-          getSelectionFrameBounds(nextTransaction.previewFrame),
+        )
+        : [];
+      if (smartSnapActive) interaction.snapCandidates = candidates;
+      const spacingItems = distanceAssistActive
+        ? interaction.spacingItems ?? createEqualSpacingItems(
+          transactionElements,
+          nextTransaction.roots.map((root) => root.id),
+        )
+        : [];
+      if (distanceAssistActive) interaction.spacingItems = spacingItems;
+      const smartResult: SnapResult = smartSnapActive
+        ? snapBoundsToCandidates(
+          movingBounds,
           candidates,
           { zoom: worldRef.current.zoom, previous: interaction.snapLocks },
-        );
-        if (event.shiftKey) {
-          const horizontal = Math.abs(requestedWorldDelta.x) >= Math.abs(requestedWorldDelta.y);
-          if (horizontal) {
-            snapResult.correction.y = 0;
-            snapResult.guides = snapResult.guides.filter((guide) => guide.axis === 'x');
-            snapResult.locks.y = undefined;
-          } else {
-            snapResult.correction.x = 0;
-            snapResult.guides = snapResult.guides.filter((guide) => guide.axis === 'y');
-            snapResult.locks.x = undefined;
-          }
+        )
+        : { correction: { x: 0, y: 0 }, guides: [], locks: {} };
+      const spacingResult: EqualSpacingResult = distanceAssistActive
+        ? snapBoundsToEqualSpacing(
+          movingBounds,
+          spacingItems,
+          { zoom: worldRef.current.zoom, previous: interaction.spacingLocks },
+        )
+        : { correction: { x: 0, y: 0 }, locks: {} };
+
+      if (event.shiftKey) {
+        const horizontal = Math.abs(requestedWorldDelta.x) >= Math.abs(requestedWorldDelta.y);
+        if (horizontal) {
+          smartResult.correction.y = 0;
+          smartResult.locks.y = undefined;
+          spacingResult.correction.y = 0;
+          spacingResult.locks.y = undefined;
+        } else {
+          smartResult.correction.x = 0;
+          smartResult.locks.x = undefined;
+          spacingResult.correction.x = 0;
+          spacingResult.locks.x = undefined;
         }
-        nextTransaction = translateMoveTransaction(
-          nextTransaction,
-          transactionElements,
-          snapResult.correction,
+      }
+
+      const xChoice = chooseAxisCorrection(
+        smartResult.correction.x,
+        Boolean(smartResult.locks.x),
+        spacingResult.correction.x,
+        Boolean(spacingResult.locks.x),
+      );
+      const yChoice = chooseAxisCorrection(
+        smartResult.correction.y,
+        Boolean(smartResult.locks.y),
+        spacingResult.correction.y,
+        Boolean(spacingResult.locks.y),
+      );
+      nextTransaction = translateMoveTransaction(
+        nextTransaction,
+        transactionElements,
+        { x: xChoice.correction, y: yChoice.correction },
+      );
+      interaction.snapLocks = {
+        x: xChoice.source === 'smart' ? smartResult.locks.x : undefined,
+        y: yChoice.source === 'smart' ? smartResult.locks.y : undefined,
+      };
+      interaction.spacingLocks = {
+        x: xChoice.source === 'spacing' ? spacingResult.locks.x : undefined,
+        y: yChoice.source === 'spacing' ? spacingResult.locks.y : undefined,
+      };
+
+      const finalBounds = getSelectionFrameBounds(nextTransaction.previewFrame);
+      if (!smartSnapActive) {
+        interaction.snapLocks = {};
+        setSnapGuides([]);
+      } else if (showSnapGuidesRef.current) {
+        const exactGuides = snapBoundsToCandidates(
+          finalBounds,
+          candidates,
+          { zoom: worldRef.current.zoom, thresholdPx: 0.5, releaseThresholdPx: 0.5 },
+        ).guides;
+        setSnapGuides(event.shiftKey
+          ? exactGuides.filter((guide) => (
+            Math.abs(requestedWorldDelta.x) >= Math.abs(requestedWorldDelta.y)
+              ? guide.axis === 'x'
+              : guide.axis === 'y'
+          ))
+          : exactGuides);
+      } else {
+        setSnapGuides([]);
+      }
+      if (distanceAssistActive) {
+        const exactHints = getEqualSpacingHints(finalBounds, spacingItems, worldRef.current.zoom);
+        const visibleSpacingHints = event.shiftKey
+          ? exactHints.filter((hint) => (
+            Math.abs(requestedWorldDelta.x) >= Math.abs(requestedWorldDelta.y)
+              ? hint.axis === 'x'
+              : hint.axis === 'y'
+          ))
+          : exactHints;
+        setSpacingHints(visibleSpacingHints);
+        setDistanceHint(
+          visibleSpacingHints.length > 0
+            ? null
+            : getNearestDistanceHint(finalBounds, spacingItems),
         );
-        interaction.snapLocks = snapResult.locks;
-        setSnapGuides(snapResult.guides);
+      } else {
+        interaction.spacingLocks = {};
+        setSpacingHints([]);
+        setDistanceHint(null);
       }
       interaction.transaction = nextTransaction;
       for (const preview of interaction.transaction.preview) {
@@ -520,6 +682,8 @@ export default function CanvasOverlay({
 
     if (interaction.kind === 'marquee') {
       setSnapGuides([]);
+      setSpacingHints([]);
+      setDistanceHint(null);
       setLocalMarquee({
         startWX: interaction.startWorld.x,
         startWY: interaction.startWorld.y,
@@ -537,7 +701,7 @@ export default function CanvasOverlay({
         event.shiftKey,
         snapRef.current,
       );
-      if (smartSnapDisabled) {
+      if (!smartSnapEnabledRef.current || smartSnapTemporarilyDisabled) {
         interaction.snapLocks = {};
         setSnapGuides([]);
       } else {
@@ -580,11 +744,15 @@ export default function CanvasOverlay({
           };
         }
         interaction.snapLocks = snapResult.locks;
-        setSnapGuides(snapResult.guides);
+        setSnapGuides(showSnapGuidesRef.current ? snapResult.guides : []);
       }
+      setSpacingHints([]);
+      setDistanceHint(null);
       interaction.transaction = nextTransaction;
     } else {
       setSnapGuides([]);
+      setSpacingHints([]);
+      setDistanceHint(null);
       interaction.transaction = previewRotateTransaction(
         interaction.transaction,
         page.elements,
@@ -605,7 +773,7 @@ export default function CanvasOverlay({
     setPreviewTransforms(interaction.transaction.preview);
     setPreviewFrame(interaction.transaction.previewFrame);
     setPreviewAngle(interaction.kind === 'rotate' ? interaction.transaction.angleDelta : null);
-  }, [pageHeight, pageWidth, pointerToWorld, setLocalMarquee]);
+  }, [pageHeight, pageWidth, pointerToWorld, setLocalMarquee, updateHoverDistance]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (interactionRef.current?.pointerId !== event.pointerId) return;
@@ -622,11 +790,20 @@ export default function CanvasOverlay({
       event.preventDefault();
       cancel();
     };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') setDistanceHint(null);
+    };
+    const onBlur = () => {
+      setDistanceHint(null);
+      cancel();
+    };
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('blur', cancel);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('blur', cancel);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
       cancel();
     };
   }, [finishInteraction]);
@@ -689,9 +866,156 @@ export default function CanvasOverlay({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={() => finishInteraction(false)}
+      onPointerLeave={() => {
+        if (!interactionRef.current) setDistanceHint(null);
+      }}
       onDoubleClick={handleDoubleClick}
     >
-      {snapGuides.map((guide, index) => {
+      {distanceHintsEnabled && distanceHint && (() => {
+        const horizontal = distanceHint.axis === 'x';
+        const start = Math.min(distanceHint.start, distanceHint.end);
+        const length = Math.max(1, Math.abs(distanceHint.end - distanceHint.start) * zoom);
+        const lineLeft = horizontal ? start * zoom + panX : distanceHint.cross * zoom + panX;
+        const lineTop = horizontal ? distanceHint.cross * zoom + panY : start * zoom + panY;
+        const label = formatSpacingDistance(distanceHint.distance);
+        return (
+          <>
+            <div
+              data-distance-hint-line={distanceHint.axis}
+              style={{
+                position: 'absolute',
+                left: lineLeft,
+                top: lineTop,
+                width: horizontal ? length : 1,
+                height: horizontal ? 1 : length,
+                background: '#ff3366',
+                boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.72)',
+                pointerEvents: 'none',
+                zIndex: 41,
+              }}
+            >
+              <span style={{
+                position: 'absolute',
+                left: horizontal ? 0 : -3,
+                top: horizontal ? -3 : 0,
+                width: horizontal ? 1 : 7,
+                height: horizontal ? 7 : 1,
+                background: '#ff3366',
+              }} />
+              <span style={{
+                position: 'absolute',
+                right: horizontal ? 0 : undefined,
+                bottom: horizontal ? undefined : 0,
+                left: horizontal ? undefined : -3,
+                top: horizontal ? -3 : undefined,
+                width: horizontal ? 1 : 7,
+                height: horizontal ? 7 : 1,
+                background: '#ff3366',
+              }} />
+            </div>
+            <div
+              data-distance-hint-value={label}
+              style={{
+                position: 'absolute',
+                left: horizontal ? lineLeft + length / 2 : lineLeft + 7,
+                top: horizontal ? lineTop - 15 : lineTop + length / 2,
+                transform: horizontal ? 'translateX(-50%)' : 'translateY(-50%)',
+                minWidth: 18,
+                padding: '1px 4px',
+                borderRadius: 4,
+                color: '#fff',
+                background: '#e11d48',
+                boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.8), 0 2px 5px rgba(0, 0, 0, 0.35)',
+                fontSize: 10,
+                fontWeight: 600,
+                lineHeight: '14px',
+                textAlign: 'center',
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+                zIndex: 42,
+              }}
+            >
+              {label}
+            </div>
+          </>
+        );
+      })()}
+
+      {distanceHintsEnabled && spacingHints.flatMap((hint, hintIndex) => hint.segments.map((segment, segmentIndex) => {
+        const horizontal = segment.axis === 'x';
+        const start = Math.min(segment.start, segment.end);
+        const length = Math.max(1, Math.abs(segment.end - segment.start) * zoom);
+        const lineLeft = horizontal ? start * zoom + panX : segment.cross * zoom + panX;
+        const lineTop = horizontal ? segment.cross * zoom + panY : start * zoom + panY;
+        const label = formatSpacingDistance(segment.distance);
+        return (
+          <React.Fragment key={`${hint.axis}-${hintIndex}-${segmentIndex}`}>
+            <div
+              data-equal-spacing-line={segment.axis}
+              style={{
+                position: 'absolute',
+                left: lineLeft,
+                top: lineTop,
+                width: horizontal ? length : 1,
+                height: horizontal ? 1 : length,
+                background: '#ff3366',
+                boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.72)',
+                pointerEvents: 'none',
+                zIndex: 41,
+              }}
+            >
+              <span style={{
+                position: 'absolute',
+                left: horizontal ? 0 : -3,
+                top: horizontal ? -3 : 0,
+                width: horizontal ? 1 : 7,
+                height: horizontal ? 7 : 1,
+                background: '#ff3366',
+              }} />
+              <span style={{
+                position: 'absolute',
+                right: horizontal ? 0 : undefined,
+                bottom: horizontal ? undefined : 0,
+                left: horizontal ? undefined : -3,
+                top: horizontal ? -3 : undefined,
+                width: horizontal ? 1 : 7,
+                height: horizontal ? 7 : 1,
+                background: '#ff3366',
+              }} />
+            </div>
+            <div
+              data-equal-spacing-distance={label}
+              style={{
+                position: 'absolute',
+                left: horizontal
+                  ? lineLeft + length / 2
+                  : lineLeft + 7,
+                top: horizontal
+                  ? lineTop - 15
+                  : lineTop + length / 2,
+                transform: horizontal ? 'translateX(-50%)' : 'translateY(-50%)',
+                minWidth: 18,
+                padding: '1px 4px',
+                borderRadius: 4,
+                color: '#fff',
+                background: '#e11d48',
+                boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.8), 0 2px 5px rgba(0, 0, 0, 0.35)',
+                fontSize: 10,
+                fontWeight: 600,
+                lineHeight: '14px',
+                textAlign: 'center',
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+                zIndex: 42,
+              }}
+            >
+              {label}
+            </div>
+          </React.Fragment>
+        );
+      }))}
+
+      {showSnapGuides && snapGuides.map((guide, index) => {
         const vertical = guide.axis === 'x';
         const start = Math.min(guide.start, guide.end);
         const guideOverhang = 10;
