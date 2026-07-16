@@ -74,6 +74,8 @@ pnpm build
 
 详细规则见 [CONTRIBUTING.md](./CONTRIBUTING.md)。禁止直接向 `main` 推送功能改动。
 
+当前私有仓库使用 GitHub Free，平台暂时不能强制启用 Branch Protection；升级前由团队按同一规则自律执行，限制与后续处理见 CONTRIBUTING 的“当前 GitHub 执行状态”。
+
 ## 文档导航
 
 - [开发环境](./docs/development.md)：安装、启动、远程模式和常见问题。

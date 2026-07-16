@@ -2,7 +2,7 @@
 
 forge 同时包含纯逻辑、React 界面、Laya 画布、Electron 本地文件和远程预览链路。单一测试手段不能覆盖全部风险，因此 PR 需要按改动范围组合自动检查和人工验收。
 
-## 合并门禁
+## 合并检查
 
 所有 PR 至少执行：
 
@@ -12,6 +12,8 @@ pnpm build
 ```
 
 GitHub Actions 会对进入 `main` 的 PR 自动执行这两项检查。失败时不能通过修改测试、吞掉错误或降低约束绕过。
+
+当前私有仓库使用 GitHub Free，Actions 可以运行，但 GitHub 暂时不能把检查设为 Branch Protection 的必需状态。升级 GitHub Pro 前，由评审者确认检查通过后再执行 Squash Merge；技术门禁配置跟踪见 [Issue #4](https://github.com/RexYoung000/editor/issues/4)。
 
 ## 现有自动测试
 
