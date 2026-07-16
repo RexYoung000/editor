@@ -262,7 +262,21 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 ---
 
-## 七、关联文档
+## 七、导出结果回归测试
+
+[Issue #32](https://github.com/RexYoung000/editor/issues/32) 为导出核心增加不依赖 Electron 写盘、SVN、网络和本机素材的结构测试入口：
+
+- `buildExportRegressionArtifacts` 生成正常课、作业、专题测评、复习课和内部页面的资源映射、`.scene` 结构、场景代码与 `config.json`。
+- `buildPreviewExportRegressionArtifacts` 生成预习课对应的同类结构产物。
+- 真实导出写盘复用与测试入口相同的结构组合逻辑；测试不会另写一套模拟导出规则。
+- 图片尺寸由测试显式传入，用于稳定验证大图散图与小图 atlas 规则，不读取开发者本机文件。
+- 断言只覆盖组件树、坐标属性、变量、动作、内部页面运行代码、课程类型差异和关键资源路径，不保存整文件快照。
+
+代表性夹具固定覆盖正常课、作业课、专题测评、预习、复习课和内部页面。夹具只使用仓库内注册的内置资源路径与虚拟 `images/` 路径，不依赖未入库素材；如果当前导出行为本身存在问题，应另建缺陷 Issue，不在回归测试任务中顺手改变输出。
+
+这层测试保护的是导出规则和最终结构，不覆盖文本 Canvas 烘焙、Spine 目录伴随音频扫描、模板 zip 下载、资源真实写盘、SVN 提交、编译与 GameLoader 打开。这些外部集成仍按本文前述流程和 [测试与验收](testing.md) 执行。
+
+## 八、关联文档
 
 - [docs/electron-packaging.md](electron-packaging.md) — `compileBuild` IPC 内部细节、pnpm 符号链接坑、`ELECTRON_RUN_AS_NODE`、轮询 `fileconfig.json`
 - [docs/dev-server.md](dev-server.md) — `/api/upload-compiled-zip` 服务端解压、动态路由注册和 Preview URL 双斜杠防护
