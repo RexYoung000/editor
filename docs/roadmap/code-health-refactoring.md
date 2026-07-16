@@ -152,11 +152,13 @@ forge 当前不是需要全面重写的失控代码库。项目已有统一状�
 
 ### 已立项
 
-| Issue | 类型 | 目标 | 依赖 | 当前状态 |
+实时执行状态以 GitHub Issue 和 Project 看板为准，本文只维护不随普通状态流转失效的治理定位与依赖。
+
+| Issue | 类型 | 目标 | 依赖 | 治理定位 |
 | --- | --- | --- | --- | --- |
-| [#31](https://github.com/RexYoung000/editor/issues/31) | 文档 | 建立本路线、导航和持续维护机制 | 无 | 评审中 |
-| [#32](https://github.com/RexYoung000/editor/issues/32) | 测试 | 建立导出结果回归保护 | 无 | 待对齐 |
-| [#33](https://github.com/RexYoung000/editor/issues/33) | 技术债 | 收敛共享导出规则 | #32 | 待对齐 |
+| [#31](https://github.com/RexYoung000/editor/issues/31) | 文档 | 建立本路线、导航和持续维护机制 | 无 | 路线基线 |
+| [#32](https://github.com/RexYoung000/editor/issues/32) | 测试 | 建立导出结果回归保护 | 无 | 首批保护任务 |
+| [#33](https://github.com/RexYoung000/editor/issues/33) | 技术债 | 收敛共享导出规则 | #32 | 首批治理任务 |
 
 ### 候选治理项
 
