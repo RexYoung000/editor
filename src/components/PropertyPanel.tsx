@@ -21,6 +21,7 @@ import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
 import { collectInternalPageIssues, findActiveElementPage, isInternalPagesSubPage } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
 import { getElementParentContainment } from '../utils/canvasGeometry';
+import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../utils/layerPresentation';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -423,6 +424,47 @@ export default function PropertyPanel() {
 
   const hasSelection = selectedElements.length > 0;
 
+  const clearEditingValue = (key: string) => {
+    setEditingValues((previous) => {
+      const next = { ...previous };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const commitLayerLabel = () => {
+    if (!single) return;
+    const draft = editingValues.layerLabel;
+    if (draft === undefined) return;
+    const normalized = draft.trim();
+    clearEditingValue('layerLabel');
+    if (normalized === getExplicitLayerLabel(single)) return;
+    updateElement(single.id, { props: withLayerLabel(single.props, normalized) });
+    saveHistory();
+  };
+
+  const commitElementIdentifier = () => {
+    if (!single || single.locked) return;
+    const newName = editingValues.name?.trim();
+    if (!newName || newName === single.name) {
+      clearEditingValue('name');
+      return;
+    }
+    if (/^\d/.test(newName)) {
+      showToast(t('nameStartDigit'), 'error');
+      clearEditingValue('name');
+      return;
+    }
+    if (elements.some((element) => element.id !== single.id && element.name === newName)) {
+      showToast(t('duplicateName'), 'error');
+      clearEditingValue('name');
+      return;
+    }
+    updateElement(single.id, { name: newName } as Partial<Element>);
+    saveHistory();
+    clearEditingValue('name');
+  };
+
   return (
     <>
     <div data-property-panel className="w-64 bg-slate-800 border-l border-slate-700 flex flex-col">
@@ -486,62 +528,60 @@ export default function PropertyPanel() {
                 </div>
               )}
 
-              {/* 名称 */}
-              {single && !DRAG_GAME_NAME_HIDDEN.includes(single.type) && (() => {
-                const displayName = editingValues.name ?? single.name ?? '';
+              {single && (() => {
+                const metaLabel = translateLabel(elementMeta[single.type]?.label || single.type, language);
+                const layerLabel = editingValues.layerLabel !== undefined
+                  ? editingValues.layerLabel
+                  : (getExplicitLayerLabel(single) || getLayerDisplayName(single, metaLabel));
                 return (
                   <div className="mb-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400 w-16 shrink-0">{t('elementName')}</span>
+                      <span className="text-xs text-slate-400 w-16 shrink-0">{t('layerName')}</span>
                       <input
                         className="flex-1 px-1.5 py-1 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500"
-                        value={displayName}
-                        onChange={(e) => {
-                          const filtered = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
-                          setEditingValues(prev => ({ ...prev, name: filtered }));
+                        value={layerLabel}
+                        placeholder={getLayerDisplayName(single, metaLabel)}
+                        onChange={(event) => setEditingValues((previous) => ({ ...previous, layerLabel: event.target.value }))}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') event.currentTarget.blur();
+                          if (event.key === 'Escape') clearEditingValue('layerLabel');
                         }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            const newName = editingValues.name?.trim();
-                            if (!newName) {
-                              setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
-                              (e.target as HTMLInputElement).blur();
-                              return;
-                            }
-                            if (/^\d/.test(newName)) {
-                              showToast(t('nameStartDigit'), 'error');
-                              return;
-                            }
-                            if (newName !== single.name) {
-                              updateElement(single.id, { name: newName } as Partial<Element>);
-                              useEditorStore.getState().saveHistory();
-                            }
-                            (e.target as HTMLInputElement).blur();
-                          } else if (e.key === 'Escape') {
-                            setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
-                            (e.target as HTMLInputElement).blur();
-                          }
-                        }}
-                        onBlur={() => {
-                          const newName = editingValues.name?.trim();
-                          if (!newName || newName === single.name) {
-                            setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
-                            return;
-                          }
-                          if (/^\d/.test(newName)) {
-                            showToast(t('nameStartDigit'), 'error');
-                            setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
-                            return;
-                          }
-                          updateElement(single.id, { name: newName } as Partial<Element>);
-                          useEditorStore.getState().saveHistory();
-                          setEditingValues(prev => { const next = { ...prev }; delete next.name; return next; });
-                        }}
+                        onBlur={commitLayerLabel}
                       />
                     </div>
                   </div>
                 );
               })()}
+
+              {single && !DRAG_GAME_NAME_HIDDEN.includes(single.type) && (
+                <details className="mb-2 pb-2 border-b border-slate-700">
+                  <summary className="text-xs text-slate-500 mb-1.5 cursor-pointer hover:text-slate-300 select-none">
+                    {t('advancedInfo')}
+                  </summary>
+                  <div className="mt-1.5 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 w-16 shrink-0">{t('componentIdentifier')}</span>
+                      <input
+                        className="flex-1 min-w-0 px-1.5 py-1 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
+                        value={editingValues.name ?? single.name ?? ''}
+                        disabled={single.locked}
+                        onChange={(event) => {
+                          const filtered = event.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
+                          setEditingValues((previous) => ({ ...previous, name: filtered }));
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') event.currentTarget.blur();
+                          if (event.key === 'Escape') clearEditingValue('name');
+                        }}
+                        onBlur={commitElementIdentifier}
+                      />
+                    </div>
+                    <div className="text-[10px] leading-relaxed text-slate-500">
+                      {t('componentIdentifierHint')}
+                    </div>
+                  </div>
+                </details>
+              )}
 
               {/* 外观样式按钮 */}
               {single && ['ScaleButton', 'TextInput', 'CheckBox', 'Radio', 'ProgressBar', 'Tab', 'RadioGroup', 'VSlider'].includes(single.type) && (
