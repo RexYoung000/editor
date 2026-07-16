@@ -9,7 +9,7 @@ import {
 import { applyKlProps, drawPlaceholder } from '../utils/laya/components';
 import { objects, canvasRoot, laya } from '../utils/laya/core';
 import CanvasOverlay from './CanvasOverlay';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import CanvasRuler, { RULER_PX } from './CanvasRuler';
 import { createDefaultElement } from '../elements/elementMeta';
 import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';

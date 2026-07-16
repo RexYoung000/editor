@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, Trash2, FolderOpen, Pencil, Upload, Loader2, Pin } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import type { SubPage } from '../types';
 import type { CustomTemplate } from '../utils/customTemplateFs';
 import type { PresetTemplate } from '../presets';

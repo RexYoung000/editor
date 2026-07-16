@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { ChevronDown, FileText, FolderOpen, Save, FilePlus2, FileInput, Images } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import ImportPPTDialog from './ImportPPTDialog';
 import ImportImagesDialog from './ImportImagesDialog';
 

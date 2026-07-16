@@ -16,11 +16,11 @@ pnpm electron:start             # 同 electron:dev
 ```bash
 pnpm test     # 编译并运行 tests/*.test.ts
 pnpm build    # tsc -b && vite build
-pnpm lint     # ESLint 全量检查，当前存在已知存量问题
+pnpm lint     # ESLint 全量检查
 pnpm preview  # 预览 vite build 静态产物，不包含开发 API
 ```
 
-PR 的必需自动检查是 `pnpm test` 和 `pnpm build`。详细要求见 [testing.md](./testing.md)。
+PR 的必需自动检查是 `pnpm lint`、`pnpm test` 和 `pnpm build`。详细要求见 [testing.md](./testing.md)。
 
 ## 资源打包
 

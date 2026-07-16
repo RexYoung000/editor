@@ -3,7 +3,7 @@ import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
 import { showToast } from '../utils/toast';
 import { Trash2, Eye, EyeOff, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { findActiveElementPage } from '../utils/internalPages';
 import type { Element } from '../types';
 import { isContainerElementType } from '../utils/elementContainers';

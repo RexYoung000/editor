@@ -1,5 +1,5 @@
 import { getResourceGroupIds, assetSrc, assetExport } from '../elements/builtinAssets';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 
 interface Props {
   currentSkin: string;   // 当前 skin 的 exportPath（如 'game/tabImg/img_lt_1.png'）

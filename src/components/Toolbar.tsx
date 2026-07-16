@@ -11,7 +11,7 @@ import SaveAsDialog from './SaveAsDialog';
 import ConfirmDialog from './ConfirmDialog';
 import SyncSettings from './SyncSettings';
 import type { SyncConfig } from './SyncSettings';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { findMissingResourceElements, type ResourceMissingItem } from '../utils/checkResourceReady';
 import { ResourceMissingDialog } from './ResourceMissingDialog';
 import { isFlatLesson } from '../utils/courseKind';

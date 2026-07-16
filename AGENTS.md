@@ -110,8 +110,8 @@ forge 是 Electron 桌面应用，Vite 既是开发页面服务器，也是预�
 
 ## 测试与完成标准
 
-- 最低合并检查是 `pnpm test` 和 `pnpm build`。
-- `pnpm lint` 当前存在已知存量问题，新改动不得增加问题；不要通过关闭规则规避。
+- 最低合并检查是 `pnpm lint`、`pnpm test` 和 `pnpm build`。
+- lint 错误必须修复，不能通过关闭规则、扩大 ignore 或降级类型约束规避。
 - 画布、Electron、本地文件、预览、导出和视觉改动必须补充真实体验验收。
 - 报告测试覆盖了什么、未覆盖什么、已知限制和 Rex 的验收路径，不能只说“测试通过”。
 - PR 必须关联 Issue，并使用 Squash Merge；提交与 PR 标题遵循 [CONTRIBUTING.md](CONTRIBUTING.md)。

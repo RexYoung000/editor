@@ -7,7 +7,7 @@ import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
 import { getCourseDirPath, readFileAsDataUrl, selectDirectory, importSpineFolder, downloadLibraryFile, downloadLibrarySpine, type SpineImportResult } from '../utils/electronFs';
 import { getObject } from '../utils/laya/core';
 import { ColorPicker } from './ColorPicker';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { translateLabel } from '../elements/elementMetaI18n';
 import { FONT_LIBRARY, FONT_CATEGORIES, lookupFont } from '../elements/fontLibrary';
 import { loadLocalFont } from '../utils/fontLoader';

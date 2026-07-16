@@ -19,7 +19,7 @@ Closes #
 
 - [ ] `pnpm test` 通过
 - [ ] `pnpm build` 通过
-- [ ] 已确认本次改动未新增 lint 问题
+- [ ] `pnpm lint` 通过
 - [ ] 已完成与风险匹配的真实界面或 Electron 验收
 
 人工验收入口、操作路径和结果：

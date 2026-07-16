@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, FolderOpen } from 'lucide-react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { showToast } from '../utils/toast';
 import { createProjectInDirectory, openProjectFromDirectory, selectDirectory } from '../utils/electronFs';
 import CreateProjectDialog from './CreateProjectDialog';

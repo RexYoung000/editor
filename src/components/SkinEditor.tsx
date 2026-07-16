@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { generateButtonSkin, generateCheckboxSkin, generateRadioSkin, generateInputSkin, generateProgressSkin, generateTabSkin, generateVSliderSkin } from '../utils/skinGenerator';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 
 interface Props {
   layaType: string;

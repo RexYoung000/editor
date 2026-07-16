@@ -1,5 +1,5 @@
 import { getResourceGroupIds, assetSrc, assetExport } from '../elements/builtinAssets';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 
 interface Props {
   currentSkin: string;

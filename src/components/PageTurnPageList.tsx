@@ -1,5 +1,5 @@
 import { useEditorStore, findSubPage } from '../store/editorStore';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import type { Element } from '../types';
 

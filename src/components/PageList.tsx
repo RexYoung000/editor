@@ -1,7 +1,7 @@
 import { useEditorStore } from '../store/editorStore';
 import { Plus, Trash2, Copy, ChevronDown, ChevronRight, ArrowUp, ArrowDown, BookmarkPlus, PanelTopOpen } from 'lucide-react';
 import { useState } from 'react';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { showToast } from '../utils/toast';
 import { PRESET_TEMPLATES } from '../presets';
 import ConfirmDialog from './ConfirmDialog';

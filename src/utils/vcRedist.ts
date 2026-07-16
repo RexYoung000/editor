@@ -11,7 +11,7 @@ export async function downloadVCRedist(
   onProgress: (downloaded: number, total: number) => void
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const progressHandler = (_event: any, { downloaded, total }: { downloaded: number; total: number }) => {
+    const progressHandler = (_event: unknown, { downloaded, total }: { downloaded: number; total: number }) => {
       onProgress(downloaded, total);
     };
 
