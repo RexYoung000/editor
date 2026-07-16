@@ -3,7 +3,7 @@ import { useEditorStore } from '../store/editorStore';
 import { createDefaultElement, decrementSubPageCounter, elementMeta, CATEGORIES } from '../elements/elementMeta';
 import { createLayaComponent, registerObject, getObject } from '../utils/layaBridge';
 import { assetExport } from '../elements/builtinAssets';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { translateLabel } from '../elements/elementMetaI18n';
 import KeyboardPresetDialog from './KeyboardPresetDialog';
 import type { KeyboardPreset } from '../elements/keyboardPresets';

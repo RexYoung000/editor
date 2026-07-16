@@ -1,3 +1,13 @@
+interface ElectronEventPayloads {
+  'download-vcredist-progress': { downloaded: number; total: number };
+}
+
+type ElectronEventChannel = keyof ElectronEventPayloads;
+type ElectronEventListener<K extends ElectronEventChannel> = (
+  event: unknown,
+  payload: ElectronEventPayloads[K],
+) => void;
+
 export interface ElectronAPI {
   selectDirectory: () => Promise<string | null>;
   listDirectory: (dirPath: string) => Promise<Array<{ name: string; isDir: boolean }>>;
@@ -37,8 +47,8 @@ export interface ElectronAPI {
   detectPowerPointEngine: () => Promise<{ engine: 'office' | 'wps' | null; progId?: string; error?: string }>;
   checkVCRuntime: () => Promise<{ installed: boolean }>;
   downloadVCRedist: (serverUrl: string) => Promise<{ ok: boolean; path: string }>;
-  on?: (channel: string, callback: (...args: any[]) => void) => void;
-  off?: (channel: string, callback: (...args: any[]) => void) => void;
+  on?: <K extends ElectronEventChannel>(channel: K, callback: ElectronEventListener<K>) => void;
+  off?: <K extends ElectronEventChannel>(channel: K, callback: ElectronEventListener<K>) => void;
   openInstaller: (installerPath: string) => Promise<{ ok: boolean }>;
   selectFile?: (options?: { filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>;
   convertPptToImages: (params: { pptPath: string; progId: string; conversionId?: string }) => Promise<{

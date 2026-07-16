@@ -1,7 +1,7 @@
 import { Plus, Trash2, Upload, X } from 'lucide-react';
 import type { Action, Element, Page } from '../types';
 import { elementMeta } from '../elements/elementMeta';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { getCourseDirPath } from '../utils/electronFs';
 import { useEditorStore } from '../store/editorStore';
 import { getElementPages, isInternalPagesSubPage, isPageAction } from '../utils/internalPages';

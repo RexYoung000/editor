@@ -54,11 +54,12 @@ pnpm electron:dev
 ## 提交前检查
 
 ```bash
+pnpm lint
 pnpm test
 pnpm build
 ```
 
-`pnpm lint` 当前仍有历史遗留问题，因此暂不作为合并门禁。新改动不得增加新的 lint 问题，后续清理完成后再把全量 lint 加入 CI。
+三项检查均为 PR 合并前的必需检查，并由 GitHub Actions 自动执行。
 
 ## 协作入口
 

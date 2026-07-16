@@ -1,9 +1,11 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Connect, type Plugin, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import fs from 'fs'
 import path from 'path'
 import * as crypto from 'node:crypto'
 import { createRequire } from 'module'
+import type { ServerResponse } from 'node:http'
+import type JSZipModule from 'jszip'
 import { LIBRARY_QUICK_TAGS, matchesLibraryQuickTag } from './src/utils/libraryQuickTags'
 import type { LibraryQuickTagId } from './src/utils/libraryQuickTags'
 import { detectLibrarySeries, matchesLibrarySearchQuery } from './src/utils/librarySearch'
@@ -230,12 +232,12 @@ function sanitizeLibraryPath(rel: string): { ok: true; value: string } | { ok: f
   return { ok: true, value: normalized.replace(/^\/+/, '') };
 }
 
-function jsonOk(res: any, data: Record<string, unknown>) {
+function jsonOk(res: ServerResponse, data: Record<string, unknown>) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify({ ok: true, ...data }));
 }
 
-function jsonError(res: any, status: number, message: string) {
+function jsonError(res: ServerResponse, status: number, message: string) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify({ ok: false, error: message }));
@@ -292,20 +294,29 @@ const hashCache = new Map<string, HashCacheEntry>();
 let hashCacheLoaded = false;
 let hashCacheSaveTimer: NodeJS.Timeout | null = null;
 
+function isHashCacheEntry(value: unknown): value is HashCacheEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Record<string, unknown>;
+  return typeof entry.hash === 'string'
+    && typeof entry.mtime === 'number'
+    && typeof entry.size === 'number';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function loadHashCacheFromDisk(): void {
   if (hashCacheLoaded) return;
   hashCacheLoaded = true;
   try {
     if (!fs.existsSync(HASH_CACHE_FILE)) return;
     const raw = fs.readFileSync(HASH_CACHE_FILE, 'utf-8');
-    const obj = JSON.parse(raw);
+    const obj: unknown = JSON.parse(raw);
     if (obj && typeof obj === 'object') {
       for (const [k, v] of Object.entries(obj)) {
-        if (v && typeof v === 'object'
-          && typeof (v as any).hash === 'string'
-          && typeof (v as any).mtime === 'number'
-          && typeof (v as any).size === 'number') {
-          hashCache.set(k, v as HashCacheEntry);
+        if (isHashCacheEntry(v)) {
+          hashCache.set(k, v);
         }
       }
     }
@@ -346,16 +357,16 @@ function computeFileHash(safeRel: string, absFile: string): string {
   return hash;
 }
 
-function forgePlugin() {
+function forgePlugin(): Plugin {
   const courseOutputDirs = new Map<string, string>(); // courseId → localOutputDir
   const installersDir = path.resolve(__dirname, 'installers');
 
   
   return {
     name: 'forge-server',
-    configureServer(server: any) {
+    configureServer(server: ViteDevServer) {
       // preview-server 静态代理：将 /preview-server/ 请求映射到物理文件
-      server.middlewares.use((req: any, res: any, next: any) => {
+      server.middlewares.use((req, res, next) => {
         const rawUrl = (req.url || '').replace(/\/\/+/g, '/');
         if (!rawUrl.startsWith('/preview-server')) return next();
         const afterPrefix = rawUrl.slice('/preview-server'.length);
@@ -380,7 +391,7 @@ function forgePlugin() {
       // GameLoader 在 preview-server/ 下运行时，资源请求不带 /preview-server/ 前缀
       // 代理 share/、cfg/、res/ 等根路径请求到 preview-server/ 对应文件
       const previewServerRootPaths = ['/share/', '/cfg/', '/res/', '/share_chinese/', '/share_english/', '/share_extend/', '/lessons-en/', '/record/'];
-      server.middlewares.use((req: any, res: any, next: any) => {
+      server.middlewares.use((req, res, next) => {
         const url = (req.url || '').replace(/\/\/+/g, '/').replace(/\?.*$/, '');
         if (previewServerRootPaths.some(p => url.startsWith(p))) {
           const filePath = path.resolve(__dirname, 'preview-server', url.slice(1));
@@ -403,7 +414,7 @@ function forgePlugin() {
       // 课件文件动态代理：拦截 /preview-server/lessons/ 和根路径 /lessons/ 请求
       // GameLoader 在 preview-server/index.html 下运行，资源请求用相对路径（如 lessons/Math/V8/...），
       // 这里从 URL 中提取 *_LessonZK 或 *_LessonHW 段，再查找实际文件位置。
-      function serveCourseFile(urlPath: string, res: any, next: any) {
+      function serveCourseFile(urlPath: string, res: ServerResponse, next: Connect.NextFunction) {
         const lessonMatch = urlPath.match(/([^/]+_Lesson(?:ZK|HW|SSEVALUATION|FXK))/);
         if (!lessonMatch) { next(); return; }
         const projName = lessonMatch[1];
@@ -441,16 +452,16 @@ function forgePlugin() {
         next();
       }
 
-      server.middlewares.use('/preview-server/lessons', (req: any, res: any, next: any) => {
+      server.middlewares.use('/preview-server/lessons', (req, res, next) => {
         serveCourseFile(req.url || '', res, next);
       });
       // GameLoader 在 preview-server/ 下运行时，资源请求不带 /preview-server/ 前缀
-      server.middlewares.use('/lessons', (req: any, res: any, next: any) => {
+      server.middlewares.use('/lessons', (req, res, next) => {
         serveCourseFile(req.url || '', res, next);
       });
 
       // preview-game HTML 拦截
-      server.middlewares.use((req: any, res: any, next: any) => {
+      server.middlewares.use((req, res, next) => {
         if (req.url?.startsWith('/preview-game/') && req.url?.endsWith('.html')) {
           const filePath = path.resolve(__dirname, 'public', req.url.slice(1));
           if (fs.existsSync(filePath)) {
@@ -463,7 +474,7 @@ function forgePlugin() {
       });
 
       // GET /api/ws-config — 返回打包机 WebSocket 配置（运行 vite 的机器通过环境变量设定）
-      server.middlewares.use('/api/ws-config', (req: any, res: any) => {
+      server.middlewares.use('/api/ws-config', (req, res) => {
         if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({
@@ -474,7 +485,7 @@ function forgePlugin() {
       // POST /api/upload-compiled-zip — Electron 编译发布产物 zip 上传
       // 接收 multipart：courseId / teacherId / kind / file(zip)
       // Vite 端在内存解压 → 写入 preview-server/lessons/{projName}/，zip 不落盘
-      server.middlewares.use('/api/upload-compiled-zip', (req: any, res: any) => {
+      server.middlewares.use('/api/upload-compiled-zip', (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
         const chunks: Buffer[] = [];
         let size = 0;
@@ -495,10 +506,10 @@ function forgePlugin() {
             const boundary = contentType.split('boundary=')[1];
             if (!boundary) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: '缺少 boundary' })); return; }
             const parts = parseMultipart(raw, boundary);
-            const courseId = parts.find((p: any) => p.name === 'courseId')?.data?.toString() || '';
-            const teacherId = parts.find((p: any) => p.name === 'teacherId')?.data?.toString() || '';
-            const kind = parts.find((p: any) => p.name === 'kind')?.data?.toString() || 'normal';
-            const filePart = parts.find((p: any) => p.filename);
+            const courseId = parts.find((part) => part.name === 'courseId')?.data.toString() || '';
+            const teacherId = parts.find((part) => part.name === 'teacherId')?.data.toString() || '';
+            const kind = parts.find((part) => part.name === 'kind')?.data.toString() || 'normal';
+            const filePart = parts.find((part) => part.filename);
             if (!courseId || !filePart) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: '缺少 courseId 或 file' })); return; }
 
             const tid = teacherId || '';
@@ -512,9 +523,9 @@ function forgePlugin() {
             fs.mkdirSync(lessonDir, { recursive: true });
 
             // 内存解压 zip → 写入 lessonDir
-            const JSZip = requireFromConfig('jszip');
+            const JSZip = requireFromConfig('jszip') as typeof JSZipModule;
             const zip = await JSZip.loadAsync(filePart.data);
-            const entries = Object.values(zip.files) as any[];
+            const entries = Object.values(zip.files);
             for (const entry of entries) {
               if (entry.dir) continue;
               const content = await entry.async('nodebuffer');
@@ -528,15 +539,15 @@ function forgePlugin() {
 
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ ok: true, cid: courseId }));
-          } catch (e: any) {
+          } catch (error: unknown) {
             res.statusCode = 500;
-            res.end(JSON.stringify({ ok: false, error: e.message }));
+            res.end(JSON.stringify({ ok: false, error: errorMessage(error) }));
           }
         });
       });
 
       // POST /api/upload-resource — 远程 Electron 上传资源（视频等）直接写入 preview-server lesson 目录
-      server.middlewares.use('/api/upload-resource', (req: any, res: any) => {
+      server.middlewares.use('/api/upload-resource', (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
         const chunks: Buffer[] = [];
         let size = 0;
@@ -557,11 +568,11 @@ function forgePlugin() {
             const boundary = contentType.split('boundary=')[1];
             if (!boundary) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: '缺少 boundary' })); return; }
             const parts = parseMultipart(raw, boundary);
-            const courseId = parts.find((p: any) => p.name === 'courseId')?.data?.toString() || 'default';
-            const teacherId = parts.find((p: any) => p.name === 'teacherId')?.data?.toString() || '';
-            const kind = parts.find((p: any) => p.name === 'kind')?.data?.toString() || 'normal';
-            const destPath = parts.find((p: any) => p.name === 'destPath')?.data?.toString();
-            const filePart = parts.find((p: any) => p.filename);
+            const courseId = parts.find((part) => part.name === 'courseId')?.data.toString() || 'default';
+            const teacherId = parts.find((part) => part.name === 'teacherId')?.data.toString() || '';
+            const kind = parts.find((part) => part.name === 'kind')?.data.toString() || 'normal';
+            const destPath = parts.find((part) => part.name === 'destPath')?.data.toString();
+            const filePart = parts.find((part) => part.filename);
             if (!destPath || !filePart) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: '缺少 destPath 或 file' })); return; }
             const tid = teacherId || '';
             const suffix = lessonSuffix(kind);
@@ -573,12 +584,12 @@ function forgePlugin() {
             fs.writeFileSync(filePath, filePart.data);
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ ok: true }));
-          } catch (e: any) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: e.message })); }
+          } catch (error: unknown) { res.statusCode = 500; res.end(JSON.stringify({ ok: false, error: errorMessage(error) })); }
         });
       });
 
       // POST /api/save-preset-thumbnail — 把 canvas 截图保存到 public/builtin/editor/
-      server.middlewares.use('/api/save-preset-thumbnail', (req: any, res: any) => {
+      server.middlewares.use('/api/save-preset-thumbnail', (req, res) => {
         if (req.method !== 'POST') { res.statusCode = 405; res.end('Method not allowed'); return; }
         let body = '';
         req.on('data', (chunk: string) => { body += chunk; });
@@ -593,15 +604,15 @@ function forgePlugin() {
             fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ ok: true, path: `/builtin/editor/${name}.png` }));
-          } catch (e: any) {
+          } catch (error: unknown) {
             res.statusCode = 500;
-            res.end(JSON.stringify({ ok: false, error: e.message }));
+            res.end(JSON.stringify({ ok: false, error: errorMessage(error) }));
           }
         });
       });
 
       // ─── 资源库 API ───
-      server.middlewares.use(async (req: any, res: any, next: any) => {
+      server.middlewares.use(async (req, res, next) => {
         if (!req.url) return next();
 
         const cleanedUrl = req.url.replace(/\/\/+/g, '/');
@@ -616,8 +627,8 @@ function forgePlugin() {
               return jsonError(res, 400, '不支持的快捷组件类型');
             }
             return jsonOk(res, { kind, presets: listQuickPresets(kind) });
-          } catch (e: any) {
-            return jsonError(res, 500, String(e?.message ?? e));
+          } catch (error: unknown) {
+            return jsonError(res, 500, errorMessage(error));
           }
         }
 
@@ -673,8 +684,8 @@ function forgePlugin() {
                 count: sameType.filter((entry) => matchesLibraryQuickTag(entry, tag)).length,
               })),
             });
-          } catch (e: any) {
-            return jsonError(res, 500, String(e?.message ?? e));
+          } catch (error: unknown) {
+            return jsonError(res, 500, errorMessage(error));
           }
         }
 
@@ -706,8 +717,8 @@ function forgePlugin() {
                 return { name: e.name, isDir: false, size: s.size, mtime: s.mtimeMs };
               });
             return jsonOk(res, { path: safe.value, entries });
-          } catch (e: any) {
-            return jsonError(res, 500, String(e?.message ?? e));
+          } catch (error: unknown) {
+            return jsonError(res, 500, errorMessage(error));
           }
         }
 
@@ -726,8 +737,8 @@ function forgePlugin() {
 
             const hash = computeFileHash(safe.value, absFile);
             return jsonOk(res, { path: safe.value, hash, size: stat.size, mtime: stat.mtimeMs });
-          } catch (e: any) {
-            return jsonError(res, 500, String(e?.message ?? e));
+          } catch (error: unknown) {
+            return jsonError(res, 500, errorMessage(error));
           }
         }
 
@@ -760,8 +771,8 @@ function forgePlugin() {
             walk(absDir, '');
 
             return jsonOk(res, { path: safe.value, files });
-          } catch (e: any) {
-            return jsonError(res, 500, String(e?.message ?? e));
+          } catch (error: unknown) {
+            return jsonError(res, 500, errorMessage(error));
           }
         }
 
@@ -769,7 +780,7 @@ function forgePlugin() {
       });
 
       // GET /api/download-vcredist — 流式下载 VC++ Redistributable（仅 Windows）
-      server.middlewares.use((req: any, res: any, next: any) => {
+      server.middlewares.use((req, res, next) => {
         const url = req.url?.replace(/\/\/+/g, '/').replace(/\?.*$/, '');
         if (!url?.startsWith('/api/download-vcredist')) return next();
 

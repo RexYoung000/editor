@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
 import { getAllCourses } from '../utils/storage';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 
 interface Props {
   onConfirm: (id: string) => void;

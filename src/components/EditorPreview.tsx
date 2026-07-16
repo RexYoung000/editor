@@ -5,7 +5,7 @@ import {
   enterPreviewMode, exitPreviewMode,
   previewGoToPage, resizeStageToContainer,
 } from '../utils/layaBridge';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 
 interface Props {
   pages: Page[];

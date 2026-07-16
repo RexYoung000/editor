@@ -7,11 +7,12 @@ forge 同时包含纯逻辑、React 界面、Laya 画布、Electron 本地文件
 所有 PR 至少执行：
 
 ```bash
+pnpm lint
 pnpm test
 pnpm build
 ```
 
-GitHub Actions 会对进入 `main` 的 PR 自动执行这两项检查。失败时不能通过修改测试、吞掉错误或降低约束绕过。
+GitHub Actions 会对进入 `main` 的 PR 自动执行这三项检查。失败时不能通过修改测试、吞掉错误或降低约束绕过。
 
 当前私有仓库使用 GitHub Free，Actions 可以运行，但 GitHub 暂时不能把检查设为 Branch Protection 的必需状态。升级 GitHub Pro 前，由评审者确认检查通过后再执行 Squash Merge；技术门禁配置跟踪见 [Issue #4](https://github.com/RexYoung000/editor/issues/4)。
 
@@ -40,16 +41,16 @@ GitHub Actions 会对进入 `main` 的 PR 自动执行这两项检查。失败�
 
 构建通过不代表 Electron、本地文件 API 或远程预览可用。
 
-## lint 当前状态
+## lint 检查
 
-`pnpm lint` 目前存在历史遗留问题，主要是旧代码中的显式 `any` 和 React Fast Refresh 规则。它暂不作为 CI 合并门禁。
+`pnpm lint` 对 TypeScript、React Hooks、React Fast Refresh 和项目约定执行全量静态检查，并作为 CI 合并检查。
 
-每个 PR 仍需遵守：
+每个 PR 必须遵守：
 
-- 不新增 lint 错误。
+- lint 零错误。
 - 不关闭规则或扩大忽略范围来规避问题。
-- 不在功能 PR 中顺手批量清理无关 lint。
-- 后续创建独立 Issue 清理基线，清零后将 lint 加入必需检查。
+- 不用 `any`、不安全断言或吞掉异常替代真实类型设计。
+- 类型治理不得顺手改变无关产品行为。
 
 ## 人工验收矩阵
 

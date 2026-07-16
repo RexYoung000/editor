@@ -103,7 +103,7 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 - `tests/` 使用 Node 测试执行器覆盖画布几何、选择交互、内部页面、模板/资源扫描和资源库检索等纯逻辑。
 - `pnpm build` 同时执行 TypeScript 构建和 Vite 生产构建。
 - Electron、本地文件、真实 Laya 渲染、预览和发布仍需要人工验收。
-- `pnpm lint` 当前有历史存量问题，暂不作为主分支门禁。
+- `pnpm lint` 对 TypeScript、React Hooks 和项目规范执行全量静态检查。
 
 验证范围见 [testing.md](./testing.md)。
 
@@ -113,7 +113,7 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 - sdk_baiya 和 LayaAir 以全局脚本加载，初始化顺序是硬约束。
 - 部分能力依赖未入库的素材库和本地课件环境，CI 无法覆盖真实资源完整性。
 - Electron IPC、远程双机模式和最终 GameLoader 表现不能只用浏览器构建结果判断。
-- 全量 lint 尚未清零，在完成专项治理前需要通过 PR 控制新增问题。
+- lint、单元测试和静态构建可以在 CI 中覆盖代码层回归，但不能替代远程双机与真实课件验收。
 
 ## 相关文档
 

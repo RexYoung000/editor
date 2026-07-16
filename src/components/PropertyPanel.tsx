@@ -13,7 +13,7 @@ import PageTurnPageList from './PageTurnPageList';
 import { KEYBOARD_PRESETS } from '../elements/keyboardPresets';
 import { CornerDownLeft, Maximize2, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import type { Action, Element } from '../types';
-import { useI18n } from '../i18n';
+import { useI18n } from '../i18n/context';
 import { getObject, syncProps } from '../utils/layaBridge';
 import { readFileAsDataUrl } from '../utils/electronFs';
 import { translateLabel } from '../elements/elementMetaI18n';
