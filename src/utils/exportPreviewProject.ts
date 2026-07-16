@@ -6,7 +6,12 @@ import { getCourseDirPath } from './electronFs';
 import JSZip from 'jszip';
 import { getApiBaseUrl } from './apiConfig';
 import { collectImageSizes, isLargeImage } from './imageSize';
-import { buildInternalPageActionBindings, buildInternalPageRuntime, internalPageActionBody } from './internalPageCompiler';
+import {
+  buildInternalPageActionBindings,
+  buildInternalPageRuntime,
+  compileInternalPagesCourse,
+  internalPageActionBody,
+} from './internalPageCompiler';
 
 // ─── 资源路径映射（预习工程，使用 game_preview 前缀）───
 
@@ -999,6 +1004,66 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
   };
 }
 
+export interface PreviewExportStructureScene {
+  name: string;
+  scene: Record<string, unknown>;
+  source: string;
+}
+
+export interface PreviewExportRegressionArtifacts {
+  viewDir: 'game_preview';
+  resources: Record<string, string>;
+  scenes: PreviewExportStructureScene[];
+  config: Record<string, unknown>;
+}
+
+type ImageSizeMap = Map<string, { w: number; h: number }>;
+
+function buildPreparedPreviewExportArtifacts(
+  course: Course,
+  resourceMap: Map<string, string>,
+  imageSizes: ImageSizeMap,
+): Omit<PreviewExportRegressionArtifacts, 'resources'> {
+  const scenes: PreviewExportStructureScene[] = [];
+  const previewStages = course.previewStages ?? [];
+  for (let si = 0; si < previewStages.length; si++) {
+    const stage = previewStages[si];
+    const videoPage = stage.subPages.find((page) => page.frozen);
+    const videoElement = videoPage?.elements.find((element) => element.locked && element.type === 'Video');
+    if (videoElement) continue;
+    const page = stage.subPages[0];
+    if (!page || page.frozen) continue;
+    const name = `Game${si + 1}`;
+    const { json, flags, varAssignment } = buildPreviewScene(page, name, resourceMap);
+    scenes.push({
+      name,
+      scene: json,
+      source: generatePreviewSceneTs(name, flags, page, varAssignment, resourceMap),
+    });
+  }
+  return {
+    viewDir: 'game_preview',
+    scenes,
+    config: buildPreviewConfigJson(course, resourceMap, imageSizes),
+  };
+}
+
+/**
+ * 生成可在 Node/CI 中直接断言的预习导出核心结构，不触发 Electron 写盘、网络或 SVN。
+ * 真实预习写盘流程复用同一个 buildPreparedPreviewExportArtifacts。
+ */
+export function buildPreviewExportRegressionArtifacts(
+  course: Course,
+  imageSizes: ImageSizeMap = new Map(),
+): PreviewExportRegressionArtifacts {
+  const compiled = compileInternalPagesCourse(course);
+  const resourceMap = collectPreviewResources(compiled);
+  return {
+    resources: Object.fromEntries(resourceMap),
+    ...buildPreparedPreviewExportArtifacts(compiled, resourceMap, imageSizes),
+  };
+}
+
 // ─── 收集需要从 game.zip 解压的精确文件路径（去掉 game/ 前缀） ───
 
 function collectGameZipFiles(resourceMap: Map<string, string>): Set<string> {
@@ -1078,23 +1143,9 @@ export async function exportPreviewProject(course: Course): Promise<void> {
 
   // 读取所有图片的真实像素尺寸，用于判断大小图
   const imageSizes = await collectImageSizes(resourceMap, course.id);
-
-  // 每个 previewStage 生成一个 scene + 一个 ts（视频关卡跳过）
-  // 预习关卡每个 stage 只有一个 subPage，因此场景命名为 Game{i}
-  const scenes: { name: string; json: Record<string, unknown>; flags: SceneFlags; page: SubPage; varAssignment: Map<string, string> }[] = [];
-  for (let si = 0; si < previewStages.length; si++) {
-    const stage = previewStages[si];
-    const videoPage = stage.subPages.find(p => p.frozen);
-    const videoEl = videoPage?.elements.find(e => e.locked && e.type === 'Video');
-    if (videoEl) continue; // 视频关卡不生成 .scene
-    const page = stage.subPages[0];
-    if (!page || page.frozen) continue;
-    const sceneName = `Game${si + 1}`;
-    const { json, flags, varAssignment } = buildPreviewScene(page, sceneName, resourceMap);
-    scenes.push({ name: sceneName, json, flags, page, varAssignment });
-  }
-
-  const configJson = buildPreviewConfigJson(course, resourceMap, imageSizes);
+  const artifacts = buildPreparedPreviewExportArtifacts(course, resourceMap, imageSizes);
+  const scenes = artifacts.scenes;
+  const configJson = artifacts.config;
   const gameZipFiles = collectGameZipFiles(resourceMap);
   // 按需追加内置音效
   for (const stage of previewStages) {
@@ -1127,15 +1178,14 @@ export async function exportPreviewProject(course: Course): Promise<void> {
     eApi,
   );
 
-  for (const { name, json, flags, page, varAssignment } of scenes) {
+  for (const { name, scene, source } of scenes) {
     await eApi.writeTextFile(
       `${projectRoot}/laya/pages/game_preview/${name}.scene`,
-      JSON.stringify(json, null, 2),
+      JSON.stringify(scene, null, 2),
     );
-    const tsContent = generatePreviewSceneTs(name, flags, page, varAssignment, resourceMap);
     await eApi.writeTextFile(
       `${projectRoot}/src/view/game_preview/${name}.ts`,
-      tsContent,
+      source,
     );
   }
 

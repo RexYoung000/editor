@@ -2175,6 +2175,94 @@ function buildReviewConfigJson(course: Course): Record<string, unknown> {
   };
 }
 
+export interface ExportStructureScene {
+  name: string;
+  scene: Record<string, unknown>;
+  source: string;
+}
+
+export interface ExportRegressionArtifacts {
+  viewDir: string;
+  resources: Record<string, string>;
+  scenes: ExportStructureScene[];
+  config: Record<string, unknown>;
+}
+
+type ImageSizeMap = Map<string, { w: number; h: number }>;
+
+function buildPreparedExportArtifacts(
+  course: Course,
+  resourceMap: Map<string, string>,
+  imageSizes: ImageSizeMap,
+): Omit<ExportRegressionArtifacts, 'resources'> {
+  const viewDir = namespace(course.kind);
+
+  if (isVideoOnlyCourse(course.kind)) {
+    return {
+      viewDir,
+      scenes: [],
+      config: buildReviewConfigJson(course),
+    };
+  }
+
+  if (isFlatLesson(course.kind)) {
+    const scenes: ExportStructureScene[] = [];
+    for (let si = 0; si < course.stages.length; si++) {
+      const page = course.stages[si].subPages[0];
+      if (!page || page.frozen) continue;
+      const name = `Game${si + 1}`;
+      const { json, varAssignment } = buildScene(page, name, resourceMap, viewDir);
+      scenes.push({
+        name,
+        scene: json,
+        source: generateHomeworkSceneTs(name, page, resourceMap, varAssignment),
+      });
+    }
+    return {
+      viewDir,
+      scenes,
+      config: buildHomeworkConfigJson(course, resourceMap, imageSizes, course.kind),
+    };
+  }
+
+  const scenes: ExportStructureScene[] = [];
+  for (let si = 0; si < course.stages.length; si++) {
+    const stage = course.stages[si];
+    for (let sj = 0; sj < stage.subPages.length; sj++) {
+      const page = stage.subPages[sj];
+      if (page.frozen) continue;
+      const name = `GameLT${si + 1}_${sj + 1}`;
+      const { json, varAssignment } = buildScene(page, name, resourceMap, viewDir);
+      scenes.push({
+        name,
+        scene: json,
+        source: generateSceneTs(name, page, resourceMap, varAssignment, viewDir),
+      });
+    }
+  }
+  return {
+    viewDir,
+    scenes,
+    config: buildConfigJson(course, resourceMap, imageSizes),
+  };
+}
+
+/**
+ * 生成可在 Node/CI 中直接断言的导出核心结构，不触发文本烘焙、Electron 写盘、网络或 SVN。
+ * 真实写盘流程复用同一个 buildPreparedExportArtifacts，避免测试维护平行导出规则。
+ */
+export function buildExportRegressionArtifacts(
+  course: Course,
+  imageSizes: ImageSizeMap = new Map(),
+): ExportRegressionArtifacts {
+  const compiled = compileInternalPagesCourse(course);
+  const resourceMap = collectResources(compiled, namespace(compiled.kind));
+  return {
+    resources: Object.fromEntries(resourceMap),
+    ...buildPreparedExportArtifacts(compiled, resourceMap, imageSizes),
+  };
+}
+
 // ─── 收集需要整目录拷贝的内置 game 文件夹 ───
 
 /** 从 resourceMap 中提取 game.zip 内被实际引用的精确文件路径集合（去掉 game/ 前缀） */
@@ -2282,10 +2370,11 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
 
   // 读取所有图片的真实像素尺寸，用于判断大小图
   const imageSizes = await collectImageSizes(resourceMap, baked.id);
+  const artifacts = buildPreparedExportArtifacts(baked, resourceMap, imageSizes);
 
   if (isReview) {
     // ─── 复习课编辑器工程 ───
-    const configJson = buildReviewConfigJson(baked);
+    const configJson = artifacts.config;
     const projectRoot = `${dirPath}/project/${course.id}/Game1_REVIEW`;
 
     const serverUrl = getApiBaseUrl();
@@ -2323,17 +2412,8 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
     return { svnSubmitted: false };
   } else if (isFlat) {
     // ─── 作业/专题测评编辑器工程 ───
-    const scenes: { name: string; json: Record<string, unknown>; page: SubPage; varAssignment: Map<string, string> }[] = [];
-    for (let si = 0; si < baked.stages.length; si++) {
-      const stage = baked.stages[si];
-      const page = stage.subPages[0];
-      if (!page || page.frozen) continue;
-      const sceneName = `Game${si + 1}`;
-      const { json, varAssignment } = buildScene(page, sceneName, resourceMap, 'game_hw');
-      scenes.push({ name: sceneName, json, page, varAssignment });
-    }
-
-    const configJson = buildHomeworkConfigJson(baked, resourceMap, imageSizes, course.kind);
+    const scenes = artifacts.scenes;
+    const configJson = artifacts.config;
     const projectRoot = `${dirPath}/project/${course.id}/Game1_HW`;
 
     const serverUrl = getApiBaseUrl();
@@ -2344,15 +2424,14 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
       eApi,
     );
 
-    for (const { name, json, page: scenePage, varAssignment } of scenes) {
+    for (const { name, scene, source } of scenes) {
       await eApi.writeTextFile(
         `${projectRoot}/laya/pages/game_hw/${name}.scene`,
-        JSON.stringify(json, null, 2),
+        JSON.stringify(scene, null, 2),
       );
-      const tsContent = generateHomeworkSceneTs(name, scenePage, resourceMap, varAssignment);
       await eApi.writeTextFile(
         `${projectRoot}/src/view/game_hw/${name}.ts`,
-        tsContent,
+        source,
       );
     }
 
@@ -2418,19 +2497,8 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
   } else {
 
   // 每个 stage 的每个 subPage 生成一个 scene + 一个 ts（视频关卡跳过）
-  const scenes: { name: string; json: Record<string, unknown>; page: SubPage; varAssignment: Map<string, string> }[] = [];
-  for (let si = 0; si < baked.stages.length; si++) {
-    const stage = baked.stages[si];
-    for (let sj = 0; sj < stage.subPages.length; sj++) {
-      const page = stage.subPages[sj];
-      if (page.frozen) continue; // 视频关卡不生成 .scene
-      const sceneName = `GameLT${si + 1}_${sj + 1}`;
-      const { json, varAssignment } = buildScene(page, sceneName, resourceMap);
-      scenes.push({ name: sceneName, json, page, varAssignment });
-    }
-  }
-
-  const configJson = buildConfigJson(baked, resourceMap, imageSizes);
+  const scenes = artifacts.scenes;
+  const configJson = artifacts.config;
 
   // 问题1：路径改为 project/<courseId>/Game1_LT（去掉重复 courseId）
   const projectRoot = `${dirPath}/project/${course.id}/Game1_LT`;
@@ -2445,16 +2513,14 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
   );
 
   // 写 .scene 文件 + 对应的 ts 文件
-  for (const { name, json, page: scenePage, varAssignment } of scenes) {
+  for (const { name, scene, source } of scenes) {
     await eApi.writeTextFile(
       `${projectRoot}/laya/pages/game_lt/${name}.scene`,
-      JSON.stringify(json, null, 2),
+      JSON.stringify(scene, null, 2),
     );
-    // 每个 scene 对应一个 ts 文件（基于 lessonModel.ts 模板）
-    const tsContent = generateSceneTs(name, scenePage, resourceMap, varAssignment);
     await eApi.writeTextFile(
       `${projectRoot}/src/view/game_lt/${name}.ts`,
-      tsContent,
+      source,
     );
   }
 
