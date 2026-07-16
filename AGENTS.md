@@ -71,6 +71,7 @@ pnpm build
 - 发布工程和预览统一从 `src/utils/exportProject.ts` 进入。改导出前阅读 [docs/export-pipeline.md](docs/export-pipeline.md)。
 - 自定义模板保存在用户选择的本地目录并按 MD5 去重，不使用 localStorage。改模板前阅读 [docs/custom-templates.md](docs/custom-templates.md) 和关联阶段或 Issue 文档。
 - 改 `electron-builder`、依赖打包或编译 IPC 前阅读 [docs/electron-packaging.md](docs/electron-packaging.md)，不要绕开现有 pnpm 符号链接、传递依赖和 `ELECTRON_RUN_AS_NODE` 处理。
+- 涉及核心模块拆分、重复规则收敛或技术债立项前阅读 [代码健康治理与渐进式重构路线](docs/roadmap/code-health-refactoring.md)，按测试保护、渐进抽离和结果一致的顺序推进。
 
 ## GitHub 协作入口
 
