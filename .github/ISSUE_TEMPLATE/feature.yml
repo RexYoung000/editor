@@ -2,7 +2,7 @@ name: 功能与体验改进
 description: 面向老师或开发流程的新增能力与体验变化
 title: "[功能] "
 labels:
-  - enhancement
+  - "类型：功能"
 body:
   - type: textarea
     id: problem
@@ -47,19 +47,6 @@ body:
     validations:
       required: true
 
-  - type: dropdown
-    id: phase
-    attributes:
-      label: 所属阶段
-      options:
-        - 通用基础与协作环境
-        - 阶段一：交互与层级管理
-        - 阶段二：组件归类与信息管理
-        - 阶段三：组合预设模板
-        - 阶段四：持续体验优化
-    validations:
-      required: true
-
   - type: textarea
     id: dependency
     attributes:
@@ -67,3 +54,7 @@ body:
       description: 没有可填写“无”。存在实质未决问题时，Issue 对齐后再开始开发。
     validations:
       required: true
+
+  - type: markdown
+    attributes:
+      value: "Issue 创建后，由 Rex 或负责梳理的 AI 在 Project 中设置 Milestone、模块、优先级、工作量和任务状态；正文中的下拉选项不作为筛选来源。"

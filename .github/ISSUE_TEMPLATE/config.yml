@@ -1,1 +1,5 @@
 blank_issues_enabled: false
+contact_links:
+  - name: 查看可领取任务
+    url: https://github.com/users/RexYoung000/projects/1
+    about: 在 forge 编辑器迭代看板中按阶段、模块、优先级和负责人筛选任务。

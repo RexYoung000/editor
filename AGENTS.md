@@ -13,7 +13,7 @@
 
 ## 开始任务前
 
-1. 阅读关联 GitHub Issue、本文和 Issue 指向的专项文档。
+1. 阅读关联 GitHub Issue、[forge 编辑器迭代看板](https://github.com/users/RexYoung000/projects/1)、本文和 Issue 指向的专项文档；领取任务前确认状态为“可领取”、没有负责人且依赖已满足。
 2. 检查当前分支、工作区和远端状态，不覆盖来源不明的改动；发现已合并的本地任务分支时，先按 `CONTRIBUTING.md` 完成清理。
 3. 确认不在 `main` 上实施，并使用 `<type>/<issue-number>-<short-name>` 短期分支。
 4. `.codegraph/` 存在时，理解或定位代码先使用 `codegraph explore`，再按需读取文件或使用 `rg`。
@@ -74,4 +74,4 @@ pnpm build
 
 ## GitHub 协作入口
 
-Issue 拆分、分支、提交、检查、PR、评审、合并、本地分支清理和版本发布均遵循 [CONTRIBUTING.md](CONTRIBUTING.md)。一个 Issue 对应一个短期分支和一个 PR；提交与 PR 标题使用项目规定的中文格式。
+Issue 拆分、Project 状态、任务领取、分支、提交、检查、PR、评审、合并、本地分支清理和版本发布均遵循 [CONTRIBUTING.md](CONTRIBUTING.md)。一个 Issue 对应一个短期分支和一个 PR；AI 在领取时同步“开发中”，创建 PR 后同步“评审中”，阻塞时记录原因并同步“已阻塞”，PR 合并收尾后同步“已完成”，但不自行改变产品范围、优先级或里程碑。

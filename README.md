@@ -65,12 +65,12 @@ pnpm build
 
 所有开发任务采用以下流程：
 
-1. 在 GitHub 创建并对齐 Issue。
+1. 从 [forge 编辑器迭代看板](https://github.com/users/RexYoung000/projects/1) 领取“可领取”且无负责人的 Issue，并转为“开发中”。
 2. 从最新 `main` 创建短期分支。
 3. 先同步相关文档，再实施代码或配置。
 4. 完成自动测试和真实界面验收。
-5. 推送分支并创建关联 Issue 的 PR。
-6. 自动检查通过、评审完成后 Squash 合并。
+5. 推送分支并创建关联 Issue 的 PR，将任务转为“评审中”。
+6. 自动检查通过、评审完成后 Squash 合并；GitHub 关闭 Issue，负责收尾的开发者或 AI 将看板转为“已完成”。
 7. 合并后同步 `main`，确认成果完整，并删除远端及本地任务分支。
 
 详细规则见 [CONTRIBUTING.md](./CONTRIBUTING.md)。禁止直接向 `main` 推送功能改动。

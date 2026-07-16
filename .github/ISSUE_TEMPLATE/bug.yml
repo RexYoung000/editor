@@ -2,7 +2,7 @@ name: 缺陷报告
 description: 记录可复现的功能、数据、界面或发布问题
 title: "[缺陷] "
 labels:
-  - bug
+  - "类型：缺陷"
 body:
   - type: textarea
     id: impact
