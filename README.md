@@ -88,6 +88,7 @@ pnpm build
 - [开发服务器](./docs/dev-server.md)：Vite middleware、路由和 API。
 - [自定义模板](./docs/custom-templates.md)：本地模板存储与资源去重。
 - [迭代路线](./docs/roadmap/editor-iteration-roadmap.md)：阶段目标和 Issue 拆解依据。
+- [代码健康治理](./docs/roadmap/code-health-refactoring.md)：核心风险、渐进式重构顺序和后续复评机制。
 
 ## 项目结构
 

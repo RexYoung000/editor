@@ -126,3 +126,4 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 - [自定义模板](./custom-templates.md)
 - [版本管理](./versioning.md)
 - [阶段迭代路线](./roadmap/editor-iteration-roadmap.md)
+- [代码健康治理与渐进式重构路线](./roadmap/code-health-refactoring.md)
