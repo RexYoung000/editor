@@ -27,6 +27,8 @@ interface Props {
   subPageIndexOf: (subPageId: string) => number;
   /** 预设模板：独立于课件的静态模板 */
   presetTemplates?: PresetTemplate[];
+  /** 复习课等不支持内部页面的课件隐藏内部页面预设、模板和复制来源。 */
+  supportsInternalPages?: boolean;
   /** 自定义模板根目录，未设置时显示引导 */
   customTemplateDir: string | null;
   onConfirmBlank: () => void;
@@ -53,6 +55,7 @@ export default function NewStageDialog({
   stageIndexOf,
   subPageIndexOf,
   presetTemplates,
+  supportsInternalPages = true,
   customTemplateDir,
   onConfirmBlank,
   onConfirmCopy,
@@ -88,6 +91,7 @@ export default function NewStageDialog({
     { key: 'custom', label: t('customTemplate') },
     { key: 'copyable', label: t('copyableTemplate') },
   ];
+  const copyableSubPages = allSubPages.filter((subPage) => supportsInternalPages || subPage.editorModel !== 'internal-pages');
 
   const canConfirm = activeTab === 'copyable' && selectedCopyId || activeTab === 'custom' && selectedTemplateId;
 
@@ -205,7 +209,7 @@ export default function NewStageDialog({
                 <div className="text-xs text-slate-400 px-2 text-center">{t('blankLevelDesc')}</div>
               </button>
               {presetTemplates
-                ?.filter((p) => mode === 'stage' || !p.noSubPages)
+                ?.filter((p) => (mode === 'stage' || !p.noSubPages) && (supportsInternalPages || p.editorModel !== 'internal-pages'))
                 .map((preset) => (
                 <button
                   key={preset.id}
@@ -236,13 +240,13 @@ export default function NewStageDialog({
                     <FolderOpen size={16} /> 选择目录
                   </button>
                 </div>
-              ) : customTemplates.length === 0 ? (
+              ) : customTemplates.filter((template) => supportsInternalPages || template.model !== 'internal-pages-v1').length === 0 ? (
                 <div className="flex items-center justify-center h-[280px] text-base text-slate-500">
                   {t('customTemplateEmpty')}
                 </div>
               ) : (
                 <div className="grid grid-cols-4 gap-4">
-                  {customTemplates.map((tmpl) => {
+                  {customTemplates.filter((template) => supportsInternalPages || template.model !== 'internal-pages-v1').map((tmpl) => {
                     const isSelected = selectedTemplateId === tmpl.id;
                     const isRenaming = renamingId === tmpl.id;
                     return (
@@ -282,7 +286,10 @@ export default function NewStageDialog({
                           ) : (
                             <div className="truncate font-medium">{tmpl.name}</div>
                           )}
-                          <div className="text-[10px] text-slate-400">{tmpl.elements.length} 元素</div>
+                          <div className="text-[10px] text-slate-400">
+                            {tmpl.model === 'internal-pages-v1' ? `${tmpl.pageCount ?? 1} 页 · ` : ''}
+                            {tmpl.subPage ? [tmpl.subPage.elements, ...(tmpl.subPage.internalPages?.map((page) => page.elements) ?? [])].flat().length : tmpl.elements.length} 元素
+                          </div>
                         </div>
                         {!isRenaming && (
                           <>
@@ -322,13 +329,13 @@ export default function NewStageDialog({
 
           {activeTab === 'copyable' && (
             <>
-              {allSubPages.length === 0 ? (
+              {copyableSubPages.length === 0 ? (
                 <div className="flex items-center justify-center h-[280px] text-base text-slate-500">
                   {t('noCopyableLevels')}
                 </div>
               ) : (
                 <div className="grid grid-cols-4 gap-4">
-                  {allSubPages.map((sp) => {
+                  {copyableSubPages.map((sp) => {
                     const si = stageIndexOf(sp.id);
                     const sj = subPageIndexOf(sp.id);
                     const isSelected = selectedCopyId === sp.id;

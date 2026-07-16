@@ -40,12 +40,9 @@ export function initWorldRoot(): void {
   _worldRoot.mouseThrough = true;
   L.stage.addChild(_worldRoot);
 
-  // DEBUG: Laya 渲染的绿色圆点标记 world(0,0)，和 DOM 红点对比偏移
-  _worldRoot.graphics.drawCircle(0, 0, 8, '#00ff00', '#ffffff', 2);
-
   _boundaryFrame = new (window as LayaAny).laya.display.Sprite();
   _boundaryFrame.name = '_boundaryFrame';
-  _boundaryFrame.graphics.drawRect(0, 0, 1920, 1080, '#000000', '#444444', 2);
+  _boundaryFrame.graphics.drawRect(0, 0, 1920, 1080, '#000000', '#64748b', 2);
   _boundaryFrame.size(1920, 1080);
   _boundaryFrame.mouseEnabled = false;
   _boundaryFrame.mouseThrough = true;

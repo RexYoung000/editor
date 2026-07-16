@@ -4,6 +4,8 @@ import { elementMeta } from '../elements/elementMeta';
 import { useI18n } from '../i18n';
 import { getCourseDirPath } from '../utils/electronFs';
 import { useEditorStore } from '../store/editorStore';
+import { getElementPages, isInternalPagesSubPage, isPageAction } from '../utils/internalPages';
+import { findSubPage } from '../utils/findSubPage';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -21,6 +23,11 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
   const actions = element.actions ?? [];
 
   const course = useEditorStore((s) => s.currentCourse);
+  const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
+  const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
+  const internalSubPage = findSubPage(course, currentSubPageId);
+  const internalPageRefs = isInternalPagesSubPage(internalSubPage) ? getElementPages(internalSubPage) : [];
+  const editingDialog = internalPageRefs.find((page) => page.id === currentInternalPageId)?.kind === 'dialog';
   const isHwOrEval = course?.kind === 'homework' || course?.kind === 'sEvaluation';
 
   const isDragViewBox = element.type === 'DragViewBox';
@@ -107,6 +114,14 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
     { value: 'showAnswerRightLock', label: '播放SDK通用胜利动画+锁屏' },
     { value: 'showAnswerWrong', label: '播放SDK通用失败动画' },
     { value: 'animate',       label: t('actionAnimate') },
+    ...(isInternalPagesSubPage(internalSubPage)
+      ? editingDialog
+        ? [{ value: 'closeInternalDialog', label: '关闭当前弹窗' }]
+        : [
+            { value: 'navigateInternalPage', label: '跳转内容页' },
+            { value: 'openInternalDialog', label: '打开弹窗' },
+          ]
+      : []),
   ];
   const PAGE_TURN_ACTION_OPTS = [
     { value: 'pageTurnPrevOnce', label: '向左翻页(不循环)' },
@@ -433,7 +448,24 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
                     <span className="text-slate-500 w-7 shrink-0">{t('action')}</span>
                     <select
                       value={action.actionType}
-                      onChange={(e) => update(i, { actionType: e.target.value, property: undefined, value: undefined })}
+                      onChange={(e) => {
+                        const actionType = e.target.value;
+                        const patch: Partial<Action> = { actionType, property: undefined, value: undefined, pageTargetId: undefined, pageTargetNameSnapshot: undefined, afterClose: undefined };
+                        if (actionType === 'navigateInternalPage') {
+                          const target = internalPageRefs.find((page) => page.kind !== 'dialog');
+                          patch.pageTargetId = target?.id;
+                          patch.pageTargetNameSnapshot = target?.name;
+                        } else if (actionType === 'openInternalDialog') {
+                          const target = internalPageRefs.find((page) => page.kind === 'dialog');
+                          patch.pageTargetId = target?.id;
+                          patch.pageTargetNameSnapshot = target?.name;
+                        }
+                        let next = actions.map((item, index) => index === i ? { ...item, ...patch } : item);
+                        if (isPageAction({ ...action, ...patch }) && (action.event === 'onClick' || action.event === 'onClickSound')) {
+                          next = next.filter((item, index) => index === i || !((item.event === 'onClick' || item.event === 'onClickSound') && isPageAction(item)));
+                        }
+                        onChange(next);
+                      }}
                       className="flex-1 min-w-0 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
                     >
                       {getActionOpts(action).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -504,6 +536,51 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
                         <option value="">{t('selectPage')}</option>
                         {pages.map((p, idx) => <option key={p.id} value={p.id}>{idx + 1}. {p.name}</option>)}
                       </select>
+                    </div>
+                  )}
+
+                  {(action.actionType === 'navigateInternalPage' || action.actionType === 'openInternalDialog') && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-500 w-7 shrink-0">页面</span>
+                      <select
+                        value={action.pageTargetId ?? ''}
+                        onChange={(e) => {
+                          const target = internalPageRefs.find((page) => page.id === e.target.value);
+                          update(i, { pageTargetId: target?.id, pageTargetNameSnapshot: target?.name });
+                        }}
+                        className="flex-1 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
+                      >
+                        <option value="">请选择页面</option>
+                        {internalPageRefs
+                          .filter((page) => action.actionType === 'openInternalDialog' ? page.kind === 'dialog' : page.kind !== 'dialog')
+                          .map((page) => <option key={page.id} value={page.id}>{page.kind === 'main' ? '内容页 / ' : page.kind === 'dialog' ? '弹窗 / ' : '内容页 / '}{page.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {action.actionType === 'closeInternalDialog' && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1">
+                        <span className="text-slate-500 w-7 shrink-0">之后</span>
+                        <select
+                          value={action.afterClose ? `${action.afterClose.type}:${action.afterClose.pageTargetId}` : ''}
+                          onChange={(e) => {
+                            if (!e.target.value) { update(i, { afterClose: undefined }); return; }
+                            const [type, pageTargetId] = e.target.value.split(':') as ['navigate' | 'openDialog', string];
+                            const target = internalPageRefs.find((page) => page.id === pageTargetId);
+                            update(i, { afterClose: { type, pageTargetId, pageTargetNameSnapshot: target?.name } });
+                          }}
+                          className="flex-1 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
+                        >
+                          <option value="">返回打开前页面</option>
+                          <optgroup label="关闭后跳转">
+                            {internalPageRefs.filter((page) => page.kind !== 'dialog').map((page) => <option key={`navigate:${page.id}`} value={`navigate:${page.id}`}>{page.name}</option>)}
+                          </optgroup>
+                          <optgroup label="替换为弹窗">
+                            {internalPageRefs.filter((page) => page.kind === 'dialog' && page.id !== currentInternalPageId).map((page) => <option key={`openDialog:${page.id}`} value={`openDialog:${page.id}`}>{page.name}</option>)}
+                          </optgroup>
+                        </select>
+                      </div>
                     </div>
                   )}
 

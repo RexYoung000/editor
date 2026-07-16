@@ -98,6 +98,7 @@ export const translations: Record<Language, Record<string, string>> = {
     presetNoInteract: '无交互',
     presetInteract: '有交互',
     presetVideo: '视频关卡',
+    presetInternalPages: '内部页面关卡',
     customTemplateEmpty: '暂无自定义模板，点击小关卡上的紫色图标保存模板',
     importTemplate: '导入',
     importing: '正在导入...',
@@ -153,7 +154,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // 画布
     canvas: '画布',
-    canvasHint: '方向键微调位置 · Shift+方向键 10px · Delete 删除',
+    canvasHint: '空格+左键移动镜头 · ⌘/Ctrl+滚轮缩放 · 方向键微调位置',
     layaInitializing: 'Laya 初始化中...',
     addComponentsHint: '从上方工具栏添加组件',
     keyboardShortcuts: 'Ctrl+S 保存 · Ctrl+Z 撤销 · Ctrl+C/V 复制粘贴',
@@ -634,6 +635,7 @@ export const translations: Record<Language, Record<string, string>> = {
     presetNoInteract: 'No Interaction',
     presetInteract: 'Interaction',
     presetVideo: 'Video Level',
+    presetInternalPages: 'Internal Pages',
     customTemplateEmpty: 'No custom templates. Click the purple icon on a sub-level to save as template',
     importTemplate: 'Import',
     importing: 'Importing...',
@@ -701,7 +703,7 @@ export const translations: Record<Language, Record<string, string>> = {
 
     // Canvas
     canvas: 'Canvas',
-    canvasHint: 'Arrow keys to nudge · Shift+Arrow 10px · Delete to remove',
+    canvasHint: 'Space+drag to pan · Ctrl/Cmd+wheel to zoom · Arrow keys to nudge',
     layaInitializing: 'Laya initializing...',
     addComponentsHint: 'Add components from the toolbar above',
     keyboardShortcuts: 'Ctrl+S Save · Ctrl+Z Undo · Ctrl+C/V Copy/Paste',

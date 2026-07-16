@@ -1,14 +1,13 @@
-import { useEditorStore, findSubPage } from '../store/editorStore';
-import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
+import { useEditorStore } from '../store/editorStore';
+import { useRef, useState, useEffect, useCallback, useLayoutEffect, useMemo } from 'react';
 import type { Element } from '../types';
 import {
-  preloadAtlas, initEditorInteraction, removeObject,
+  preloadAtlas, removeObject,
   clearAllObjects, createLayaComponent, registerObject, getObject, syncTransform,
-  initWorldRoot, setWorldTransform,
+  initWorldRoot, setWorldTransform, getWorldTransform,
 } from '../utils/layaBridge';
 import { applyKlProps, drawPlaceholder } from '../utils/laya/components';
-import { objects, canvasRoot } from '../utils/laya/core';
-import { cleanupEditorInteraction } from '../utils/laya/selection';
+import { objects, canvasRoot, laya } from '../utils/laya/core';
 import CanvasOverlay from './CanvasOverlay';
 import { useI18n } from '../i18n';
 import CanvasRuler, { RULER_PX } from './CanvasRuler';
@@ -17,13 +16,18 @@ import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
+import { findCanvasElementPage } from '../utils/internalPages';
+import {
+  CANVAS_ZOOM_BUTTON_STEP,
+  constrainViewportToWorkspace,
+  fitCanvasViewport,
+  panViewportByWheel,
+  zoomViewportAtPoint,
+  zoomViewportByWheel,
+} from '../utils/canvasViewport';
 
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
-
-function centerCanvas(hostW: number, hostH: number, zoom: number) {
-  return { panX: (hostW - CANVAS_W * zoom) / 2, panY: (hostH - CANVAS_H * zoom) / 2 };
-}
 
 /**
  * 按"父先于子"的拓扑顺序排序子元素列表。
@@ -57,35 +61,13 @@ function sortChildrenParentFirst(children: Element[], topLevelIds: Set<string>):
   return result;
 }
 
-function getAbsoluteWorldRect(el: Element, allElements: Element[]) {
-  let absX = el.x, absY = el.y;
-  let cur = el;
-  const map = new Map(allElements.map(e => [e.id, e]));
-  while (cur.parentId) {
-    const parent = map.get(cur.parentId);
-    if (!parent) break;
-    absX += parent.x;
-    absY += parent.y;
-    cur = parent;
-  }
-  const props = el.props as Record<string, unknown>;
-  const anchorX = Number(props.anchorX ?? 0);
-  const anchorY = Number(props.anchorY ?? 0);
-  if (anchorX || anchorY) {
-    absX -= anchorX * el.width;
-    absY -= anchorY * el.height;
-  }
-  return { x: absX, y: absY, w: el.width, h: el.height };
-}
-
 export default function Canvas() {
   const { t } = useI18n();
   const currentCourse    = useEditorStore((s) => s.currentCourse);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
+  const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement    = useEditorStore((s) => s.selectElement);
-  const selectElements   = useEditorStore((s) => s.selectElements);
-  const clearSelection   = useEditorStore((s) => s.clearSelection);
   const updateElement    = useEditorStore((s) => s.updateElement);
   const deleteElement    = useEditorStore((s) => s.deleteElement);
   const saveHistory      = useEditorStore((s) => s.saveHistory);
@@ -97,35 +79,48 @@ export default function Canvas() {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [layaReady, setLayaReady] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [marqueeStart, setMarqueeStart] = useState<{ wx: number; wy: number } | null>(null);
   const prevPageIdRef = useRef<string | null>(null);
   const prevElementsRef = useRef<Map<string, Element>>(new Map());
 
-  // ─── world state：pan/zoom 由 worldRoot 控制 ───
+  // ─── 固定工作区 + 整体页面画布状态 ───
+  const [workspaceSize, setWorkspaceSize] = useState({ width: 0, height: 0 });
   const [world, setWorldRaw] = useState({ zoom: 0.4, panX: 0, panY: 0 });
-  const setWorld = (w: { zoom: number; panX: number; panY: number }) => {
+  const worldRef = useRef(world);
+  const setWorld = useCallback((w: { zoom: number; panX: number; panY: number }) => {
     if (isNaN(w.zoom) || isNaN(w.panX) || isNaN(w.panY)) {
       console.warn('[forge] setWorld NaN detected:', w);
       console.trace('[forge] NaN callstack');
       const host = layaHostRef.current;
-      const fallback = host ? centerCanvas(host.clientWidth, host.clientHeight, 0.4) : { panX: 0, panY: 0 };
-      setWorldRaw({ zoom: 0.4, panX: fallback.panX, panY: fallback.panY });
+      const fallback = host
+        ? fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H)
+        : { zoom: 0.4, panX: 0, panY: 0 };
+      worldRef.current = fallback;
+      setWorldRaw(fallback);
       return;
     }
-    setWorldRaw(w);
-  };
-  const worldRef = useRef(world);
+    const host = layaHostRef.current;
+    const next = host && host.clientWidth > 0 && host.clientHeight > 0
+      ? constrainViewportToWorkspace(w, host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H)
+      : w;
+    worldRef.current = next;
+    setWorldRaw(next);
+  }, []);
   useLayoutEffect(() => { worldRef.current = world; }, [world]);
 
-  const currentPage = findSubPage(currentCourse, currentSubPageId);
+  const currentPage = useMemo(
+    () => findCanvasElementPage(currentCourse, currentSubPageId, currentInternalPageId),
+    [currentCourse, currentSubPageId, currentInternalPageId],
+  );
+
+  const spacePressedRef = useRef(false);
+  const panningRef = useRef(false);
+  const panStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const [spacePressed, setSpacePressed] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
 
   const showGridRef = useRef(false);
   const snap = (v: number) => showGridRef.current ? Math.round(v / 20) * 20 : Math.round(v);
-
-  const selectElementRef = useRef(selectElement);
-  const clearSelectionRef = useRef(clearSelection);
-  useEffect(() => { selectElementRef.current = selectElement; }, [selectElement]);
-  useEffect(() => { clearSelectionRef.current = clearSelection; }, [clearSelection]);
 
   const layaContainerRef = useRef<HTMLElement | null>(null);
 
@@ -145,11 +140,12 @@ export default function Canvas() {
       });
     }
 
-    const L = window.Laya as any;
+    const L = laya();
     L.stage.screenAdaptationEnabled = false;
 
     // Laya 通过 canvas CSS transform 实现 viewport 偏移渲染（如左侧栏宽度 156px），
-    // 导致 Laya 渲染和 DOM overlay 不对齐。用 Laya timer 每帧强制 canvas.style.transform = none。
+    // 导致 Laya 渲染和 DOM overlay 不对齐。用 Laya timer 每帧强制 canvas.style.transform = none，
+    // 并守护 worldRoot 变换，避免内部页面重建或预览返回后标尺与实际画布采用不同视口。
     // 注意：_canvasTransform.tx/ty 不重置！它们是 Laya 鼠标坐标转换所需的，
     // 清零会导致命中检测偏移。
     const resetCanvasRendering = () => {
@@ -157,6 +153,15 @@ export default function Canvas() {
       if (canvasEl && canvasEl.style.transform && canvasEl.style.transform !== 'none') {
         canvasEl.style.transform = 'none';
         canvasEl.style.transformOrigin = '0 0';
+      }
+      const expected = worldRef.current;
+      const actual = getWorldTransform();
+      if (
+        Math.abs(actual.panX - expected.panX) > 0.01
+        || Math.abs(actual.panY - expected.panY) > 0.01
+        || Math.abs(actual.zoom - expected.zoom) > 0.0001
+      ) {
+        setWorldTransform(expected.panX, expected.panY, expected.zoom);
       }
     };
     L.timer.frameLoop(1, null, resetCanvasRendering);
@@ -168,6 +173,7 @@ export default function Canvas() {
     L.stage.width = hostRect.width;
     L.stage.height = hostRect.height;
     L.stage.setScreenSize(hostRect.width * dpr, hostRect.height * dpr);
+    setWorkspaceSize({ width: hostRect.width, height: hostRect.height });
     resetCanvasRendering();
 
     const resizeStage = () => {
@@ -188,7 +194,11 @@ export default function Canvas() {
       if (canvas) {
         canvas.style.cssText = `position:absolute;top:0;left:0;width:${r.width}px;height:${r.height}px;margin:0;padding:0;border:0;transform:none;transform-origin:0 0;`;
       }
-      // 同步当前 world 变换到 worldRoot
+      setWorkspaceSize((previous) => previous.width === r.width && previous.height === r.height
+        ? previous
+        : { width: r.width, height: r.height });
+      // 工作区变化时只约束页面的可见范围，不改变当前缩放比例。
+      setWorld({ ...worldRef.current });
       setWorldTransform(worldRef.current.panX, worldRef.current.panY, worldRef.current.zoom);
     };
     resizeStageRef.current = resizeStage;
@@ -202,20 +212,13 @@ export default function Canvas() {
       resizeStage();
       // worldRoot + boundaryFrame
       initWorldRoot();
-      // 初始居中
-      const { panX, panY } = centerCanvas(host.clientWidth, host.clientHeight, 0.4);
-      setWorld({ zoom: 0.4, panX, panY });
-      setWorldTransform(panX, panY, 0.4);
-      initEditorInteraction({
-        onSelect:     (id) => selectElementRef.current(id, false),
-        onDeselect:   () => clearSelectionRef.current(),
-        onMarqueeStart: (wx, wy) => setMarqueeStart({ wx, wy }),
-        getStore:     () => useEditorStore,
-        getHostElement: () => layaHostRef.current,
-      });
+      // 初始状态让完整页面占据工作区约九成，并明确显示页面边界。
+      const initialViewport = fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H);
+      setWorld(initialViewport);
+      setWorldTransform(initialViewport.panX, initialViewport.panY, initialViewport.zoom);
       setLayaReady(true);
     });
-  }, []);
+  }, [setWorld]);
 
   useEffect(() => {
     const start = Date.now();
@@ -248,7 +251,7 @@ export default function Canvas() {
     }
     clearAllObjects();
     prevElementsRef.current = new Map();
-  }, [currentCourse?.id, layaReady]);
+  }, [currentCourse, layaReady]);
 
   // ─── 页面切换：全量重建 ───
   useEffect(() => {
@@ -260,10 +263,10 @@ export default function Canvas() {
       prevElementsRef.current = new Map();
       return;
     }
-    if (prevPageIdRef.current && prevPageIdRef.current !== currentSubPageId) {
+    if (prevPageIdRef.current && prevPageIdRef.current !== currentPage.id) {
       captureThumb(prevPageIdRef.current);
     }
-    prevPageIdRef.current = currentSubPageId;
+    prevPageIdRef.current = currentPage.id;
     clearAllObjects();
     prevElementsRef.current = new Map();
     const topLevel = currentPage.elements.filter(e => !e.parentId);
@@ -287,12 +290,12 @@ export default function Canvas() {
         if (cancelled) return;
         requestAnimationFrame(() => {
           if (cancelled) return;
-          captureThumb(currentSubPageId!);
+          captureThumb(currentPage.id);
         });
       });
     }, 500);
     return () => { cancelled = true; };
-  }, [currentSubPageId, layaReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentPage?.id, layaReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── 统一同步 effect：增删改 + z-order ───
   useEffect(() => {
@@ -341,7 +344,7 @@ export default function Canvas() {
       }
     }
 
-    // z-order 同步：boundaryFrame 在 index 0，元素从 index 1 开始
+    // z-order 同步：页面背景和边框位于 index 0，元素从 index 1 开始。
     const root = canvasRoot();
     if (root) {
       const topLevel = currentPage.elements.filter(e => !e.parentId);
@@ -425,7 +428,7 @@ export default function Canvas() {
     return () => {
       try {
         // Stop Laya frameLoop
-        const L = window.Laya as any;
+        const L = laya();
         if (L && frameLoopFnRef.current) {
           L.timer.clear(null, frameLoopFnRef.current);
         }
@@ -433,8 +436,6 @@ export default function Canvas() {
         // Disconnect ResizeObserver
         resizeObserverRef.current?.disconnect();
         resizeObserverRef.current = null;
-        // Remove editor interaction handler from Laya stage
-        cleanupEditorInteraction();
         // Clear all Laya objects
         clearAllObjects();
         // Move layaContainer off-screen and hide it
@@ -484,82 +485,47 @@ export default function Canvas() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedElementIds, deleteElement, currentPage, updateElement, saveHistory]);
 
-  // ─── 双击 NewTextArea 进入行内编辑 ───
-  useEffect(() => {
-    if (!layaReady) return;
-    const host = layaHostRef.current;
-    if (!host) return;
-    const onDblClick = (e: MouseEvent) => {
-      const state = useEditorStore.getState();
-      const page = findSubPage(state.currentCourse, state.currentSubPageId);
-      if (!page) return;
-      // client → world 坐标
-      const rect = host.getBoundingClientRect();
-      const { zoom, panX, panY } = worldRef.current;
-      const wx = (e.clientX - rect.left - panX) / zoom;
-      const wy = (e.clientY - rect.top - panY) / zoom;
-      for (let i = page.elements.length - 1; i >= 0; i--) {
-        const el = page.elements[i];
-        const abs = getAbsoluteWorldRect(el, page.elements);
-        if (wx >= abs.x && wx <= abs.x + abs.w && wy >= abs.y && wy <= abs.y + abs.h) {
-          if (el.type === 'NewTextArea' || el.type === 'Video') {
-            setEditingId(el.id);
-            return;
-          }
-        }
-      }
-    };
-    host.addEventListener('dblclick', onDblClick);
-    return () => host.removeEventListener('dblclick', onDblClick);
-  }, [layaReady]);
-
   const [showGrid, setShowGrid] = useState(false);
   const [showRuler, setShowRuler] = useState(true);
   const [dragHover, setDragHover] = useState(false);
   useEffect(() => { showGridRef.current = showGrid; }, [showGrid]);
 
-  // ─── 缩放/平移 ───
-  const zoomIn  = () => {
+  // ─── Axure 风格画布导航：空格拖拽、滚轮平移、修饰键缩放 ───
+  const getZoomAnchor = useCallback(() => {
     const host = layaHostRef.current;
-    const r = host?.getBoundingClientRect();
-    if (!r) return;
-    const { zoom, panX, panY } = worldRef.current;
-    const newZoom = Math.min(2, Math.round((zoom + 0.1) * 10) / 10);
-    // 以视口中心为锚点
-    const cx = r.width / 2, cy = r.height / 2;
-    const worldX = (cx - panX) / zoom, worldY = (cy - panY) / zoom;
-    setWorld({ zoom: newZoom, panX: cx - worldX * newZoom, panY: cy - worldY * newZoom });
-  };
-  const zoomOut = () => {
+    if (!host) return null;
+    return lastPointerRef.current ?? { x: host.clientWidth / 2, y: host.clientHeight / 2 };
+  }, []);
+
+  const zoomByStep = useCallback((direction: -1 | 1) => {
+    const anchor = getZoomAnchor();
+    if (!anchor) return;
+    const viewport = worldRef.current;
+    const nextZoom = Math.round((viewport.zoom + direction * CANVAS_ZOOM_BUTTON_STEP) * 100) / 100;
+    setWorld(zoomViewportAtPoint(viewport, nextZoom, anchor));
+  }, [getZoomAnchor, setWorld]);
+
+  const zoomIn = useCallback(() => zoomByStep(1), [zoomByStep]);
+  const zoomOut = useCallback(() => zoomByStep(-1), [zoomByStep]);
+
+  const handleWheel = useCallback((e: WheelEvent) => {
     const host = layaHostRef.current;
-    const r = host?.getBoundingClientRect();
-    if (!r) return;
-    const { zoom, panX, panY } = worldRef.current;
-    const newZoom = Math.max(0.1, Math.round((zoom - 0.1) * 10) / 10);
-    const cx = r.width / 2, cy = r.height / 2;
-    const worldX = (cx - panX) / zoom, worldY = (cy - panY) / zoom;
-    setWorld({ zoom: newZoom, panX: cx - worldX * newZoom, panY: cy - worldY * newZoom });
-  };
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    if (localX < 0 || localX > rect.width || localY < 0 || localY > rect.height) return;
+    e.preventDefault();
+    const anchor = { x: localX, y: localY };
+    lastPointerRef.current = anchor;
+    const viewport = worldRef.current;
+    const next = e.metaKey || e.ctrlKey
+      ? zoomViewportByWheel(viewport, e.deltaY, e.deltaMode, rect.height, anchor)
+      : panViewportByWheel(viewport, e.deltaX, e.deltaY, e.deltaMode, rect.width, rect.height, e.shiftKey);
+    setWorld(next);
+  }, [setWorld]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const panningRef = useRef(false);
-  const panStartRef = useRef({ mx: 0, my: 0, ox: 0, oy: 0 });
-
-  // ─── 滚轮缩放（以鼠标为锚点） ───
-  const handleWheel = useCallback((e: WheelEvent) => {
-    e.preventDefault();
-    const { zoom, panX, panY } = worldRef.current;
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    const newZoom = Math.min(2, Math.max(0.1, Math.round((zoom + delta) * 10) / 10));
-    if (newZoom === zoom) return;
-
-    const rect = layaHostRef.current!.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    // world 坐标不变 → 新 panX/panY
-    const worldX = (mx - panX) / zoom;
-    const worldY = (my - panY) / zoom;
-    setWorld({ zoom: newZoom, panX: mx - worldX * newZoom, panY: my - worldY * newZoom });
-  }, []);
 
   useEffect(() => {
     const el = canvasRef.current;
@@ -568,31 +534,97 @@ export default function Canvas() {
     return () => el.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  // ─── 中键拖动平移 ───
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const element = target as HTMLElement | null;
+      return element?.tagName === 'INPUT' || element?.tagName === 'TEXTAREA' || element?.isContentEditable;
+    };
+    const releaseNavigation = () => {
+      spacePressedRef.current = false;
+      panningRef.current = false;
+      setSpacePressed(false);
+      setIsPanning(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || isEditableTarget(event.target)) return;
+      event.preventDefault();
+      if (!spacePressedRef.current) {
+        spacePressedRef.current = true;
+        setSpacePressed(true);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code === 'Space') releaseNavigation();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', releaseNavigation);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', releaseNavigation);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      const host = layaHostRef.current;
+      if (host) {
+        const rect = host.getBoundingClientRect();
+        const localX = event.clientX - rect.left;
+        const localY = event.clientY - rect.top;
+        if (localX >= 0 && localX <= rect.width && localY >= 0 && localY <= rect.height) {
+          lastPointerRef.current = { x: localX, y: localY };
+        }
+      }
+      if (!panningRef.current) return;
+      setWorld({
+        ...worldRef.current,
+        panX: panStartRef.current.ox + event.clientX - panStartRef.current.mx,
+        panY: panStartRef.current.oy + event.clientY - panStartRef.current.my,
+      });
+    };
+    const onMouseUp = () => {
+      if (!panningRef.current) return;
+      panningRef.current = false;
+      setIsPanning(false);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [setWorld]);
+
+  useEffect(() => {
+    if (!isPanning) return;
+    const previous = document.body.style.cursor;
+    document.body.style.cursor = 'grabbing';
+    return () => { document.body.style.cursor = previous; };
+  }, [isPanning]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 1) return;
+    const shouldPan = e.button === 1 || (e.button === 0 && spacePressedRef.current);
+    if (!shouldPan) return;
+    const host = layaHostRef.current;
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const localX = e.clientX - rect.left;
+    const localY = e.clientY - rect.top;
+    if (localX < 0 || localX > rect.width || localY < 0 || localY > rect.height) return;
     e.preventDefault();
+    e.stopPropagation();
     panningRef.current = true;
+    setIsPanning(true);
     panStartRef.current = { mx: e.clientX, my: e.clientY, ox: worldRef.current.panX, oy: worldRef.current.panY };
   }, []);
-
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!panningRef.current) return;
-    setWorld({
-      ...worldRef.current,
-      panX: panStartRef.current.ox + e.clientX - panStartRef.current.mx,
-      panY: panStartRef.current.oy + e.clientY - panStartRef.current.my,
-    });
-  }, []);
-
-  const handleMouseUp = useCallback(() => { panningRef.current = false; }, []);
 
   const handleFitZoom = useCallback(() => {
     const host = layaHostRef.current;
     if (!host) return;
-    const { panX, panY } = centerCanvas(host.clientWidth, host.clientHeight, 0.4);
-    setWorld({ zoom: 0.4, panX, panY });
-  }, []);
+    setWorld(fitCanvasViewport(host.clientWidth, host.clientHeight, CANVAS_W, CANVAS_H));
+  }, [setWorld]);
 
   // ─── 拖拽图片到画布 ───
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -765,37 +797,72 @@ export default function Canvas() {
         showToast(t('uploadFailed'), 'error');
       }
     }
-  }, [currentCourse, currentSubPageId]);
+  }, [currentCourse, currentSubPageId, currentPage?.frozen, selectElement, t]);
 
   // 行内编辑元素
   const editingElement = editingId
     ? (currentPage?.elements.find((e) => e.id === editingId && (e.type === 'NewTextArea' || e.type === 'Video')) ?? null)
     : null;
 
+  const pageScreenWidth = CANVAS_W * world.zoom;
+  const pageScreenHeight = CANVAS_H * world.zoom;
+  const pageRight = world.panX + pageScreenWidth;
+  const pageBottom = world.panY + pageScreenHeight;
+  const visiblePageLeft = Math.max(0, Math.min(workspaceSize.width, world.panX));
+  const visiblePageTop = Math.max(0, Math.min(workspaceSize.height, world.panY));
+  const visiblePageRight = Math.max(0, Math.min(workspaceSize.width, pageRight));
+  const visiblePageBottom = Math.max(0, Math.min(workspaceSize.height, pageBottom));
   return (
-    <div ref={canvasRef} className="flex-1 flex flex-col overflow-hidden bg-slate-800 relative"
-        onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+    <div ref={canvasRef} className={`flex-1 flex flex-col overflow-hidden bg-slate-800 relative ${isPanning ? 'cursor-grabbing' : spacePressed ? 'cursor-grab' : ''}`}
+        onMouseDownCapture={handleMouseDown}
         onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
         onContextMenu={(e) => e.preventDefault()}>
       <div className="flex-1 overflow-hidden relative">
+        {spacePressed && (
+          <div
+            className={`absolute inset-0 z-50 ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
+            aria-hidden="true"
+          />
+        )}
         {/* 拖拽图片高亮 */}
         {dragHover && (
           <div className="absolute inset-0 border-2 border-blue-400 bg-blue-400/10 rounded pointer-events-none z-20" />
         )}
         {/* layaHost 铺满视口 */}
         <div ref={layaHostRef} data-laya-host className="absolute inset-0" />
+        {/* 页面画布整体缩放平移；工作区遮罩同时明确页面边界并裁掉越界内容。 */}
+        {workspaceSize.width > 0 && (
+          <>
+            <div className="absolute left-0 right-0 top-0 bg-slate-800 pointer-events-none" style={{ height: visiblePageTop, zIndex: 1 }} />
+            <div className="absolute left-0 right-0 bottom-0 bg-slate-800 pointer-events-none" style={{ top: visiblePageBottom, zIndex: 1 }} />
+            <div className="absolute left-0 top-0 bottom-0 bg-slate-800 pointer-events-none" style={{ width: visiblePageLeft, zIndex: 1 }} />
+            <div className="absolute right-0 top-0 bottom-0 bg-slate-800 pointer-events-none" style={{ left: visiblePageRight, zIndex: 1 }} />
+            <div className="absolute pointer-events-none border border-slate-400/70 shadow-[0_8px_24px_rgba(0,0,0,0.28)]" style={{
+              left: world.panX,
+              top: world.panY,
+              width: pageScreenWidth,
+              height: pageScreenHeight,
+              zIndex: 3,
+            }} />
+          </>
+        )}
+        {currentPage?.kind === 'dialog' && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 py-1 rounded-full bg-slate-950/80 border border-violet-400/40 text-[11px] text-violet-200">
+            弹窗编辑 · 主界面底板只读
+          </div>
+        )}
         {layaReady && (
-          <CanvasOverlay
-            layaHostRef={layaHostRef}
-            world={world}
-            selectedIds={selectedElementIds}
-            currentPage={currentPage}
-            editingElement={editingElement}
-            snap={snap}
-            marqueeStart={marqueeStart}
-            onMarqueeComplete={(ids) => { selectElements(ids); setMarqueeStart(null); }}
-            setEditingId={setEditingId}
-          />
+          <div className="absolute inset-0" style={{ zIndex: 5 }}>
+            <CanvasOverlay
+              layaHostRef={layaHostRef}
+              world={world}
+              selectedIds={selectedElementIds}
+              currentPage={currentPage}
+              editingElement={editingElement}
+              snap={snap}
+              setEditingId={setEditingId}
+            />
+          </div>
         )}
         {!layaReady && (
           <div className="absolute inset-0 flex items-center justify-center text-gray-400 z-10">
@@ -803,7 +870,13 @@ export default function Canvas() {
           </div>
         )}
         {layaReady && currentPage && currentPage.elements.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 2 }}>
+          <div className="absolute flex items-center justify-center pointer-events-none" style={{
+            left: world.panX,
+            top: world.panY,
+            width: pageScreenWidth,
+            height: pageScreenHeight,
+            zIndex: 2,
+          }}>
             <div className="text-center text-slate-400/40">
               <div className="text-lg mb-2">{t('addComponentsHint')}</div>
               <div className="text-xs space-y-1">
@@ -814,25 +887,31 @@ export default function Canvas() {
           </div>
         )}
         {showGrid && (
-          <div className="absolute pointer-events-none" style={{
-            left: world.panX, top: world.panY,
-            width: CANVAS_W * world.zoom, height: CANVAS_H * world.zoom,
-            backgroundImage: `
-              linear-gradient(rgba(59,130,246,0.06) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(59,130,246,0.06) 1px, transparent 1px),
-              linear-gradient(rgba(59,130,246,0.12) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(59,130,246,0.12) 1px, transparent 1px)
-            `,
-            backgroundSize: `${20 * world.zoom}px ${20 * world.zoom}px, ${20 * world.zoom}px ${20 * world.zoom}px, ${100 * world.zoom}px ${100 * world.zoom}px, ${100 * world.zoom}px ${100 * world.zoom}px`,
+          <div className="absolute pointer-events-none overflow-hidden" style={{
+            left: world.panX,
+            top: world.panY,
+            width: pageScreenWidth,
+            height: pageScreenHeight,
             zIndex: 2,
-          }} />
+          }}>
+            <div className="absolute" style={{
+              inset: 0,
+              backgroundImage: `
+                linear-gradient(rgba(59,130,246,0.06) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,0.06) 1px, transparent 1px),
+                linear-gradient(rgba(59,130,246,0.12) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59,130,246,0.12) 1px, transparent 1px)
+              `,
+              backgroundSize: `${20 * world.zoom}px ${20 * world.zoom}px, ${20 * world.zoom}px ${20 * world.zoom}px, ${100 * world.zoom}px ${100 * world.zoom}px, ${100 * world.zoom}px ${100 * world.zoom}px`,
+            }} />
+          </div>
         )}
         {/* 标尺 */}
         {showRuler && (
           <>
-            <div className="absolute pointer-events-none bg-slate-800" style={{ left: world.panX - RULER_PX, top: world.panY - RULER_PX, width: RULER_PX, height: RULER_PX, zIndex: 10 }} />
-            <CanvasRuler orientation="horizontal" length={CANVAS_W} zoom={world.zoom} offsetX={world.panX} offsetY={world.panY} rulerWidth={RULER_PX} />
-            <CanvasRuler orientation="vertical" length={CANVAS_H} zoom={world.zoom} offsetX={world.panX} offsetY={world.panY} rulerWidth={RULER_PX} />
+            <div className="absolute pointer-events-none bg-slate-800 border-r border-b border-slate-700" style={{ left: 0, top: 0, width: RULER_PX, height: RULER_PX, zIndex: 10 }} />
+            <CanvasRuler orientation="horizontal" length={CANVAS_W} zoom={world.zoom} offsetX={RULER_PX} offsetY={RULER_PX} viewportLength={Math.max(0, workspaceSize.width - RULER_PX)} contentOffset={world.panX - RULER_PX} rulerWidth={RULER_PX} />
+            <CanvasRuler orientation="vertical" length={CANVAS_H} zoom={world.zoom} offsetX={RULER_PX} offsetY={RULER_PX} viewportLength={Math.max(0, workspaceSize.height - RULER_PX)} contentOffset={world.panY - RULER_PX} rulerWidth={RULER_PX} />
           </>
         )}
       </div>
@@ -840,7 +919,7 @@ export default function Canvas() {
       <div className="h-8 bg-slate-900 border-t border-slate-700 flex items-center justify-center gap-3 px-4 shrink-0">
         <button onClick={handleFitZoom} className="text-xs text-slate-400 hover:text-white px-2 py-0.5 rounded hover:bg-slate-700">{t('fit')}</button>
         <button onClick={zoomOut} className="text-slate-400 hover:text-white w-5 h-5 flex items-center justify-center rounded hover:bg-slate-700 text-sm">−</button>
-        <span className="text-xs text-slate-300 w-12 text-center">{Math.round(world.zoom * 100)}%</span>
+        <span className="text-xs text-slate-300 w-12 text-center" title="⌘/Ctrl + 滚轮缩放 · 空格 + 左键拖拽">{Math.round(world.zoom * 100)}%</span>
         <button onClick={zoomIn} className="text-slate-400 hover:text-white w-5 h-5 flex items-center justify-center rounded hover:bg-slate-700 text-sm">+</button>
         <span className="text-xs text-slate-600 ml-2">1920 × 1080</span>
         <button onClick={() => setShowGrid(!showGrid)} className={`ml-2 text-xs px-2 py-0.5 rounded ${showGrid ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>

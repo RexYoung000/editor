@@ -1,4 +1,4 @@
-import type { Course, SubPage, Element } from '../types';
+import type { Action, Course, SubPage, Element } from '../types';
 import { elementMeta, type ExportChild } from '../elements/elementMeta';
 import { getKeyboardPreset } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath, lookupBuiltinBySrcPath } from '../elements/builtinAssets';
@@ -6,6 +6,7 @@ import { getCourseDirPath } from './electronFs';
 import JSZip from 'jszip';
 import { getApiBaseUrl } from './apiConfig';
 import { collectImageSizes, isLargeImage } from './imageSize';
+import { buildInternalPageActionBindings, buildInternalPageRuntime, internalPageActionBody } from './internalPageCompiler';
 
 // ─── 资源路径映射（预习工程，使用 game_preview 前缀）───
 
@@ -164,6 +165,7 @@ function collectElementsNeedingVar(page: SubPage): Set<string> {
   const elements = page.elements;
 
   for (const el of elements) {
+    if (typeof el.props?.__internalPageRootVar === 'string') needsVar.add(el.id);
     if (el.actions && el.actions.length > 0) {
       needsVar.add(el.id);
       for (const action of el.actions) {
@@ -309,7 +311,7 @@ function buildSceneNode(
     }
   }
   // SelectableObj：将编辑器专用皮肤属性转换为子 Image 节点
-  let selectableObjChildren: Record<string, unknown>[] = [];
+  const selectableObjChildren: Record<string, unknown>[] = [];
   if (element.layaType === 'SelectableObj') {
     const fgSkin = rewritten._foregroundSkin;
     if (typeof fgSkin === 'string' && fgSkin !== '') {
@@ -357,7 +359,7 @@ function buildSceneNode(
 
   // DragObj/DropObj：若有 skin，生成 Image 子节点（编辑器不创建子元素，发布时才生成）
   // 子 Image 用 anchor 0.5 + 父中心位置实现居中（与编辑器视觉一致）
-  let dragSkinChildren: Record<string, unknown>[] = [];
+  const dragSkinChildren: Record<string, unknown>[] = [];
   if ((element.type === 'DragObj' || element.type === 'DropObj') && props.skin) {
     const skinVal = props.skin as string;
     delete props.skin;
@@ -479,7 +481,7 @@ interface SceneFlags {
 }
 
 function detectSceneFlags(page: SubPage): SceneFlags {
-  let hasBtnConfirm = false;
+  const hasBtnConfirm = false;
   let hasKlInputBox = false;
   for (const el of page.elements) {
     const meta = elementMeta[el.type];
@@ -508,11 +510,13 @@ function buildTopLevelSceneChildren(
       groups.push({ wrapper: null, elements: [el] });
       continue;
     }
-    const idx = wrapperIndex.get(wrapper.type);
+    const pageScope = typeof el.props.__internalPageId === 'string' ? el.props.__internalPageId : '';
+    const wrapperKey = `${pageScope}:${wrapper.type}`;
+    const idx = wrapperIndex.get(wrapperKey);
     if (idx !== undefined) {
       groups[idx].elements.push(el);
     } else {
-      wrapperIndex.set(wrapper.type, groups.length);
+      wrapperIndex.set(wrapperKey, groups.length);
       groups.push({ wrapper, elements: [el] });
     }
   }
@@ -611,11 +615,27 @@ function buildPreviewScene(page: SubPage, sceneName: string, resourceMap: Map<st
 
 // ─── 生成 scene 对应的 ts 文件 ───
 
-function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: SubPage, varAssignment: Map<string, string>): string {
+function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: SubPage, varAssignment: Map<string, string>, resourceMap: Map<string, string>): string {
   const getVar = (el: Element): string => {
     return varAssignment.get(el.id) || (el.name || el.id).replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
   };
   let initCode = '';
+  const buildActionBody = (action: Action, elementRef: string, currentPage: SubPage, source?: Element): string => {
+    const pageBody = internalPageActionBody(action);
+    if (pageBody) return pageBody;
+    const targetElement = action.targetId ? currentPage.elements.find((item) => item.id === action.targetId) : source;
+    const targetRef = targetElement && action.targetId ? `this.${getVar(targetElement)}` : elementRef;
+    if (action.actionType === 'toggleVisible') return `var t = ${targetRef}; if (t) t.visible = !t.visible;`;
+    if (action.actionType === 'setVisible') return `var t = ${targetRef}; if (t) t.visible = ${action.value === false ? 'false' : 'true'};`;
+    if (action.actionType === 'setProperty' && action.property) return `var t = ${targetRef}; if (t) t.${action.property} = ${JSON.stringify(action.value)};`;
+    if (action.actionType === 'playSound') return `this.playSound(${JSON.stringify(resourceMap.get(String(action.value)) ?? action.value)});`;
+    if (action.actionType === 'playRightSound') return 'this.playSound("game_preview/sound/right.mp3");';
+    if (action.actionType === 'playWrongSound') return 'this.playSound("game_preview/sound/wrong.mp3");';
+    if (action.actionType === 'animate') return `var t = ${targetRef}; if (t && t.play) t.play(${JSON.stringify(action.value ?? 'shan')});`;
+    return '';
+  };
+  const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   // onClickInitConfirm / onClickInitConfirmWithLock 事件：在 initView 注入 GameUtils.initConfirm
   for (const el of page.elements) {
     if (!el.actions?.length) continue;
@@ -629,6 +649,7 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
       initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
     }
   }
+
   // DragObj dropSkin：有放置位皮肤时，生成 DragViewBox 的 EVENT_SUCCESS/EVENT_FAILD 监听
   const dragObjsWithDropSkin = page.elements.filter(e => e.type === 'DragObj' && (e.props as Record<string, unknown>)?.dropSkin);
   if (dragObjsWithDropSkin.length > 0) {
@@ -794,6 +815,9 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     initCode += `        GameUtils.initDraw(this, this.${drawVar}, this.${clearVar}, this.${brushVar});\n`;
   }
 
+  // 页面首次显示动作最后执行，确保输入、拖拽、翻页等组件已完成初始化。
+  initCode += internalRuntime.initCode;
+
   return `import { ui } from "../../ui/layaMaxUI";
 
 import Event = Laya.Event;
@@ -812,7 +836,7 @@ export default class ${sceneName} extends ui.game_preview.${sceneName}UI {
 
 ${initCode}        //add script
     }
-    //add function
+${internalRuntime.methodsCode}    //add function
 }`;
 }
 
@@ -1108,7 +1132,7 @@ export async function exportPreviewProject(course: Course): Promise<void> {
       `${projectRoot}/laya/pages/game_preview/${name}.scene`,
       JSON.stringify(json, null, 2),
     );
-    const tsContent = generatePreviewSceneTs(name, flags, page, varAssignment);
+    const tsContent = generatePreviewSceneTs(name, flags, page, varAssignment, resourceMap);
     await eApi.writeTextFile(
       `${projectRoot}/src/view/game_preview/${name}.ts`,
       tsContent,

@@ -10,6 +10,16 @@ export interface Action {
   groupId?: string;              // ActionEditor: 同一 event+target 共享多个动作时分组用
   branchId?: string;             // 子事件分组：同 branchId 的 actions 同属一个子事件块
   branchCondition?: 'right' | 'wrong' | 'null'; // 子事件的判定条件（全对/不全对/还没操作）
+  /** 内部页面动作目标。与元素 targetId 分开，避免页面和元素 ID 混用。 */
+  pageTargetId?: string;
+  /** 删除或移动目标后保留原名称，用于断链提示。 */
+  pageTargetNameSnapshot?: string;
+  /** 关闭弹窗后的单一后续页面动作，不额外占用动作序列位置。 */
+  afterClose?: {
+    type: 'navigate' | 'openDialog';
+    pageTargetId: string;
+    pageTargetNameSnapshot?: string;
+  };
 }
 
 export interface Element {
@@ -44,6 +54,30 @@ export interface SubPage {
   elements: Element[];
   /** frozen = 不允许添加新组件 */
   frozen?: boolean;
+  /** 仅新“内部页面关卡”模板写入；缺省表示历史单页小关卡。 */
+  editorModel?: 'internal-pages';
+  templateId?: 'internal-pages-v1';
+  schemaVersion?: 1;
+  /** 主界面继续使用 elements；这里只保存内容页与弹窗。 */
+  internalPages?: InternalPage[];
+}
+
+export type InternalPageKind = 'content' | 'dialog';
+
+export interface DialogSettings {
+  maskColor: string;
+  maskOpacity: number;
+  closeOnMask: boolean;
+}
+
+export interface InternalPage {
+  id: string;
+  name: string;
+  kind: InternalPageKind;
+  elements: Element[];
+  dialogSettings?: DialogSettings;
+  /** 内容页允许把“无入口”降级为暂不配置。 */
+  noEntryDeferred?: boolean;
 }
 
 export type Page = SubPage;
@@ -66,4 +100,6 @@ export interface Course {
   normalShrinked?: boolean;    // 正课区域折叠状态
   presetThumbnails?: Record<string, string>;
   feedback?: 'spirit' | 'newLD';  // 通用反馈动画，缺省 'spirit'（豌豆精灵）
+  requiredFeatures?: string[];
+  minimumEditorVersion?: string;
 }

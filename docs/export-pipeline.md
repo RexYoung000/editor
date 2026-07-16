@@ -13,6 +13,8 @@ forge 编辑器的导出流程由 Toolbar 上两个按钮触发，**前段共用
 
 两条流程都先跑**前置检查（资源就绪检查）**，再跑导出共用部分（`writeBackToLocalFile` 写回课件 JSON → `cleanupUnreferencedImages` 清未引用图 → 实际导出）。
 
+内部页面课件在资源检查之后增加结构校验：目标不存在、目标类型不兼容或弹窗没有关闭出口时阻止预览与发布；无入口内容页和无打开入口弹窗只提示，不阻断。
+
 ### 1.1 发布前置检查（资源就绪检查）
 
 按钮点下后跑 [checkResourceReady.ts](../src/utils/checkResourceReady.ts) 的 `findMissingResourceElements`，扫所有 Stage（含 previewStages），收集以下三类未上传资源的元素：
@@ -145,6 +147,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 [exportProject.ts:619-635](../src/utils/exportProject.ts#L619-L635)。包一层 `KlView` 根节点：`width=1920, height=1080, sceneColor='#000000', runtime='view/<viewDir>/<sceneName>.ts'`。
 
+内部页面小关卡仍只生成一个场景：主界面、内容页和弹窗分别编译为持久容器。内容页互斥显示；弹窗显示时以主界面为只读底板。切换仅改变容器显隐，不重新创建已进入页面，因此同一轮运行内保留输入、选择、拖拽和显隐状态。隐藏页面的加载动作延迟到首次显示时执行一次。
+
 ### 4.9 `.ts` 生成
 
 [exportProject.ts:639-853](../src/utils/exportProject.ts#L639-L853)。`generateSceneTs(sceneName, flags, page, resourceMap, uiNamespace='game_lt')` 产出每个场景对应的 ts 文件，模板继承 `ui.<viewDir>.<sceneName>UI`，在 `initView(byReset)` 内拼装：
@@ -236,6 +240,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
    - 也有 `onClickSound → btn_click.wav` / `playRightSound → right.mp3` / `playWrongSound → wrong.mp3` 的条件加入
 7. **不做 SVN/WebSocket**：发布尾段统一在 `exportProject` 中处理
 8. **模板 zip**：从 `${serverUrl}/builtin/layaProjectModel/Game1_PREVIEW.zip` 单独拉
+
+内部页面编译、页面动作生成、关系校验和页面资源遍历由正式工程与预习工程共享，不能再各自维护一份规则。正课、作业、专题测评和预习区均支持 `internal-pages-v1`；复习课和视频关卡继续走原流程。
 
 ---
 

@@ -15,6 +15,7 @@ import { useI18n } from '../i18n';
 import { findMissingResourceElements, type ResourceMissingItem } from '../utils/checkResourceReady';
 import { ResourceMissingDialog } from './ResourceMissingDialog';
 import { isFlatLesson } from '../utils/courseKind';
+import { collectInternalPageIssues } from '../utils/internalPages';
 
 export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack?: () => void }) {
   const { language, setLanguage, t } = useI18n();
@@ -141,10 +142,25 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     return true;
   };
 
+  const assertInternalPagesReady = (mode: 'preview' | 'publish'): void => {
+    if (!currentCourse) return;
+    const issues = collectInternalPageIssues(currentCourse);
+    const blocking = issues.filter((issue) => issue.severity === 'blocking');
+    if (blocking.length > 0 && mode === 'publish') {
+      const details = blocking.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+      const more = blocking.length > 8 ? `\n另有 ${blocking.length - 8} 项未显示` : '';
+      throw new Error(`内部页面关系尚未完成，不能发布：\n\n${details}${more}`);
+    }
+    if (blocking.length > 0) showToast(`内部页面有 ${blocking.length} 项阻塞发布的问题；本次仅预览，仍可继续检查`, 'warning');
+    const warnings = issues.filter((issue) => issue.severity === 'warning' && issue.code !== 'capacity');
+    if (warnings.length > 0) showToast(`内部页面有 ${warnings.length} 项非阻塞提醒，可在专注工作区查看`, 'info');
+  };
+
   // 共享流程：导出工程（不提交 SVN）→ 编译 → 打 zip → 上传 → 打开预览
   // previewMode: false=正课, true=预习关卡
   const runCompileBuildAndOpen = async (previewMode: boolean) => {
     if (!currentCourse) return;
+    assertInternalPagesReady('preview');
     await writeBackToLocalFile(currentCourse.id, currentCourse);
     await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
     await exportProject(currentCourse, { skipSvn: true });
@@ -181,6 +197,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     if (!currentCourse || busy) return;
     setBusy(true);
     try {
+      assertInternalPagesReady('publish');
       await writeBackToLocalFile(currentCourse.id, currentCourse);
       await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
       const result = await exportProject(currentCourse);

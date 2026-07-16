@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { Element, SubPage, Stage, Course } from '../types';
+import type { Element, SubPage, Stage, Course, InternalPage, InternalPageKind, DialogSettings } from '../types';
 import {
   type CustomTemplate,
   type ImportResult,
@@ -18,10 +18,35 @@ import { getCourseDirPath } from '../utils/electronFs';
 import { PRESET_TEMPLATES } from '../presets';
 import { getUniqueElementName, normalizeElementNames, createDefaultElement, elementMeta, rebuildSubPageCounters, getNextNumberedName, getNextItemNameForCenterMatch } from '../elements/elementMeta';
 import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
+import { getElementParentContainment, getFitContainerToChildrenUpdates } from '../utils/canvasGeometry';
+import { isContainerElementType } from '../utils/elementContainers';
+import {
+  cloneInternalPageWithinSubPage,
+  cloneSubPageWithNewIds,
+  createInternalPagesSubPage,
+  findActiveElementPage,
+  getElementPage,
+  isInternalPagesSubPage,
+  INTERNAL_PAGES_MIN_VERSION,
+  INTERNAL_PAGES_TEMPLATE_ID,
+  resolveMovedPageName,
+} from '../utils/internalPages';
 
 export type { Element, SubPage, Stage, Course };
 // Backwards alias: many call sites still import `Page`
 export type { SubPage as Page } from '../types';
+
+export interface ElementPasteResult {
+  allIds: string[];
+  selectedIds: string[];
+  idMap: Record<string, string>;
+  elements: Element[];
+}
+
+export interface ContainerGeometryActionResult {
+  ok: boolean;
+  error?: string;
+}
 
 async function loadImageSize(skin: string): Promise<{ w: number; h: number } | null> {
   return new Promise((resolve) => {
@@ -37,6 +62,8 @@ interface EditorState {
   currentCourse: Course | null;
   currentStageId: string | null;
   currentSubPageId: string | null;
+  currentInternalPageId: string | null;
+  focusSubPageId: string | null;
   selectedElementIds: string[];
   selectedStageTarget?: 'preview' | 'normal';
   clipboard: Element[];
@@ -50,6 +77,17 @@ interface EditorState {
   // Actions
   setCurrentCourse: (course: Course) => void;
   setCurrentSubPage: (stageId: string, subPageId: string) => void;
+  enterFocusWorkspace: (stageId: string, subPageId: string) => void;
+  exitFocusWorkspace: () => void;
+  setCurrentInternalPage: (pageId: string) => void;
+  addInternalPage: (kind: InternalPageKind, name: string) => void;
+  renameInternalPage: (pageId: string, name: string) => boolean;
+  duplicateInternalPage: (pageId: string) => void;
+  deleteInternalPage: (pageId: string) => void;
+  reorderInternalPages: (kind: InternalPageKind, fromIndex: number, toIndex: number) => void;
+  moveInternalPage: (pageId: string, targetSubPageId: string, targetIndex: number) => { ok: boolean; error?: string };
+  updateDialogSettings: (pageId: string, updates: Partial<DialogSettings>) => void;
+  setNoEntryDeferred: (pageId: string, deferred: boolean) => void;
   toggleStageShrink: (stageId: string) => void;
   setPageThumbnail: (subPageId: string, dataUrl: string) => void;
 
@@ -85,6 +123,8 @@ interface EditorState {
 
   addElement: (element: Element) => void;
   updateElement: (id: string, updates: Partial<Element>) => void;
+  moveElementIntoParent: (id: string) => ContainerGeometryActionResult;
+  fitContainerToChildren: (id: string) => ContainerGeometryActionResult;
   deleteElement: (id: string) => void;
   reorderElement: (id: string, newIndex: number) => void;
   setElementParent: (id: string, newParentId: string | undefined) => void;
@@ -93,8 +133,11 @@ interface EditorState {
   selectAll: () => void;
   clearSelection: () => void;
   copyElements: () => void;
-  pasteElements: () => void;
-  duplicateElements: () => void;
+  pasteElements: (saveToHistory?: boolean) => ElementPasteResult | null;
+  duplicateElements: () => ElementPasteResult | null;
+  duplicateElementsForDrag: (sourceIds: string[]) => ElementPasteResult | null;
+  updateElementsWithoutHistory: (updates: Array<Pick<Element, 'id' | 'x' | 'y' | 'width' | 'height' | 'rotation'>>) => void;
+  removeElementsWithoutHistory: (ids: string[]) => void;
   alignElements: (direction: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => void;
   groupElements: () => void;
   ungroupElements: () => void;
@@ -144,8 +187,22 @@ import { findSubPage } from '../utils/findSubPage';
 export { findSubPage };
 
 /** 在 state 上根据当前 currentSubPageId 找到 SubPage（mutable 引用），找不到返回 null */
-function findCurrentSubPage(state: EditorState): SubPage | null {
-  return findSubPage(state.currentCourse, state.currentSubPageId);
+function findCurrentSubPage(state: EditorState): SubPage | InternalPage | null {
+  const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+  if (!subPage) return null;
+  return getElementPage(subPage, state.currentInternalPageId).internalPage ?? subPage;
+}
+
+function isLockedByHierarchy(element: Element, elements: Element[]): boolean {
+  const elementMap = new Map(elements.map((item) => [item.id, item]));
+  const visited = new Set<string>();
+  let current: Element | undefined = element;
+  while (current && !visited.has(current.id)) {
+    if (current.locked) return true;
+    visited.add(current.id);
+    current = current.parentId ? elementMap.get(current.parentId) : undefined;
+  }
+  return false;
 }
 
 function findStageOfSubPage(course: Course | null, subPageId: string | null): Stage | null {
@@ -232,11 +289,35 @@ function renumberPreviewAll(course: Course): void {
   });
 }
 
+function subPageFromPreset(preset: (typeof PRESET_TEMPLATES)[number], name: string): SubPage {
+  if (preset.editorModel === 'internal-pages') {
+    const subPage = createInternalPagesSubPage(genId('subpage'), name);
+    subPage.elements = cloneElementsWithNewIds(preset.elements, 'el');
+    return subPage;
+  }
+  return {
+    id: genId('subpage'),
+    name,
+    elements: cloneElementsWithNewIds(preset.elements, 'el'),
+    frozen: preset.frozen ?? false,
+  };
+}
+
+function markInternalPagesFeature(course: Course, subPage: SubPage): void {
+  if (!isInternalPagesSubPage(subPage)) return;
+  const features = new Set(course.requiredFeatures ?? []);
+  features.add(INTERNAL_PAGES_TEMPLATE_ID);
+  course.requiredFeatures = [...features];
+  course.minimumEditorVersion = INTERNAL_PAGES_MIN_VERSION;
+}
+
 export const useEditorStore = create<EditorState>()(
   immer((set, get) => ({
     currentCourse: null,
     currentStageId: null,
     currentSubPageId: null,
+    currentInternalPageId: null,
+    focusSubPageId: null,
     selectedElementIds: [],
     selectedStageTarget: undefined,
     clipboard: [],
@@ -289,18 +370,23 @@ export const useEditorStore = create<EditorState>()(
     setCurrentCourse: (course) =>
       set((state) => {
         ensureCourseShape(course);
+        const normalizeSubPage = (sp: SubPage): SubPage => ({
+          ...sp,
+          elements: normalizeElementNames(sp.elements),
+          internalPages: sp.internalPages?.map((page) => ({ ...page, elements: normalizeElementNames(page.elements) })),
+        });
         course.stages = course.stages.map((stage) => ({
           ...stage,
-          subPages: stage.subPages.map((sp) => ({
-            ...sp,
-            elements: normalizeElementNames(sp.elements),
-          })),
+          subPages: stage.subPages.map(normalizeSubPage),
         }));
+        course.previewStages = course.previewStages?.map((stage) => ({ ...stage, subPages: stage.subPages.map(normalizeSubPage) }));
         state.currentCourse = course;
         const firstStage = course.stages[0];
         const firstSub = firstStage?.subPages[0];
         state.currentStageId = firstStage?.id ?? null;
         state.currentSubPageId = firstSub?.id ?? null;
+        state.currentInternalPageId = isInternalPagesSubPage(firstSub) ? firstSub.id : null;
+        state.focusSubPageId = null;
         state.history = [JSON.parse(JSON.stringify(course))];
         state.historyIndex = 0;
         // 重建所有 SubPage 的局部类型计数器，让新建组件按局部序号命名
@@ -308,6 +394,7 @@ export const useEditorStore = create<EditorState>()(
           ...course.stages.flatMap(s => s.subPages),
           ...(course.previewStages?.flatMap(s => s.subPages) ?? []),
         ];
+        allSubPages.forEach((subPage) => markInternalPagesFeature(course, subPage));
         rebuildSubPageCounters(allSubPages);
       }),
 
@@ -319,12 +406,202 @@ export const useEditorStore = create<EditorState>()(
         const stage = state.currentCourse?.stages.find(s => s.id === stageId)
           ?? (state.currentCourse?.previewStages ?? []).find(s => s.id === stageId);
         const page = stage?.subPages.find(sp => sp.id === subPageId);
+        state.currentInternalPageId = isInternalPagesSubPage(page) ? page.id : null;
+        if (state.focusSubPageId && state.focusSubPageId !== subPageId) state.focusSubPageId = null;
         if (page?.frozen) {
           state.selectedElementIds = page.elements.filter(e => e.locked).map(e => e.id);
         } else {
           state.selectedElementIds = [];
         }
         state.selectedStageTarget = state.currentCourse?.previewStages?.some(s => s.id === stageId) ? 'preview' : 'normal';
+      }),
+
+    enterFocusWorkspace: (stageId, subPageId) =>
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, subPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        state.currentStageId = stageId;
+        state.currentSubPageId = subPageId;
+        state.currentInternalPageId = subPage.id;
+        state.focusSubPageId = subPage.id;
+        state.selectedElementIds = [];
+        state.selectedStageTarget = state.currentCourse?.previewStages?.some((stage) => stage.id === stageId) ? 'preview' : 'normal';
+      }),
+
+    exitFocusWorkspace: () =>
+      set((state) => {
+        state.focusSubPageId = null;
+        state.currentInternalPageId = null;
+        state.selectedElementIds = [];
+      }),
+
+    setCurrentInternalPage: (pageId) =>
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const page = getElementPage(subPage, pageId);
+        state.currentInternalPageId = page.id;
+        state.selectedElementIds = [];
+      }),
+
+    addInternalPage: (kind, name) => {
+      let changed = false;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const trimmed = name.trim();
+        if (!trimmed || subPage.internalPages.some((page) => page.name === trimmed)) return;
+        const page: InternalPage = {
+          id: genId('internal-page'),
+          name: trimmed,
+          kind,
+          elements: [],
+          ...(kind === 'dialog'
+            ? { dialogSettings: { maskColor: '#000000', maskOpacity: 0.55, closeOnMask: false } }
+            : {}),
+        };
+        if (kind === 'dialog') {
+          const closeButton = createDefaultElement('ScaleButton', subPage.id);
+          closeButton.id = genId('el');
+          closeButton.name = 'btn_close';
+          closeButton.x = 1540;
+          closeButton.y = 180;
+          closeButton.props = { ...closeButton.props, label: '关闭' };
+          closeButton.actions = [{ id: genId('action'), event: 'onClick', actionType: 'closeInternalDialog' }];
+          page.elements.push(closeButton);
+        }
+        subPage.internalPages.push(page);
+        state.currentInternalPageId = page.id;
+        state.selectedElementIds = [];
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+    },
+
+    renameInternalPage: (pageId, name) => {
+      let renamed = false;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const trimmed = name.trim();
+        const page = subPage.internalPages.find((item) => item.id === pageId);
+        if (!page || !trimmed || subPage.internalPages.some((item) => item.id !== pageId && item.name === trimmed)) return;
+        page.name = trimmed;
+        for (const source of [subPage.elements, ...subPage.internalPages.map((item) => item.elements)]) {
+          for (const element of source) {
+            for (const action of element.actions ?? []) {
+              if (action.pageTargetId === pageId) action.pageTargetNameSnapshot = trimmed;
+              if (action.afterClose?.pageTargetId === pageId) action.afterClose.pageTargetNameSnapshot = trimmed;
+            }
+          }
+        }
+        renamed = true;
+      });
+      if (renamed) get().saveHistory();
+      return renamed;
+    },
+
+    duplicateInternalPage: (pageId) => {
+      let changed = false;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const index = subPage.internalPages.findIndex((item) => item.id === pageId);
+        if (index < 0) return;
+        const source = subPage.internalPages[index];
+        const copy = cloneInternalPageWithinSubPage(source, genId);
+        let suffix = 2;
+        let name = `${source.name} 副本`;
+        while (subPage.internalPages.some((item) => item.name === name)) name = `${source.name} 副本 ${suffix++}`;
+        copy.name = name;
+        copy.noEntryDeferred = false;
+        subPage.internalPages.splice(index + 1, 0, copy);
+        state.currentInternalPageId = copy.id;
+        state.selectedElementIds = [];
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+    },
+
+    deleteInternalPage: (pageId) => {
+      let changed = false;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const index = subPage.internalPages.findIndex((item) => item.id === pageId);
+        if (index < 0) return;
+        subPage.internalPages.splice(index, 1);
+        state.currentInternalPageId = subPage.id;
+        state.selectedElementIds = [];
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+    },
+
+    reorderInternalPages: (kind, fromIndex, toIndex) => {
+      let changed = false;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const indices = subPage.internalPages.map((page, index) => ({ page, index })).filter(({ page }) => page.kind === kind);
+        if (!indices[fromIndex] || !indices[toIndex]) return;
+        const [removed] = subPage.internalPages.splice(indices[fromIndex].index, 1);
+        const refreshed = subPage.internalPages.map((page, index) => ({ page, index })).filter(({ page }) => page.kind === kind);
+        const insertIndex = toIndex >= refreshed.length ? subPage.internalPages.length : refreshed[toIndex].index;
+        subPage.internalPages.splice(insertIndex, 0, removed);
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+    },
+
+    moveInternalPage: (pageId, targetSubPageId, targetIndex) => {
+      let result: { ok: boolean; error?: string } = { ok: false, error: '未找到页面' };
+      set((state) => {
+        if (!state.currentCourse || !state.currentSubPageId) return;
+        const sourceSubPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        const targetSubPage = findSubPage(state.currentCourse, targetSubPageId);
+        if (!isInternalPagesSubPage(sourceSubPage) || !isInternalPagesSubPage(targetSubPage)) return;
+        if (sourceSubPage.templateId !== targetSubPage.templateId) { result = { ok: false, error: '题型结构不同，不能移入' }; return; }
+        const sourceArea = state.currentCourse.previewStages?.some((stage) => stage.subPages.some((sub) => sub.id === sourceSubPage.id));
+        const targetArea = state.currentCourse.previewStages?.some((stage) => stage.subPages.some((sub) => sub.id === targetSubPage.id));
+        if (sourceArea !== targetArea) { result = { ok: false, error: '正课与预习区域之间不能移动内部页面' }; return; }
+        const sourceIndex = sourceSubPage.internalPages.findIndex((page) => page.id === pageId);
+        if (sourceIndex < 0) return;
+        const page = sourceSubPage.internalPages[sourceIndex];
+        page.name = resolveMovedPageName(targetSubPage, page.name);
+        sourceSubPage.internalPages.splice(sourceIndex, 1);
+        const compatible = targetSubPage.internalPages.map((item, index) => ({ item, index })).filter(({ item }) => item.kind === page.kind);
+        const insertIndex = targetIndex >= compatible.length ? targetSubPage.internalPages.length : compatible[targetIndex].index;
+        targetSubPage.internalPages.splice(insertIndex, 0, page);
+        const targetStage = findStageOfSubPage(state.currentCourse, targetSubPage.id);
+        state.currentStageId = targetStage?.id ?? state.currentStageId;
+        state.currentSubPageId = targetSubPage.id;
+        state.currentInternalPageId = page.id;
+        state.focusSubPageId = targetSubPage.id;
+        state.selectedElementIds = [];
+        state.selectedStageTarget = targetArea ? 'preview' : 'normal';
+        result = { ok: true };
+      });
+      if (result.ok) get().saveHistory();
+      return result;
+    },
+
+    updateDialogSettings: (pageId, updates) =>
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const page = subPage.internalPages.find((item) => item.id === pageId && item.kind === 'dialog');
+        if (!page) return;
+        page.dialogSettings = { maskColor: '#000000', maskOpacity: 0.55, closeOnMask: false, ...page.dialogSettings, ...updates };
+      }),
+
+    setNoEntryDeferred: (pageId, deferred) =>
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const page = subPage.internalPages.find((item) => item.id === pageId && item.kind === 'content');
+        if (!page) return;
+        page.noEntryDeferred = deferred;
       }),
 
     toggleStageShrink: (stageId) =>
@@ -358,6 +635,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentCourse.stages.push(newStage);
         state.currentStageId = newStage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         state.selectedStageTarget = 'normal';
         renumberAll(state.currentCourse);
@@ -414,11 +692,10 @@ export const useEditorStore = create<EditorState>()(
           if (found) { sourceSub = found; break; }
         }
         if (!sourceSub) return;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: `小关卡 0-0`,
-          elements: cloneElementsWithNewIds(sourceSub.elements),
-        };
+        if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
+        const newSub = cloneSubPageWithNewIds(sourceSub, genId);
+        newSub.name = `小关卡 0-0`;
+        markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: `关卡 0`,
@@ -427,6 +704,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentCourse.stages.push(newStage);
         state.currentStageId = newStage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         state.selectedStageTarget = 'normal';
         renumberAll(state.currentCourse);
@@ -438,20 +716,19 @@ export const useEditorStore = create<EditorState>()(
       if (!state0.currentCourse) return;
       const template = state0.customTemplates.find((t) => t.id === templateId);
       if (!template) return;
+      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('复习课和视频关卡不支持内部页面模板');
       const courseDir = getCourseDirPath(state0.currentCourse.id);
       if (!courseDir) throw new Error('NO_DIR_PATH');
-      const elements = await applyTemplate({
+      const applied = await applyTemplate({
         courseId: state0.currentCourse.id,
         courseDir,
         template,
       });
       set((state) => {
         if (!state.currentCourse) return;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: `小关卡 0-0`,
-          elements,
-        };
+        const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
+        newSub.name = `小关卡 0-0`;
+        markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: `关卡 0`,
@@ -529,6 +806,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentCourse.previewStages.push(newStage);
         state.currentStageId = newStage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         state.selectedStageTarget = 'preview';
         renumberPreviewAll(state.currentCourse);
@@ -540,14 +818,11 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
+        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: preset.defaultSubPageName ?? `预习 ${previewNum}`,
-          elements: cloneElementsWithNewIds(preset.elements, 'el'),
-          frozen: preset.frozen ?? false,
-        };
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `预习 ${previewNum}`);
+        markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: preset.defaultStageName ?? `预习 ${previewNum}`,
@@ -557,6 +832,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentCourse.previewStages.push(newStage);
         state.currentStageId = newStage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedStageTarget = 'preview';
         // frozen 页面自动选中锁定元素
         if (preset.frozen) {
@@ -586,12 +862,11 @@ export const useEditorStore = create<EditorState>()(
           }
         }
         if (!sourceSub) return;
+        if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const previewNum = state.currentCourse.previewStages.length + 1;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: `预习 ${previewNum}`,
-          elements: cloneElementsWithNewIds(sourceSub.elements),
-        };
+        const newSub = cloneSubPageWithNewIds(sourceSub, genId);
+        newSub.name = `预习 ${previewNum}`;
+        markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: `预习 ${previewNum}`,
@@ -601,6 +876,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentCourse.previewStages.push(newStage);
         state.currentStageId = newStage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         state.selectedStageTarget = 'preview';
         renumberPreviewAll(state.currentCourse);
@@ -612,9 +888,10 @@ export const useEditorStore = create<EditorState>()(
       if (!state0.currentCourse) return;
       const template = state0.customTemplates.find((t) => t.id === templateId);
       if (!template) return;
+      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('复习课和视频关卡不支持内部页面模板');
       const courseDir = getCourseDirPath(state0.currentCourse.id);
       if (!courseDir) throw new Error('NO_DIR_PATH');
-      const elements = await applyTemplate({
+      const applied = await applyTemplate({
         courseId: state0.currentCourse.id,
         courseDir,
         template,
@@ -623,11 +900,9 @@ export const useEditorStore = create<EditorState>()(
         if (!state.currentCourse) return;
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: `预习 ${previewNum}`,
-          elements,
-        };
+        const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
+        newSub.name = `预习 ${previewNum}`;
+        markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: `预习 ${previewNum}`,
@@ -637,6 +912,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentCourse.previewStages.push(newStage);
         state.currentStageId = newStage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         state.selectedStageTarget = 'preview';
         renumberPreviewAll(state.currentCourse);
@@ -726,6 +1002,7 @@ export const useEditorStore = create<EditorState>()(
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         renumberAll(state.currentCourse);
         get().saveHistory();
@@ -749,14 +1026,14 @@ export const useEditorStore = create<EditorState>()(
           }
         }
         if (!sourceSub) return;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: `小关卡 0-0`,
-          elements: cloneElementsWithNewIds(sourceSub.elements),
-        };
+        if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
+        const newSub = cloneSubPageWithNewIds(sourceSub, genId);
+        newSub.name = `小关卡 0-0`;
+        markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         renumberAll(state.currentCourse);
         get().saveHistory();
@@ -767,9 +1044,10 @@ export const useEditorStore = create<EditorState>()(
       if (!state0.currentCourse) return;
       const template = state0.customTemplates.find((t) => t.id === templateId);
       if (!template) return;
+      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('复习课和视频关卡不支持内部页面模板');
       const courseDir = getCourseDirPath(state0.currentCourse.id);
       if (!courseDir) throw new Error('NO_DIR_PATH');
-      const elements = await applyTemplate({
+      const applied = await applyTemplate({
         courseId: state0.currentCourse.id,
         courseDir,
         template,
@@ -778,14 +1056,13 @@ export const useEditorStore = create<EditorState>()(
         if (!state.currentCourse) return;
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (!stage) return;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: `小关卡 0-0`,
-          elements,
-        };
+        const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
+        newSub.name = `小关卡 0-0`;
+        markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         renumberAll(state.currentCourse);
       });
@@ -797,12 +1074,9 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: preset.defaultSubPageName ?? `小关卡 0-0`,
-          elements: cloneElementsWithNewIds(preset.elements, 'el'),
-          frozen: preset.frozen ?? false,
-        };
+        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
+        markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: preset.defaultStageName ?? `关卡 0`,
@@ -812,6 +1086,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentCourse.stages.push(newStage);
         state.currentStageId = newStage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedStageTarget = 'normal';
         // frozen 页面自动选中锁定元素
         if (preset.frozen) {
@@ -829,17 +1104,15 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
+        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (!stage) return;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          name: preset.defaultSubPageName ?? `小关卡 0-0`,
-          elements: cloneElementsWithNewIds(preset.elements, 'el'),
-          frozen: preset.frozen ?? false,
-        };
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
+        markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         // frozen 页面自动选中锁定元素
         if (preset.frozen) {
           state.selectedElementIds = newSub.elements.filter(e => e.locked).map(e => e.id);
@@ -917,16 +1190,15 @@ export const useEditorStore = create<EditorState>()(
         if (!stage) return;
         const sp = stage.subPages.find((s) => s.id === subPageId);
         if (!sp) return;
-        const newSub: SubPage = {
-          id: genId('subpage'),
-          // 用合法默认格式占位，下面 renumberAll 会按位置正确编号；
-          // 若原 sub 是用户自定义名，则保留 "副本" 副本格式不被自动重命名覆盖
-          name: SUBPAGE_DEFAULT_RE.test(sp.name) ? `小关卡 0-0` : `${sp.name} 副本`,
-          elements: cloneElementsWithNewIds(sp.elements),
-        };
+        const newSub = cloneSubPageWithNewIds(sp, genId);
+        // 用合法默认格式占位，下面 renumberAll 会按位置正确编号；
+        // 若原 sub 是用户自定义名，则保留“副本”格式不被自动重命名覆盖
+        newSub.name = SUBPAGE_DEFAULT_RE.test(sp.name) ? `小关卡 0-0` : `${sp.name} 副本`;
+        markInternalPagesFeature(state.currentCourse, newSub);
         const subIdx = stage.subPages.indexOf(sp);
         stage.subPages.splice(subIdx + 1, 0, newSub);
         state.currentSubPageId = newSub.id;
+        state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
         renumberAll(state.currentCourse);
         get().saveHistory();
@@ -994,7 +1266,7 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
-        if (page.frozen) return;
+        if ('frozen' in page && page.frozen) return;
         if (!element.name?.trim()) element.name = `${element.layaType || element.type}_1`;
         // 确保 name 在同一父节点下唯一（局部作用域）
         const siblings = page.elements.filter(e => e.parentId === element.parentId);
@@ -1032,6 +1304,82 @@ export const useEditorStore = create<EditorState>()(
           element.props.var = getUniqueElementName(updates.name, otherVars);
         }
       }),
+
+    moveElementIntoParent: (id) => {
+      let result: ContainerGeometryActionResult = { ok: false, error: '未找到子元素' };
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const element = page.elements.find((item) => item.id === id);
+        if (!element?.parentId) {
+          result = { ok: false, error: '当前元素不在容器中' };
+          return;
+        }
+        if (isLockedByHierarchy(element, page.elements)) {
+          result = { ok: false, error: '元素或父容器已锁定，无法移动' };
+          return;
+        }
+        const containment = getElementParentContainment(element, page.elements);
+        if (!containment) {
+          result = { ok: false, error: '无法读取父容器范围' };
+          return;
+        }
+        if (!containment.isOverflowing) {
+          result = { ok: false, error: '子元素已在父容器范围内' };
+          return;
+        }
+        if (!containment.canFit) {
+          result = { ok: false, error: '子元素尺寸超过父容器，请先扩展容器' };
+          return;
+        }
+        element.x += containment.correction.x;
+        element.y += containment.correction.y;
+        changed = true;
+        result = { ok: true };
+      });
+      if (changed) get().saveHistory();
+      return result;
+    },
+
+    fitContainerToChildren: (id) => {
+      let result: ContainerGeometryActionResult = { ok: false, error: '未找到父容器' };
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const container = page.elements.find((item) => item.id === id);
+        if (!container || !isContainerElementType(container.type)) {
+          result = { ok: false, error: '目标元素不是可扩展容器' };
+          return;
+        }
+        if (isLockedByHierarchy(container, page.elements)) {
+          result = { ok: false, error: '父容器已锁定，无法扩展' };
+          return;
+        }
+        const updates = getFitContainerToChildrenUpdates(container, page.elements);
+        if (!updates) {
+          result = { ok: false, error: '父容器中没有可适应的内容' };
+          return;
+        }
+        if (updates.length === 0) {
+          result = { ok: false, error: '全部内容已在父容器范围内' };
+          return;
+        }
+        for (const update of updates) {
+          const element = page.elements.find((item) => item.id === update.id);
+          if (!element) continue;
+          element.x = update.x;
+          element.y = update.y;
+          element.width = update.width;
+          element.height = update.height;
+        }
+        changed = true;
+        result = { ok: true };
+      });
+      if (changed) get().saveHistory();
+      return result;
+    },
 
     deleteElement: (id) =>
       set((state) => {
@@ -1164,7 +1512,7 @@ export const useEditorStore = create<EditorState>()(
 
         if (multi) {
           // frozen 页面不允许取消锁定元素的选中
-          if (page?.frozen && page.elements.some(e => e.locked && state.selectedElementIds.includes(e.id))) {
+          if (page && 'frozen' in page && page.frozen && page.elements.some(e => e.locked && state.selectedElementIds.includes(e.id))) {
             if (state.selectedElementIds.includes(id) && el?.locked) return;
           }
           if (state.selectedElementIds.includes(id)) {
@@ -1185,7 +1533,7 @@ export const useEditorStore = create<EditorState>()(
     selectElements: (ids) =>
       set((state) => {
         const page = findCurrentSubPage(state);
-        if (page?.frozen) return;
+        if (page && 'frozen' in page && page.frozen) return;
         state.selectedElementIds = ids;
       }),
 
@@ -1193,7 +1541,7 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const page = findCurrentSubPage(state);
         // frozen 页面不允许清空选中（锁定元素必须保持选中）
-        if (page?.frozen) return;
+        if (page && 'frozen' in page && page.frozen) return;
         state.selectedElementIds = [];
       }),
 
@@ -1226,15 +1574,24 @@ export const useEditorStore = create<EditorState>()(
         ));
       }),
 
-    pasteElements: () =>
+    pasteElements: (saveToHistory = true) => {
+      let result: ElementPasteResult | null = null;
       set((state) => {
         if (state.clipboard.length === 0) return;
         const page = findCurrentSubPage(state);
         if (!page) return;
         const idMap = new Map<string, string>();
+        const groupIdMap = new Map<string, string>();
+        const actionGroupIdMap = new Map<string, string>();
+        const branchIdMap = new Map<string, string>();
         const now = Date.now();
         state.clipboard.forEach((el, i) => {
           idMap.set(el.id, `el-${now + i}-${Math.random().toString(36).slice(2, 6)}`);
+          if (el.groupId && !groupIdMap.has(el.groupId)) groupIdMap.set(el.groupId, genId('group'));
+          for (const action of el.actions ?? []) {
+            if (action.groupId && !actionGroupIdMap.has(action.groupId)) actionGroupIdMap.set(action.groupId, genId('action-group'));
+            if (action.branchId && !branchIdMap.has(action.branchId)) branchIdMap.set(action.branchId, genId('branch'));
+          }
         });
         const newIds: string[] = [];
 
@@ -1245,11 +1602,15 @@ export const useEditorStore = create<EditorState>()(
         state.clipboard.forEach((el) => {
           const newEl = JSON.parse(JSON.stringify(el));
           newEl.id = idMap.get(el.id)!;
+          if (newEl.groupId && groupIdMap.has(newEl.groupId)) newEl.groupId = groupIdMap.get(newEl.groupId);
           // 先重映射 parentId 和 actions.targetId，让后续 name 生成能扫到正确父节点下的兄弟
           if (newEl.parentId && idMap.has(newEl.parentId)) newEl.parentId = idMap.get(newEl.parentId);
           if (newEl.actions) {
-            newEl.actions.forEach((a: { targetId?: string }) => {
+            newEl.actions.forEach((a: { id: string; targetId?: string; groupId?: string; branchId?: string }) => {
+              a.id = genId('action');
               if (a.targetId && idMap.has(a.targetId)) a.targetId = idMap.get(a.targetId);
+              if (a.groupId && actionGroupIdMap.has(a.groupId)) a.groupId = actionGroupIdMap.get(a.groupId);
+              if (a.branchId && branchIdMap.has(a.branchId)) a.branchId = branchIdMap.get(a.branchId);
             });
           }
 
@@ -1296,14 +1657,71 @@ export const useEditorStore = create<EditorState>()(
           page.elements.push(newEl);
           newIds.push(newEl.id);
         });
-        state.selectedElementIds = newIds;
-        get().saveHistory();
-      }),
+        const newIdSet = new Set(newIds);
+        const selectedIds = newIds.filter((id) => {
+          let element = page.elements.find((item) => item.id === id);
+          const visited = new Set<string>();
+          while (element?.parentId && !visited.has(element.id)) {
+            visited.add(element.id);
+            if (newIdSet.has(element.parentId)) return false;
+            element = page.elements.find((item) => item.id === element?.parentId);
+          }
+          return true;
+        });
+        state.selectedElementIds = selectedIds;
+        result = {
+          allIds: newIds,
+          selectedIds,
+          idMap: Object.fromEntries(idMap),
+          elements: JSON.parse(JSON.stringify(page.elements)),
+        };
+      });
+      if (result && saveToHistory) get().saveHistory();
+      return result;
+    },
 
     duplicateElements: () => {
       get().copyElements();
-      get().pasteElements();
+      return get().pasteElements();
     },
+
+    duplicateElementsForDrag: (sourceIds) => {
+      const previousClipboard = JSON.parse(JSON.stringify(get().clipboard));
+      const previousSelection = [...get().selectedElementIds];
+      set((state) => { state.selectedElementIds = sourceIds; });
+      get().copyElements();
+      const result = get().pasteElements(false);
+      set((state) => {
+        state.clipboard = previousClipboard;
+        if (!result) state.selectedElementIds = previousSelection;
+      });
+      return result;
+    },
+
+    updateElementsWithoutHistory: (updates) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const updateMap = new Map(updates.map((update) => [update.id, update]));
+        for (const element of page.elements) {
+          const update = updateMap.get(element.id);
+          if (!update) continue;
+          element.x = update.x;
+          element.y = update.y;
+          element.width = update.width;
+          element.height = update.height;
+          element.rotation = update.rotation;
+        }
+      }),
+
+    removeElementsWithoutHistory: (ids) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const removing = new Set(ids);
+        page.elements = page.elements.filter((element) => !removing.has(element.id));
+        state.selectedElementIds = state.selectedElementIds.filter((id) => !removing.has(id));
+      }),
 
     alignElements: (direction) =>
       set((state) => {
@@ -1468,7 +1886,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const ptBox = page.elements.find(e => e.id === elementId);
         if (!ptBox || ptBox.type !== 'PageTurnBox') return;
@@ -1477,7 +1895,7 @@ export const useEditorStore = create<EditorState>()(
         if (newIndex < 0 || newIndex >= pageBoxes.length) return;
 
         set((state) => {
-          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          const p = findCurrentSubPage(state);
           if (!p) return state;
           // 遍历所有页面，选中的设成 true，其他设成 false
           pageBoxes.forEach((box, i) => {
@@ -1508,7 +1926,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const ptBox = page.elements.find(e => e.id === elementId);
         if (!ptBox || ptBox.type !== 'PageTurnBox') return;
@@ -1549,7 +1967,7 @@ export const useEditorStore = create<EditorState>()(
         }
 
         set((state) => {
-          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          const p = findCurrentSubPage(state);
           if (!p) return state;
           // 把所有旧页面都设成 false
           pageBoxes.forEach(box => {
@@ -1590,7 +2008,7 @@ export const useEditorStore = create<EditorState>()(
           if (tabObj) registerObject(newTab.id, tabObj);
         }
         // 同步 Laya 实例侧的 visible：所有旧页面 false，新页面 true
-        const finalSp = findSubPage(get().currentCourse, subPageId);
+        const finalSp = findActiveElementPage(get().currentCourse, subPageId, get().currentInternalPageId);
         const finalPageBoxes = finalSp?.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox') ?? [];
         finalPageBoxes.forEach((box, i) => {
           const obj = getObject(box.id);
@@ -1608,7 +2026,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const ptBox = page.elements.find(e => e.id === elementId);
         if (!ptBox || ptBox.type !== 'PageTurnBox') return;
@@ -1626,7 +2044,7 @@ export const useEditorStore = create<EditorState>()(
         }
 
         set((state) => {
-          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          const p = findCurrentSubPage(state);
           if (!p) return state;
           p.elements = p.elements.filter(e => !idsToDelete.has(e.id));
           const currentIndex = (ptBox.props as Record<string, unknown>).currentPageIndex as number;
@@ -1653,7 +2071,7 @@ export const useEditorStore = create<EditorState>()(
         });
         for (const id of idsToDelete) removeObject(id);
         // 同步 Laya 实例侧的 visible
-        const finalSp = findSubPage(get().currentCourse, subPageId);
+        const finalSp = findActiveElementPage(get().currentCourse, subPageId, get().currentInternalPageId);
         const finalPageBoxes = finalSp?.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox') ?? [];
         const finalNewIdx = (finalSp?.elements.find(e => e.id === elementId)?.props as Record<string, unknown> | undefined)?.currentPageIndex as number ?? 0;
         finalPageBoxes.forEach((box, i) => {
@@ -1667,7 +2085,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const ptBox = page.elements.find(e => e.id === elementId);
         if (!ptBox || ptBox.type !== 'PageTurnBox') return;
@@ -1750,7 +2168,7 @@ export const useEditorStore = create<EditorState>()(
         }
 
         set((state) => {
-          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          const p = findCurrentSubPage(state);
           if (!p) return state;
           p.elements = p.elements.filter(e => !idsToDelete.has(e.id));
           for (const el of elementsToAdd) p.elements.push(el);
@@ -1769,7 +2187,7 @@ export const useEditorStore = create<EditorState>()(
       /** 翻页:把所有翻页按钮(左/右箭头 + 标签按钮)在 elements 数组里移到 ContainerBox 的最前或最后 */
       movePageTurnButtons: (elementId: string, position: 'top' | 'bottom') => {
         set((state) => {
-          const p = findSubPage(state.currentCourse, state.currentSubPageId);
+          const p = findCurrentSubPage(state);
           if (!p) return state;
           const ptBox = p.elements.find(e => e.id === elementId);
           if (!ptBox || ptBox.type !== 'PageTurnBox') return state;
@@ -1801,7 +2219,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const existingOptions = page.elements.filter(e => e.parentId === choiceBoxId && e.type === 'SpeechSelectableObj');
         const existingNames = new Set(existingOptions.map(e => e.name));
@@ -1829,7 +2247,7 @@ export const useEditorStore = create<EditorState>()(
         newOpt.x = lastOpt ? lastOpt.x + lastOpt.width + 10 : 50;
         newOpt.y = lastOpt ? lastOpt.y : 50;
         set((state) => {
-          const sp = findSubPage(state.currentCourse, state.currentSubPageId);
+          const sp = findCurrentSubPage(state);
           if (!sp) return state;
           sp.elements.push(newOpt);
           return state;
@@ -1843,7 +2261,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const existingOptions = page.elements.filter(e => e.parentId === choiceBoxId && e.type === 'SpeechSelectableObj');
         if (existingOptions.length === 0) return;
@@ -1856,7 +2274,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const existing = page.elements.filter(e => e.parentId === klInputBoxId && e.type === 'KlInputImage');
         const lastOpt = existing[existing.length - 1];
@@ -1870,7 +2288,7 @@ export const useEditorStore = create<EditorState>()(
           if (lastProps.camp) newInput.props = { ...newInput.props, camp: lastProps.camp };
         }
         set((state) => {
-          const sp = findSubPage(state.currentCourse, state.currentSubPageId);
+          const sp = findCurrentSubPage(state);
           if (!sp) return state;
           sp.elements.push(newInput);
           return state;
@@ -1884,7 +2302,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const existing = page.elements.filter(e => e.parentId === klInputBoxId && e.type === 'KlInputImage');
         if (existing.length <= 1) return;
@@ -1897,7 +2315,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const matchingGame = page.elements.find(e => e.id === matchingGameId);
         if (!matchingGame) return;
@@ -1961,7 +2379,7 @@ export const useEditorStore = create<EditorState>()(
         rightItem.props = { ...rightItem.props, camp: 'camp2', connectableCamps: 'camp1', rightItemNames: '' };
 
         set((state) => {
-          const sp = findSubPage(state.currentCourse, state.currentSubPageId);
+          const sp = findCurrentSubPage(state);
           if (!sp) return state;
           // 元素列表顺序：左 item 插入到 camp1 最后一个之后；右 item 插入到 camp2 最后一个之后
           // camp1 为空时插入到 matchBox 之后；camp2 为空时插入到 leftItem 之后
@@ -2000,7 +2418,7 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        const page = findSubPage(course, subPageId);
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
         if (!page) return;
         const matchBox = page.elements.find(e => e.parentId === matchingGameId && e.type === 'Box');
         if (!matchBox) return;
@@ -2022,114 +2440,80 @@ export const useEditorStore = create<EditorState>()(
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-          for (const page of stage.subPages) {
-            if (page.id !== subPageId) continue;
-            const dropbox = page.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDropBox');
-            if (!dropbox) return;
-            const existing = page.elements.filter(e => e.parentId === dropbox.id && e.type === 'DropObj');
-            const last = existing[existing.length - 1];
-            const newEl = createDefaultElement('DropObj', subPageId ?? undefined);
-            // 扫描 dropbox 下已用 dj 序号，取最大+1（避免删除中间项后产生重复）
-            newEl.name = getNextNumberedName('dj', page.elements, dropbox.id);
-            newEl.parentId = dropbox.id;
-            newEl.x = last ? last.x + 280 : 606;
-            newEl.y = last ? last.y : 445;
-            if (newEl.x > 1700) { newEl.x = 606; newEl.y = (last?.y ?? 445) + 220; }
-            newEl.props = { ...newEl.props, var: newEl.name };
-            set((state) => {
-              const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === state.currentSubPageId);
-              if (!sp) return state;
-              sp.elements.push(newEl);
-              return state;
-            });
-            const obj = createLayaComponent(newEl, getObject(dropbox.id));
-            if (obj) registerObject(newEl.id, obj);
-            return;
-          }
-        }
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
+        const dropbox = page?.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDropBox');
+        if (!page || !dropbox) return;
+        const existing = page.elements.filter(e => e.parentId === dropbox.id && e.type === 'DropObj');
+        const last = existing[existing.length - 1];
+        const newEl = createDefaultElement('DropObj', subPageId);
+        newEl.name = getNextNumberedName('dj', page.elements, dropbox.id);
+        newEl.parentId = dropbox.id;
+        newEl.x = last ? last.x + 280 : 606;
+        newEl.y = last ? last.y : 445;
+        if (newEl.x > 1700) { newEl.x = 606; newEl.y = (last?.y ?? 445) + 220; }
+        newEl.props = { ...newEl.props, var: newEl.name };
+        set((state) => { findCurrentSubPage(state)?.elements.push(newEl); });
+        const obj = createLayaComponent(newEl, getObject(dropbox.id));
+        if (obj) registerObject(newEl.id, obj);
       },
 
       removeDropObj: (dragViewBoxId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-          for (const page of stage.subPages) {
-            if (page.id !== subPageId) continue;
-            const dropbox = page.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDropBox');
-            if (!dropbox) return;
-            const existing = page.elements.filter(e => e.parentId === dropbox.id && e.type === 'DropObj');
-            if (existing.length === 0) return;
-            const last = existing[existing.length - 1];
-            get().deleteElement(last.id);
-            return;
-          }
-        }
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
+        const dropbox = page?.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDropBox');
+        if (!page || !dropbox) return;
+        const existing = page.elements.filter(e => e.parentId === dropbox.id && e.type === 'DropObj');
+        if (existing.length > 0) get().deleteElement(existing[existing.length - 1].id);
       },
 
       addDragObj: (dragViewBoxId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-          for (const page of stage.subPages) {
-            if (page.id !== subPageId) continue;
-            const dragbox = page.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDragBox');
-            if (!dragbox) return;
-            const existing = page.elements.filter(e => e.parentId === dragbox.id && e.type === 'DragObj');
-            const last = existing[existing.length - 1];
-            const newEl = createDefaultElement('DragObj', subPageId ?? undefined);
-            // 扫描 dragbox 下已用 aj 序号，取最大+1（避免删除中间项后产生重复）
-            newEl.name = getNextNumberedName('aj', page.elements, dragbox.id);
-            newEl.parentId = dragbox.id;
-            newEl.x = last ? last.x + 280 : 606;
-            newEl.y = last ? last.y : 734;
-            if (newEl.x > 1700) { newEl.x = 606; newEl.y = (last?.y ?? 734) + 220; }
-            newEl.props = { ...newEl.props, var: newEl.name };
-            set((state) => {
-              const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === state.currentSubPageId);
-              if (!sp) return state;
-              sp.elements.push(newEl);
-              return state;
-            });
-            const obj = createLayaComponent(newEl, getObject(dragbox.id));
-            if (obj) registerObject(newEl.id, obj);
-            return;
-          }
-        }
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
+        const dragbox = page?.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDragBox');
+        if (!page || !dragbox) return;
+        const existing = page.elements.filter(e => e.parentId === dragbox.id && e.type === 'DragObj');
+        const last = existing[existing.length - 1];
+        const newEl = createDefaultElement('DragObj', subPageId);
+        newEl.name = getNextNumberedName('aj', page.elements, dragbox.id);
+        newEl.parentId = dragbox.id;
+        newEl.x = last ? last.x + 280 : 606;
+        newEl.y = last ? last.y : 734;
+        if (newEl.x > 1700) { newEl.x = 606; newEl.y = (last?.y ?? 734) + 220; }
+        newEl.props = { ...newEl.props, var: newEl.name };
+        set((state) => { findCurrentSubPage(state)?.elements.push(newEl); });
+        const obj = createLayaComponent(newEl, getObject(dragbox.id));
+        if (obj) registerObject(newEl.id, obj);
       },
 
       removeDragObj: (dragViewBoxId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
         if (!course || !subPageId) return;
-        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-          for (const page of stage.subPages) {
-            if (page.id !== subPageId) continue;
-            const dragbox = page.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDragBox');
-            if (!dragbox) return;
-            const existing = page.elements.filter(e => e.parentId === dragbox.id && e.type === 'DragObj');
-            if (existing.length === 0) return;
-            const last = existing[existing.length - 1];
-            const children = page.elements.filter(e => e.parentId === last.id);
-            for (const child of children) get().deleteElement(child.id);
-            get().deleteElement(last.id);
-            return;
-          }
-        }
+        const page = findActiveElementPage(course, subPageId, get().currentInternalPageId);
+        const dragbox = page?.elements.find(e => e.parentId === dragViewBoxId && e.type === 'DragDragBox');
+        if (!page || !dragbox) return;
+        const existing = page.elements.filter(e => e.parentId === dragbox.id && e.type === 'DragObj');
+        if (existing.length === 0) return;
+        const last = existing[existing.length - 1];
+        const children = page.elements.filter(e => e.parentId === last.id);
+        for (const child of children) get().deleteElement(child.id);
+        get().deleteElement(last.id);
       },
 
       setProxySkin: (parentId: string, skinValue: string) => {
         const subPageId = get().currentSubPageId;
+        const internalPageId = get().currentInternalPageId;
         if (!subPageId) return;
         const trimmed = (skinValue ?? '').trim();
 
         // 更新 props.skin
         set((state) => {
-          const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === subPageId);
-          if (!sp) return state;
-          const p = sp.elements.find(e => e.id === parentId);
+          const sp = findSubPage(state.currentCourse, subPageId);
+          const p = sp ? getElementPage(sp, internalPageId).elements.find(e => e.id === parentId) : undefined;
           if (!p) return state;
           (p.props as Record<string, unknown>).skin = trimmed;
           (p.props as Record<string, unknown>)._skinLoadToken = (((p.props as Record<string, unknown>)._skinLoadToken as number) ?? 0) + 1;
@@ -2142,12 +2526,8 @@ export const useEditorStore = create<EditorState>()(
         const getToken = () => {
           const cur = get().currentCourse;
           if (!cur) return -1;
-          for (const stage of [...cur.stages, ...(cur.previewStages ?? [])]) {
-            for (const p of stage.subPages) {
-              const el = p.elements.find(e => e.id === parentId);
-              if (el) return ((el.props as Record<string, unknown>)._skinLoadToken as number) ?? 0;
-            }
-          }
+          const el = findActiveElementPage(cur, subPageId, internalPageId)?.elements.find(e => e.id === parentId);
+          if (el) return ((el.props as Record<string, unknown>)._skinLoadToken as number) ?? 0;
           return -1;
         };
         const token = getToken();
@@ -2156,9 +2536,8 @@ export const useEditorStore = create<EditorState>()(
           if (!size) return;
           if (getToken() !== token) return;
           set((state) => {
-            const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === subPageId);
-            if (!sp) return state;
-            const p = sp.elements.find(e => e.id === parentId);
+            const sp = findSubPage(state.currentCourse, subPageId);
+            const p = sp ? getElementPage(sp, internalPageId).elements.find(e => e.id === parentId) : undefined;
             if (!p) return state;
             p.width = size.w; p.height = size.h;
             (p.props as Record<string, unknown>).pivotX = size.w / 2;
@@ -2253,23 +2632,17 @@ export const useEditorStore = create<EditorState>()(
       alignDropObjToSkin: (elementId: string, propKey: 'skin' | 'tipSkin') => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
+        const internalPageId = get().currentInternalPageId;
         if (!course || !subPageId) return;
-        let el: Element | undefined;
-        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-          for (const page of stage.subPages) {
-            if (page.id !== subPageId) continue;
-            el = page.elements.find(e => e.id === elementId);
-          }
-        }
+        const el = findActiveElementPage(course, subPageId, internalPageId)?.elements.find(e => e.id === elementId);
         if (!el) return;
         const skinPath = (el.props as Record<string, unknown>)?.[propKey] as string | undefined;
         if (!skinPath) return;
 
         const applySize = (w: number, h: number) => {
           set((state) => {
-            const sp = state.currentCourse?.stages.flatMap(s => s.subPages).concat(state.currentCourse?.previewStages?.flatMap(s => s.subPages) ?? []).find(p => p.id === subPageId);
-            if (!sp) return state;
-            const target = sp.elements.find(e => e.id === elementId);
+            const sp = findSubPage(state.currentCourse, subPageId);
+            const target = sp ? getElementPage(sp, internalPageId).elements.find(e => e.id === elementId) : undefined;
             if (!target) return state;
             target.width = w;
             target.height = h;
