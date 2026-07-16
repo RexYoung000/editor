@@ -71,7 +71,7 @@ pnpm build
 4. 完成自动测试和真实界面验收。
 5. 推送分支并创建关联 Issue 的 PR。
 6. 自动检查通过、评审完成后 Squash 合并。
-7. 合并后删除功能分支。
+7. 合并后同步 `main`，确认成果完整，并删除远端及本地任务分支。
 
 详细规则见 [CONTRIBUTING.md](./CONTRIBUTING.md)。禁止直接向 `main` 推送功能改动。
 
