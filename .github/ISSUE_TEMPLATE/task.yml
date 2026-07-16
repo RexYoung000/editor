@@ -1,0 +1,43 @@
+name: 工程与文档任务
+description: 测试、文档、依赖、重构和开发环境维护
+title: "[工程] "
+body:
+  - type: textarea
+    id: reason
+    attributes:
+      label: 背景与目标
+      description: 说明为什么现在需要处理，以及不处理会产生什么成本或风险。
+    validations:
+      required: true
+
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: 交付内容
+      description: 列出可以独立评审的结果，不按文件数量衡量完成度。
+    validations:
+      required: true
+
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: 非目标
+      description: 没有可填写“无”。
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: 验证方式
+      description: 说明命令、检查结果或文档评审依据。
+    validations:
+      required: true
+
+  - type: textarea
+    id: risk
+    attributes:
+      label: 风险与回退
+      description: 涉及依赖、配置、数据、构建或发布时必须填写。
+    validations:
+      required: true

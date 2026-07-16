@@ -33,6 +33,7 @@ dist-ssr
 .socket-pid
 .socket.log
 .codegraph/
+.scatter/
 
 # Local service credentials/certificates
 conf/DBConfig.xml

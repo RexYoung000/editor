@@ -1,0 +1,60 @@
+name: 缺陷报告
+description: 记录可复现的功能、数据、界面或发布问题
+title: "[缺陷] "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: impact
+    attributes:
+      label: 问题与影响
+      description: 谁在什么场景遇到问题，是否阻塞制作、保存、预览或发布？
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开……
+        2. 点击……
+        3. 观察到……
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境信息
+      description: 编辑器版本、操作系统、浏览器或 Electron、课程类型、Vite 是否远程运行。
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图、录屏或错误信息
+      description: 不要粘贴 Token、密码、本机敏感路径或课程隐私数据。
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 修复验收
+      description: 至少包含原复现路径和一个相关回归场景。
+    validations:
+      required: true

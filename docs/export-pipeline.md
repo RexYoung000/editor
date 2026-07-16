@@ -265,7 +265,6 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 ## 七、关联文档
 
 - [docs/electron-packaging.md](electron-packaging.md) — `compileBuild` IPC 内部细节、pnpm 符号链接坑、`ELECTRON_RUN_AS_NODE`、轮询 `fileconfig.json`
-- [CLAUDE.md](../CLAUDE.md)「开发服务器即后端」节 — `/api/upload-compiled-zip` server 端解压逻辑、动态路由 `courseOutputDirs` 注册
-- [CLAUDE.md](../CLAUDE.md)「Preview URL 双斜杠防护」节 — `forge_server_url` 尾斜杠处理
+- [docs/dev-server.md](dev-server.md) — `/api/upload-compiled-zip` 服务端解压、动态路由注册和 Preview URL 双斜杠防护
 - [docs/sdk-baiya-components.md](sdk-baiya-components.md) — sdk_baiya runtime 类（KlView / KlInputBox / DragViewBox 等）的语义
-- [docs/添加组件方法记录.md](添加组件方法记录.md) — 新组件如何在 `elementMeta` 中声明 `runtime` / `exportChildren` / `exportWrapper` / `placeholderImage`
+- [AGENTS.md](../AGENTS.md)「元素与组件元数据」节 — 新组件如何在 `elementMeta` 中声明 `runtime` / `exportChildren` / `exportWrapper` / `placeholderImage`
