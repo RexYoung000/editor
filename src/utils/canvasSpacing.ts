@@ -35,6 +35,10 @@ export interface EqualSpacingHint {
   segments: [EqualSpacingSegment, EqualSpacingSegment];
 }
 
+export interface DistanceHint extends EqualSpacingSegment {
+  referenceId: string;
+}
+
 export interface EqualSpacingResult {
   correction: CanvasPoint;
   locks: SpacingLocks;
@@ -64,6 +68,7 @@ interface SpacingPattern {
 const DEFAULT_THRESHOLD_PX = 5;
 const DEFAULT_RELEASE_THRESHOLD_PX = 8;
 const MAX_NEARBY_ITEMS_PER_AXIS = 24;
+const MIN_CROSS_OVERLAP_RATIO = 0.25;
 const EPSILON = 0.000001;
 
 function isDescendantOfAny(
@@ -135,23 +140,86 @@ function crossEnd(rect: CanvasRect, axis: SnapAxis): number {
   return crossStart(rect, axis) + (axis === 'x' ? rect.height : rect.width);
 }
 
+function getCrossOverlap(
+  axis: SnapAxis,
+  rects: CanvasRect[],
+): { start: number; end: number; ratio: number } {
+  const start = Math.max(...rects.map((rect) => crossStart(rect, axis)));
+  const end = Math.min(...rects.map((rect) => crossEnd(rect, axis)));
+  const shortest = Math.min(...rects.map((rect) => crossEnd(rect, axis) - crossStart(rect, axis)));
+  return {
+    start,
+    end,
+    ratio: shortest > EPSILON ? Math.max(0, end - start) / shortest : 0,
+  };
+}
+
 function commonCross(
   axis: SnapAxis,
   moving: CanvasRect,
   first: CanvasRect,
   second: CanvasRect,
 ): number | null {
-  const start = Math.max(
-    crossStart(moving, axis),
-    crossStart(first, axis),
-    crossStart(second, axis),
-  );
-  const end = Math.min(
-    crossEnd(moving, axis),
-    crossEnd(first, axis),
-    crossEnd(second, axis),
-  );
-  return end - start > EPSILON ? (start + end) / 2 : null;
+  const overlap = getCrossOverlap(axis, [moving, first, second]);
+  return overlap.ratio >= MIN_CROSS_OVERLAP_RATIO
+    ? (overlap.start + overlap.end) / 2
+    : null;
+}
+
+export function getDistanceHintBetweenRects(
+  moving: CanvasRect,
+  reference: CanvasRect,
+  referenceId = '',
+): DistanceHint | null {
+  const candidates = (['x', 'y'] as const).flatMap((axis) => {
+    const overlap = getCrossOverlap(axis, [moving, reference]);
+    if (overlap.ratio < MIN_CROSS_OVERLAP_RATIO) return [];
+    const movingStart = axisStart(moving, axis);
+    const movingEnd = axisEnd(moving, axis);
+    const referenceStart = axisStart(reference, axis);
+    const referenceEnd = axisEnd(reference, axis);
+    if (movingEnd <= referenceStart) {
+      return [{
+        axis,
+        start: movingEnd,
+        end: referenceStart,
+        cross: (overlap.start + overlap.end) / 2,
+        distance: referenceStart - movingEnd,
+        referenceId,
+      }];
+    }
+    if (referenceEnd <= movingStart) {
+      return [{
+        axis,
+        start: referenceEnd,
+        end: movingStart,
+        cross: (overlap.start + overlap.end) / 2,
+        distance: movingStart - referenceEnd,
+        referenceId,
+      }];
+    }
+    return [];
+  });
+  return candidates.sort((left, right) => (
+    left.distance - right.distance
+    || left.axis.localeCompare(right.axis)
+  ))[0] ?? null;
+}
+
+export function getNearestDistanceHint(
+  moving: CanvasRect,
+  items: SpacingItem[],
+): DistanceHint | null {
+  return items
+    .flatMap((item) => {
+      const hint = getDistanceHintBetweenRects(moving, item.bounds, item.id);
+      return hint ? [hint] : [];
+    })
+    .sort((left, right) => (
+      left.distance - right.distance
+      || left.referenceId.localeCompare(right.referenceId)
+      || left.axis.localeCompare(right.axis)
+    ))[0] ?? null;
 }
 
 function addPattern(
@@ -199,8 +267,7 @@ function createAxisPatterns(
   const movingCenter = axisStart(moving, axis) + movingSize / 2;
   const relevant = items
     .filter((item) => (
-      crossEnd(item.bounds, axis) > crossStart(moving, axis) + EPSILON
-      && crossStart(item.bounds, axis) < crossEnd(moving, axis) - EPSILON
+      getCrossOverlap(axis, [moving, item.bounds]).ratio >= MIN_CROSS_OVERLAP_RATIO
     ))
     .sort((left, right) => (
       Math.abs(axisStart(left.bounds, axis) + axisSize(left.bounds, axis) / 2 - movingCenter)

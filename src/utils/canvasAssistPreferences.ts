@@ -3,7 +3,7 @@ export interface CanvasAssistPreferences {
   snapToGrid: boolean;
   smartSnap: boolean;
   showSnapGuides: boolean;
-  showSpacingHints: boolean;
+  showDistanceHints: boolean;
 }
 
 interface PreferenceStorage {
@@ -18,7 +18,7 @@ export const DEFAULT_CANVAS_ASSIST_PREFERENCES: CanvasAssistPreferences = {
   snapToGrid: false,
   smartSnap: true,
   showSnapGuides: true,
-  showSpacingHints: true,
+  showDistanceHints: true,
 };
 
 function readBoolean(
@@ -42,9 +42,9 @@ export function parseCanvasAssistPreferences(
         parsed.showSnapGuides,
         DEFAULT_CANVAS_ASSIST_PREFERENCES.showSnapGuides,
       ),
-      showSpacingHints: readBoolean(
-        parsed.showSpacingHints,
-        DEFAULT_CANVAS_ASSIST_PREFERENCES.showSpacingHints,
+      showDistanceHints: readBoolean(
+        parsed.showDistanceHints ?? parsed.showSpacingHints,
+        DEFAULT_CANVAS_ASSIST_PREFERENCES.showDistanceHints,
       ),
     };
   } catch {

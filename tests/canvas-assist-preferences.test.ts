@@ -28,13 +28,14 @@ test('画布辅助设置只接收有效布尔值并兼容旧数据', () => {
     showGrid: true,
     snapToGrid: 'yes',
     smartSnap: false,
+    showSpacingHints: false,
   }));
   assert.deepEqual(preferences, {
     showGrid: true,
     snapToGrid: false,
     smartSnap: false,
     showSnapGuides: true,
-    showSpacingHints: true,
+    showDistanceHints: false,
   });
 });
 
@@ -46,7 +47,7 @@ test('画布辅助设置损坏时恢复默认且各项可以独立保存', () =>
     snapToGrid: false,
     smartSnap: false,
     showSnapGuides: true,
-    showSpacingHints: false,
+    showDistanceHints: false,
   };
   saveCanvasAssistPreferences(preferences, storage);
   assert.deepEqual(loadCanvasAssistPreferences(storage), preferences);

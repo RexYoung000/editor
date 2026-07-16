@@ -43,7 +43,7 @@ const ASSIST_SETTING_OPTIONS: Array<{
   { key: 'snapToGrid', label: '网格吸附', description: '移动与缩放吸附到 20px 网格' },
   { key: 'smartSnap', label: '智能吸附', description: '吸附页面、元素和父容器位置' },
   { key: 'showSnapGuides', label: '参考线', description: '显示智能吸附命中的对齐线' },
-  { key: 'showSpacingHints', label: '等距提示', description: '识别相等间距并显示实际距离' },
+  { key: 'showDistanceHints', label: '距离提示', description: '显示相邻距离与三元素等距反馈' },
 ];
 
 /**
@@ -917,7 +917,7 @@ export default function Canvas() {
               snap={snap}
               smartSnapEnabled={assistPreferences.smartSnap}
               showSnapGuides={assistPreferences.showSnapGuides}
-              spacingHintsEnabled={assistPreferences.showSpacingHints}
+              distanceHintsEnabled={assistPreferences.showDistanceHints}
               setEditingId={setEditingId}
             />
           </div>

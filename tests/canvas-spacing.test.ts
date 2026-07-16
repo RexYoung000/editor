@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import type { Element } from '../src/types';
 import {
   createEqualSpacingItems,
+  getDistanceHintBetweenRects,
   getEqualSpacingHints,
+  getNearestDistanceHint,
   snapBoundsToEqualSpacing,
   type SpacingItem,
 } from '../src/utils/canvasSpacing';
@@ -40,6 +42,61 @@ test('移动项位于两个元素之间时吸附为水平等间距并显示两�
     [100, 150],
     [250, 300],
   ]);
+});
+
+test('两个元素明确同行或同列时只显示单轴动态距离', () => {
+  const horizontal = getDistanceHintBetweenRects(
+    { x: 0, y: 20, width: 100, height: 100 },
+    { x: 160, y: 80, width: 100, height: 100 },
+    'right',
+  );
+  assert.deepEqual(horizontal, {
+    axis: 'x',
+    start: 100,
+    end: 160,
+    cross: 100,
+    distance: 60,
+    referenceId: 'right',
+  });
+
+  const vertical = getDistanceHintBetweenRects(
+    { x: 40, y: 0, width: 100, height: 100 },
+    { x: 100, y: 180, width: 100, height: 100 },
+    'bottom',
+  );
+  assert.deepEqual(vertical, {
+    axis: 'y',
+    start: 100,
+    end: 180,
+    cross: 120,
+    distance: 80,
+    referenceId: 'bottom',
+  });
+});
+
+test('斜对角和投影擦边关系不显示距离，也不会形成十字', () => {
+  assert.equal(getDistanceHintBetweenRects(
+    { x: 0, y: 0, width: 100, height: 100 },
+    { x: 160, y: 160, width: 100, height: 100 },
+  ), null);
+  assert.equal(getDistanceHintBetweenRects(
+    { x: 0, y: 0, width: 100, height: 100 },
+    { x: 160, y: 80, width: 100, height: 100 },
+  )?.axis, undefined);
+});
+
+test('普通动态测距只选择最近的一个有效同行或同列元素', () => {
+  const hint = getNearestDistanceHint(
+    { x: 200, y: 0, width: 100, height: 100 },
+    [
+      item('far-left', 0, 0),
+      item('near-right', 330, 20),
+      item('diagonal', 305, 160),
+    ],
+  );
+  assert.equal(hint?.referenceId, 'near-right');
+  assert.equal(hint?.axis, 'x');
+  assert.equal(hint?.distance, 30);
 });
 
 test('移动项位于连续两个元素外侧时吸附为相同水平间距', () => {
