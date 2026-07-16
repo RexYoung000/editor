@@ -3,9 +3,20 @@
 > 作者：Wills.Deng【微信：43592330】  
 > 第二作者：AI 助手 Kiro  
 > 来源：`sdk_baiya_base_prod_2.0` 源码 + `sdk_baiya_base.js` 编译产物  
-> 更新日期：2026-04-23
+> 更新日期：2026-07-16
 
 所有组件均实现 `ISyncComp` 接口，属性变更时自动触发三端同步。
+
+## forge 编辑器接入约束
+
+- 所有组件统一声明在 `src/elements/elementMeta.ts`。`runtime`、`exportChildren`、`exportWrapper` 和 `placeholderImage` 同时承担编辑、预览与导出能力，不建立旁路元数据。
+- 新组件字段写入 `Element.props` 并在 metadata 中声明；`_` 前缀属性只用于编辑器皮肤生成，导出前必须剥离。
+- `src/utils/laya/core.ts` 持有 Laya 对象单例 map 和 `_previewMode`；编辑模式通过 `src/utils/laya/components.ts` 的 `createLayaComponent` 避免真实 sdk 组件崩溃、自动播放或干扰编辑，预览模式由 `setPreviewMode(true)` 实例化真实组件。
+- `TextInput`、`DragViewBox`、`DropObj` 编辑时使用 `Box` 占位；`TextArea` 使用 `Label`；`SoundButton` 使用 `Image`；`Spine` 使用原生 `Laya.Skeleton`。带 `meta.placeholderImage` 的组件统一使用 `Image`。
+- `NewTextArea` 导出时由 `bakeTextElements()` 烘焙成 PNG，最终课件不保留 `TextArea`。
+- `applyKlProps` 必须在 `skin` 前应用 `stateNum` 和 `sizeGrid`，因为 sdk_baiya 的 `skin` 赋值会触发内部渲染。
+- `share/comp/...` 皮肤前缀表示自动生成默认皮肤，其他路径按真实资源处理。
+- `index.html` 必须在 React 启动前同步加载 `/libs/GameLoader.max.js` 和 `/libs/sdk_baiya_base.js`，不能改为懒加载。
 
 ---
 
