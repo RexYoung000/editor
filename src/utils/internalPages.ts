@@ -28,6 +28,15 @@ export function isInternalPagesSubPage(subPage: SubPage | null | undefined): sub
     && Array.isArray(subPage.internalPages);
 }
 
+export function isInternalPagesWorkbenchReadonly(
+  course: Course | null | undefined,
+  subPageId: string | null | undefined,
+  focusSubPageId: string | null | undefined,
+): boolean {
+  if (focusSubPageId) return false;
+  return isInternalPagesSubPage(findSubPage(course ?? null, subPageId ?? null));
+}
+
 export function createInternalPagesSubPage(id: string, name: string): SubPage {
   return {
     id,

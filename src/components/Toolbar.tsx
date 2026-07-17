@@ -15,7 +15,7 @@ import { useI18n } from '../i18n/context';
 import { findMissingResourceElements, type ResourceMissingItem } from '../utils/checkResourceReady';
 import { ResourceMissingDialog } from './ResourceMissingDialog';
 import { isFlatLesson } from '../utils/courseKind';
-import { collectInternalPageIssues } from '../utils/internalPages';
+import { collectInternalPageIssues, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 
 export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack?: () => void }) {
   const { language, setLanguage, t } = useI18n();
@@ -24,6 +24,11 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   const historyIndex = useEditorStore((state) => state.historyIndex);
   const history = useEditorStore((state) => state.history);
   const currentCourse = useEditorStore((state) => state.currentCourse);
+  const workbenchReadonly = useEditorStore((state) => isInternalPagesWorkbenchReadonly(
+    state.currentCourse,
+    state.currentSubPageId,
+    state.focusSubPageId,
+  ));
   const setCurrentCourse = useEditorStore((state) => state.setCurrentCourse);
   const setFeedback = useEditorStore((state) => state.setFeedback);
 
@@ -39,8 +44,8 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   const [resourceMissingItems, setResourceMissingItems] = useState<ResourceMissingItem[]>([]);
   const [resourceMissingContinue, setResourceMissingContinue] = useState<{ label: string; action: () => void } | null>(null);
 
-  const canUndo = historyIndex > 0;
-  const canRedo = historyIndex < history.length - 1;
+  const canUndo = !workbenchReadonly && historyIndex > 0;
+  const canRedo = !workbenchReadonly && historyIndex < history.length - 1;
 
   const handleNew = () => {
     if (currentCourse && [...currentCourse.stages, ...(currentCourse.previewStages ?? [])].some(s => s.subPages.some(sp => sp.elements.length > 0))) {

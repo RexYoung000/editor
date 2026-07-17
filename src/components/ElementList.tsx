@@ -3,7 +3,7 @@ import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
 import { Trash2, Eye, EyeOff, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
 import { useI18n } from '../i18n/context';
-import { findActiveElementPage } from '../utils/internalPages';
+import { findActiveElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
 import {
   getExplicitLayerLabel,
@@ -27,6 +27,11 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const currentCourse = useEditorStore((s) => s.currentCourse);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
   const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
+  const workbenchReadonly = useEditorStore((s) => isInternalPagesWorkbenchReadonly(
+    s.currentCourse,
+    s.currentSubPageId,
+    s.focusSubPageId,
+  ));
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement = useEditorStore((s) => s.selectElement);
   const updateElement = useEditorStore((s) => s.updateElement);
@@ -279,8 +284,11 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0"
+    <div
+      className={`flex-1 flex flex-col min-h-0 ${workbenchReadonly ? 'pointer-events-none opacity-60' : ''}`}
       data-keep-selection
+      aria-disabled={workbenchReadonly}
+      inert={workbenchReadonly ? true : undefined}
       onDragOver={handleDragOverTopLevel}
       onDrop={handleDropTopLevel}
     >
