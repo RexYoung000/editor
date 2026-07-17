@@ -491,6 +491,17 @@ export default function FocusWorkspace() {
       <div
         key={page.id}
         data-internal-page-id={page.id}
+        draggable={!sortingDisabled}
+        onDragStart={(event) => {
+          const target = event.target as HTMLElement;
+          if (sortingDisabled || target.closest('[data-page-action]')) return event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', page.id);
+          beginDragImage(event, page.name);
+          setDrag({ type: 'page', pageId: page.id });
+        }}
+        onDragEnd={stopDrag}
         onDragOver={(event) => {
           if (drag?.type !== 'page' || sortingDisabled || dragging) return;
           event.preventDefault();
@@ -503,27 +514,17 @@ export default function FocusWorkspace() {
         }}
         onDrop={(event) => { event.preventDefault(); event.stopPropagation(); completePageDrop(); }}
         onClick={() => setCurrentInternalPage(page.id)}
-        className={`group ${grouped ? 'ml-7 mr-2' : 'mx-2'} rounded-lg border transition-all duration-150 ${dragging ? 'scale-[0.98] opacity-35' : ''} ${selected ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}
+        className={`group ${grouped ? 'ml-7 mr-2' : 'mx-2'} rounded-lg border transition-all duration-150 ${sortingDisabled ? '' : 'cursor-grab active:cursor-grabbing'} ${dragging ? 'scale-[0.98] opacity-35' : ''} ${selected ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}
       >
         <div className="flex items-center gap-2 p-2">
           <span
-            draggable={!sortingDisabled}
-            onDragStart={(event) => {
-              if (sortingDisabled) return event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.effectAllowed = 'move';
-              event.dataTransfer.setData('text/plain', page.id);
-              beginDragImage(event, page.name);
-              setDrag({ type: 'page', pageId: page.id });
-            }}
-            onDragEnd={stopDrag}
             className={`shrink-0 p-1 text-slate-500 ${sortingDisabled ? 'cursor-not-allowed opacity-35' : 'cursor-grab active:cursor-grabbing'}`}
             title={sortingDisabled ? '搜索或筛选状态下不能排序' : '拖动页面'}
           >
             <GripVertical size={14} />
           </span>
           <div className="w-16 aspect-video rounded bg-slate-950 overflow-hidden flex items-center justify-center text-[9px] text-slate-500">
-            {pageThumbnails[page.id] ? <img src={pageThumbnails[page.id]} className="w-full h-full object-cover" alt="" /> : page.kind === 'dialog' ? '弹窗' : '内容页'}
+            {pageThumbnails[page.id] ? <img src={pageThumbnails[page.id]} draggable={false} className="w-full h-full object-cover" alt="" /> : page.kind === 'dialog' ? '弹窗' : '内容页'}
           </div>
           <div className="min-w-0 flex-1">
             <div
@@ -540,7 +541,7 @@ export default function FocusWorkspace() {
             </div>
           </div>
           {pageIssues.length > 0 && <AlertTriangle size={14} className={pageIssues.some((issue) => issue.severity === 'blocking') ? 'text-red-400' : 'text-amber-400'} />}
-          <div className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+          <div data-page-action className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
             <button className="p-1 hover:bg-slate-600 rounded" title="复制页面" onClick={(event) => { event.stopPropagation(); duplicateInternalPage(page.id); }}><Copy size={13} /></button>
             <button className="p-1 hover:bg-slate-600 rounded" title="移动到其他小关卡" onClick={(event) => {
               event.stopPropagation();
