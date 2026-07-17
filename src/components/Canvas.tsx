@@ -966,7 +966,7 @@ export default function Canvas() {
         )}
         <div
           ref={assistPanelRef}
-          className="absolute top-3 right-3 z-[60]"
+          className="absolute top-3 right-3 z-40"
           data-canvas-interactive
         >
           <button
