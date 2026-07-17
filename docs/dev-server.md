@@ -21,6 +21,8 @@ forge 没有独立的 Node 服务，所有"后端"能力都由 [vite.config.ts](
 
 `vite.config.ts` 顶部的 `lessonSuffix(kind)` 是这套后缀的**单一源**。反查到本地目录就从那里读；查不到就 fallback 到 `preview-server/lessons/<projName>/`。
 
+正课和预习复用同一次编译上传结果。GameLoader 请求预习课件时会在课程标识末尾增加 `_preview`，动态路由必须先查完整标识；完整标识没有独立目录时，再回退到去掉末尾 `_preview` 的正课注册项和磁盘目录。只处理课程标识末尾的预习标记，名称中间包含 `preview` 的普通课件不改写。预习仍按原始课程标识读取自己的 `config_<course>_preview.json`，目录回退不能改写请求文件名。GameLoader 附加的 `?t=...` 缓存参数只用于请求去缓存，不能进入磁盘文件路径。
+
 ## 2. preview-server 静态资源代理
 
 - `/preview-server/...` → `preview-server/` 下对应文件
