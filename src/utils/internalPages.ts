@@ -1,4 +1,4 @@
-import type { Action, Course, Element, InternalPage, InternalPageKind, Stage, SubPage } from '../types';
+import type { Action, Course, Element, InternalPage, InternalPageGroup, InternalPageKind, Stage, SubPage } from '../types';
 import { findSubPage } from './findSubPage';
 
 export const INTERNAL_PAGES_TEMPLATE_ID = 'internal-pages-v1' as const;
@@ -49,7 +49,19 @@ export function createInternalPagesSubPage(id: string, name: string): SubPage {
     templateId: INTERNAL_PAGES_TEMPLATE_ID,
     schemaVersion: 1,
     internalPages: [],
+    internalPageGroups: [],
   };
+}
+
+export function getInternalPageGroups(subPage: SubPage): InternalPageGroup[] {
+  return isInternalPagesSubPage(subPage) && Array.isArray(subPage.internalPageGroups)
+    ? subPage.internalPageGroups
+    : [];
+}
+
+export function validInternalPageGroupId(subPage: SubPage, requested: string | null | undefined): string | undefined {
+  if (!requested) return undefined;
+  return getInternalPageGroups(subPage).some((group) => group.id === requested) ? requested : undefined;
 }
 
 export function getElementPages(subPage: SubPage): ElementPageRef[] {
@@ -182,7 +194,15 @@ export function cloneSubPageWithNewIds(source: SubPage, makeId: (prefix: string)
   const elementIdMap = new Map<string, string>();
   const groupIdMap = new Map<string, string>();
   const branchIdMap = new Map<string, string>();
+  const pageGroupIdMap = new Map<string, string>();
   const pageIdMap = new Map<string, string>([[source.id, newSubId]]);
+  const internalPageGroups = isInternalPagesSubPage(source)
+    ? getInternalPageGroups(source).map((group) => {
+        const id = makeId('page-group');
+        pageGroupIdMap.set(group.id, id);
+        return { ...JSON.parse(JSON.stringify(group)), id } as InternalPageGroup;
+      })
+    : undefined;
   for (const page of getElementPages(source)) {
     for (const element of page.elements) elementIdMap.set(element.id, makeId('el'));
   }
@@ -190,7 +210,12 @@ export function cloneSubPageWithNewIds(source: SubPage, makeId: (prefix: string)
     ? source.internalPages.map((page) => {
         const id = makeId('internal-page');
         pageIdMap.set(page.id, id);
-        return { ...JSON.parse(JSON.stringify(page)), id, elements: remapElements(page.elements, elementIdMap, makeId, groupIdMap, branchIdMap) } as InternalPage;
+        return {
+          ...JSON.parse(JSON.stringify(page)),
+          id,
+          pageGroupId: page.pageGroupId ? pageGroupIdMap.get(page.pageGroupId) : undefined,
+          elements: remapElements(page.elements, elementIdMap, makeId, groupIdMap, branchIdMap),
+        } as InternalPage;
       })
     : undefined;
   const elements = remapElements(source.elements, elementIdMap, makeId, groupIdMap, branchIdMap);
@@ -201,6 +226,7 @@ export function cloneSubPageWithNewIds(source: SubPage, makeId: (prefix: string)
     id: newSubId,
     elements,
     ...(internalPages ? { internalPages } : {}),
+    ...(internalPageGroups ? { internalPageGroups } : {}),
   };
 }
 

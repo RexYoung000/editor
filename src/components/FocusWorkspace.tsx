@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Copy,
   GripVertical,
+  MoreHorizontal,
   MoveRight,
   Plus,
   Search,
@@ -11,16 +14,29 @@ import {
   X,
 } from 'lucide-react';
 import { useEditorStore, findSubPage } from '../store/editorStore';
-import { analyzeInternalPageMove, collectInternalPageIssues, getElementPages, isInternalPagesSubPage, type InternalPageMoveImpact } from '../utils/internalPages';
-import type { InternalPage, InternalPageKind, SubPage } from '../types';
+import {
+  analyzeInternalPageMove,
+  collectInternalPageIssues,
+  getElementPages,
+  getInternalPageGroups,
+  isInternalPagesSubPage,
+  type InternalPageMoveImpact,
+} from '../utils/internalPages';
+import type { InternalPage, InternalPageGroup, InternalPageKind, SubPage } from '../types';
 import ElementList from './ElementList';
 import ConfirmDialog from './ConfirmDialog';
 import { showToast } from '../utils/toast';
 
 type Filter = 'all' | 'content' | 'dialog' | 'issues';
-
-type DragState = { pageId: string; kind: InternalPageKind; index: number };
+type PagePlacement = { pageGroupId?: string; afterPageId?: string };
+type DragState =
+  | { type: 'page'; pageId: string }
+  | { type: 'group'; groupId: string; sourceIndex: number };
+type PageDrop = { pageGroupId?: string; targetIndex: number };
 type MoveRequest = { pageId: string; targetSubPageId: string; targetIndex: number; targetName: string; impact: InternalPageMoveImpact };
+
+const UNGROUPED_KEY = '__ungrouped__';
+const LAYER_PANEL_KEY = 'forge:focus-workspace:layer-panel';
 
 function stageForSubPage(course: ReturnType<typeof useEditorStore.getState>['currentCourse'], subPageId: string | null) {
   if (!course || !subPageId) return null;
@@ -39,6 +55,51 @@ function referenceCount(subPage: SubPage, pageId: string): number {
   return count;
 }
 
+function collapsedStorageKey(courseId: string | undefined, subPageId: string) {
+  return `forge:focus-workspace:collapsed-groups:${courseId ?? 'course'}:${subPageId}`;
+}
+
+function readCollapsedGroups(key: string, validGroupIds: Set<string>): string[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) ?? '[]') as string[];
+    return stored.filter((id) => validGroupIds.has(id));
+  } catch {
+    return [];
+  }
+}
+
+function readLayerPanelState(): { open: boolean; height: number } {
+  try {
+    const value = JSON.parse(localStorage.getItem(LAYER_PANEL_KEY) ?? 'null') as { open?: boolean; height?: number } | null;
+    return {
+      open: value?.open ?? true,
+      height: Math.max(140, Math.min(420, value?.height ?? 224)),
+    };
+  } catch {
+    return { open: true, height: 224 };
+  }
+}
+
+function GroupDropSlot({
+  active,
+  onTarget,
+  onComplete,
+}: {
+  active: boolean;
+  onTarget: () => void;
+  onComplete: () => void;
+}) {
+  return (
+    <div
+      onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); onTarget(); }}
+      onDrop={(event) => { event.preventDefault(); event.stopPropagation(); onComplete(); }}
+      className={`mx-2 transition-[height] duration-150 ${active ? 'h-9' : 'h-2'}`}
+    >
+      <div className={`w-full rounded border ${active ? 'h-7 border-blue-400 bg-blue-500/10' : 'h-0 border-transparent'}`} />
+    </div>
+  );
+}
+
 export default function FocusWorkspace() {
   const currentCourse = useEditorStore((state) => state.currentCourse);
   const currentSubPageId = useEditorStore((state) => state.currentSubPageId);
@@ -50,7 +111,11 @@ export default function FocusWorkspace() {
   const renameInternalPage = useEditorStore((state) => state.renameInternalPage);
   const duplicateInternalPage = useEditorStore((state) => state.duplicateInternalPage);
   const deleteInternalPage = useEditorStore((state) => state.deleteInternalPage);
-  const reorderInternalPages = useEditorStore((state) => state.reorderInternalPages);
+  const addInternalPageGroup = useEditorStore((state) => state.addInternalPageGroup);
+  const renameInternalPageGroup = useEditorStore((state) => state.renameInternalPageGroup);
+  const deleteInternalPageGroup = useEditorStore((state) => state.deleteInternalPageGroup);
+  const reorderInternalPageGroups = useEditorStore((state) => state.reorderInternalPageGroups);
+  const moveInternalPageInList = useEditorStore((state) => state.moveInternalPageInList);
   const moveInternalPage = useEditorStore((state) => state.moveInternalPage);
 
   const [query, setQuery] = useState('');
@@ -58,16 +123,33 @@ export default function FocusWorkspace() {
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [createKind, setCreateKind] = useState<InternalPageKind | null>(null);
   const [createName, setCreateName] = useState('');
+  const [createPlacement, setCreatePlacement] = useState<PagePlacement | undefined>();
+  const [quickAddGroupKey, setQuickAddGroupKey] = useState<string | null>(null);
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [createGroupName, setCreateGroupName] = useState('');
+  const [groupMenuId, setGroupMenuId] = useState<string | null>(null);
+  const [deleteGroup, setDeleteGroup] = useState<InternalPageGroup | null>(null);
   const [deletePage, setDeletePage] = useState<InternalPage | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [pageDrop, setPageDrop] = useState<PageDrop | null>(null);
+  const [groupDropIndex, setGroupDropIndex] = useState<number | null>(null);
   const [movePageId, setMovePageId] = useState<string | null>(null);
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null);
-  const [lastDrop, setLastDrop] = useState<{ visualIndex: number; targetIndex: number; after: boolean } | null>(null);
+  const [collapsedBySubPage, setCollapsedBySubPage] = useState<Record<string, string[]>>({});
+  const [initialLayerPanel] = useState(() => readLayerPanelState());
+  const [layerPanelOpen, setLayerPanelOpen] = useState(initialLayerPanel.open);
+  const [layerPanelHeight, setLayerPanelHeight] = useState(initialLayerPanel.height);
+  const [pendingScrollPageId, setPendingScrollPageId] = useState<string | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const createMenuRef = useRef<HTMLDivElement>(null);
   const targetScrollRef = useRef<HTMLDivElement>(null);
-  const edgeRef = useRef<{ direction: -1 | 0 | 1; since: number }>({ direction: 0, since: 0 });
-  const targetEdgeRef = useRef<{ direction: -1 | 0 | 1; since: number }>({ direction: 0, since: 0 });
+  const ghostRef = useRef<HTMLElement | null>(null);
+  const pageDropRef = useRef<PageDrop | null>(null);
+  const movePanelByDragRef = useRef(false);
+  const rightHoverRef = useRef<{ since: number; pageId: string } | null>(null);
+  const edgeRef = useRef<{ direction: -1 | 0 | 1; since: number; intensity: number }>({ direction: 0, since: 0, intensity: 0 });
+  const targetEdgeRef = useRef<{ direction: -1 | 0 | 1; since: number; intensity: number }>({ direction: 0, since: 0, intensity: 0 });
   const rafRef = useRef<number | null>(null);
 
   const subPage = findSubPage(currentCourse, currentSubPageId);
@@ -78,18 +160,30 @@ export default function FocusWorkspace() {
   useEffect(() => {
     const tick = () => {
       const edge = edgeRef.current;
-      if (edge.direction && Date.now() - edge.since >= 300 && scrollRef.current) {
-        scrollRef.current.scrollTop += edge.direction * 2;
+      if (edge.direction && Date.now() - edge.since >= 100 && scrollRef.current) {
+        scrollRef.current.scrollTop += edge.direction * (2 + edge.intensity * 10);
       }
       const targetEdge = targetEdgeRef.current;
-      if (targetEdge.direction && Date.now() - targetEdge.since >= 300 && targetScrollRef.current) {
-        targetScrollRef.current.scrollTop += targetEdge.direction * 2;
+      if (targetEdge.direction && Date.now() - targetEdge.since >= 100 && targetScrollRef.current) {
+        targetScrollRef.current.scrollTop += targetEdge.direction * (2 + targetEdge.intensity * 10);
       }
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current); };
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem(LAYER_PANEL_KEY, JSON.stringify({ open: layerPanelOpen, height: layerPanelHeight }));
+  }, [layerPanelOpen, layerPanelHeight]);
+
+  useEffect(() => {
+    if (!pendingScrollPageId) return;
+    requestAnimationFrame(() => {
+      document.querySelector(`[data-internal-page-id="${pendingScrollPageId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      setPendingScrollPageId(null);
+    });
+  }, [pendingScrollPageId, currentCourse]);
 
   useEffect(() => {
     if (!createMenuOpen) return;
@@ -107,22 +201,83 @@ export default function FocusWorkspace() {
     };
   }, [createMenuOpen]);
 
+  useEffect(() => {
+    if (!drag) return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      edgeRef.current = { direction: 0, since: 0, intensity: 0 };
+      targetEdgeRef.current = { direction: 0, since: 0, intensity: 0 };
+      rightHoverRef.current = null;
+      ghostRef.current?.remove();
+      ghostRef.current = null;
+      setDrag(null);
+      pageDropRef.current = null;
+      setPageDrop(null);
+      setGroupDropIndex(null);
+      if (movePanelByDragRef.current) setMovePageId(null);
+    };
+    const handleDocumentDrag = (event: DragEvent) => {
+      if (drag.type !== 'page' || !scrollRef.current) return;
+      const rect = scrollRef.current.getBoundingClientRect();
+      if (event.clientX > rect.right + 24) {
+        if (rightHoverRef.current?.pageId !== drag.pageId) rightHoverRef.current = { since: Date.now(), pageId: drag.pageId };
+        if (rightHoverRef.current && Date.now() - rightHoverRef.current.since >= 140) {
+          movePanelByDragRef.current = true;
+          setMovePageId(drag.pageId);
+        }
+      } else {
+        rightHoverRef.current = null;
+        if (movePanelByDragRef.current) {
+          movePanelByDragRef.current = false;
+          setMovePageId(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    document.addEventListener('dragover', handleDocumentDrag);
+    return () => {
+      window.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('dragover', handleDocumentDrag);
+    };
+  }, [drag]);
+
+  useEffect(() => {
+    if (drag !== null) return;
+    edgeRef.current = { direction: 0, since: 0, intensity: 0 };
+    targetEdgeRef.current = { direction: 0, since: 0, intensity: 0 };
+    rightHoverRef.current = null;
+    ghostRef.current?.remove();
+    ghostRef.current = null;
+    pageDropRef.current = null;
+  }, [drag]);
+
   if (!subPage || !isInternalPagesSubPage(subPage) || !stage) return null;
 
   const pages = getElementPages(subPage);
+  const mainPage = pages.find((page) => page.kind === 'main');
   const internalPages = subPage.internalPages;
+  const groups = getInternalPageGroups(subPage);
+  const validGroupIds = new Set(groups.map((group) => group.id));
+  const collapseKey = collapsedStorageKey(currentCourse?.id, subPage.id);
+  const collapsedGroupIds = new Set(collapsedBySubPage[collapseKey] ?? readCollapsedGroups(collapseKey, validGroupIds));
   const showSearch = internalPages.length >= 6;
   const normalizedQuery = query.trim().toLowerCase();
-  const matches = (page: (typeof pages)[number]) => {
-    if (filter === 'content' && page.kind === 'dialog') return false;
+  const sortingDisabled = normalizedQuery.length > 0 || filter !== 'all';
+  const selectedPage = pages.find((page) => page.id === currentInternalPageId) ?? mainPage;
+
+  const pageGroupId = (page: InternalPage) => page.pageGroupId && validGroupIds.has(page.pageGroupId) ? page.pageGroupId : undefined;
+  const matchesBaseFilter = (page: InternalPage) => {
+    if (filter === 'content' && page.kind !== 'content') return false;
     if (filter === 'dialog' && page.kind !== 'dialog') return false;
     if (filter === 'issues' && !issuePageIds.has(page.id)) return false;
-    if (!normalizedQuery) return true;
+    return true;
+  };
+  const matchesPage = (page: InternalPage, groupName?: string) => {
+    if (!matchesBaseFilter(page)) return false;
+    if (!normalizedQuery || groupName?.toLowerCase().includes(normalizedQuery)) return true;
     return page.name.toLowerCase().includes(normalizedQuery)
       || page.elements.some((element) => (element.name ?? '').toLowerCase().includes(normalizedQuery));
   };
-  const contentPages = pages.filter((page) => page.kind !== 'dialog' && matches(page));
-  const dialogPages = pages.filter((page) => page.kind === 'dialog' && matches(page));
 
   const allSameAreaSubPages = (() => {
     const currentIsPreview = currentCourse?.previewStages?.some((item) => item.id === stage.id) ?? false;
@@ -135,31 +290,123 @@ export default function FocusWorkspace() {
       ));
   })();
 
-  const startCreate = (kind: InternalPageKind) => {
+  const topPlacement = (): PagePlacement | undefined => {
+    const current = internalPages.find((page) => page.id === currentInternalPageId);
+    return current ? { afterPageId: current.id } : undefined;
+  };
+
+  const startCreate = (kind: InternalPageKind, placement?: PagePlacement) => {
     const base = kind === 'content' ? '内容页' : '弹窗';
     let index = 1;
     let name = `${base} ${index}`;
     while (internalPages.some((page) => page.name === name)) name = `${base} ${++index}`;
     setCreateMenuOpen(false);
+    setQuickAddGroupKey(null);
     setCreateName(name);
+    setCreatePlacement(placement);
     setCreateKind(kind);
   };
 
-  const handleScrollDrag = (event: React.DragEvent) => {
-    if (!drag) return;
-    event.preventDefault();
-    const rect = scrollRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const zone = 72;
-    const direction: -1 | 0 | 1 = event.clientY < rect.top + zone ? -1 : event.clientY > rect.bottom - zone ? 1 : 0;
-    if (edgeRef.current.direction !== direction) edgeRef.current = { direction, since: Date.now() };
+  const commitCreate = () => {
+    if (!createKind) return;
+    const createdId = addInternalPage(createKind, createName, createPlacement);
+    if (!createdId) {
+      showToast('页面名称不能为空或与现有页面重复', 'error');
+      return;
+    }
+    setPendingScrollPageId(createdId);
+    setCreateKind(null);
+    setCreatePlacement(undefined);
+  };
+
+  const commitCreateGroup = () => {
+    const groupId = addInternalPageGroup(createGroupName);
+    if (!groupId) {
+      showToast('分组名称不能为空或与现有分组重复', 'error');
+      return;
+    }
+    setCreateGroupOpen(false);
+    setCreateGroupName('');
+    setCreateMenuOpen(false);
+  };
+
+  const persistCollapsedGroups = (next: Set<string>) => {
+    setCollapsedBySubPage((current) => ({ ...current, [collapseKey]: [...next] }));
+    localStorage.setItem(collapsedStorageKey(currentCourse?.id, subPage.id), JSON.stringify([...next]));
+  };
+
+  const toggleGroup = (groupId: string) => {
+    const next = new Set(collapsedGroupIds);
+    if (next.has(groupId)) next.delete(groupId);
+    else next.add(groupId);
+    persistCollapsedGroups(next);
+  };
+
+  const beginDragImage = (event: React.DragEvent, label: string) => {
+    ghostRef.current?.remove();
+    const ghost = document.createElement('div');
+    ghost.textContent = label;
+    ghost.className = 'fixed -left-[9999px] top-0 rounded-lg border border-blue-400 bg-slate-800 px-4 py-3 text-xs text-white shadow-2xl';
+    document.body.appendChild(ghost);
+    event.dataTransfer.setDragImage(ghost, 24, 20);
+    ghostRef.current = ghost;
+  };
+
+  const clearGhost = () => {
+    ghostRef.current?.remove();
+    ghostRef.current = null;
   };
 
   const stopDrag = () => {
-    edgeRef.current = { direction: 0, since: 0 };
-    targetEdgeRef.current = { direction: 0, since: 0 };
+    edgeRef.current = { direction: 0, since: 0, intensity: 0 };
+    targetEdgeRef.current = { direction: 0, since: 0, intensity: 0 };
+    rightHoverRef.current = null;
+    clearGhost();
     setDrag(null);
-    setLastDrop(null);
+    pageDropRef.current = null;
+    setPageDrop(null);
+    setGroupDropIndex(null);
+    if (movePanelByDragRef.current) {
+      movePanelByDragRef.current = false;
+      setMovePageId(null);
+    }
+  };
+
+  const updateEdge = (event: React.DragEvent, element: HTMLElement | null, target: 'list' | 'targets') => {
+    if (!drag || !element) return;
+    event.preventDefault();
+    const rect = element.getBoundingClientRect();
+    const zone = 56;
+    let direction: -1 | 0 | 1 = 0;
+    let intensity = 0;
+    if (event.clientY < rect.top + zone) {
+      direction = -1;
+      intensity = Math.min(1, Math.max(0, (rect.top + zone - event.clientY) / zone));
+    } else if (event.clientY > rect.bottom - zone) {
+      direction = 1;
+      intensity = Math.min(1, Math.max(0, (event.clientY - (rect.bottom - zone)) / zone));
+    }
+    const ref = target === 'list' ? edgeRef : targetEdgeRef;
+    if (ref.current.direction !== direction) ref.current = { direction, since: Date.now(), intensity };
+    else ref.current.intensity = intensity;
+  };
+
+  const completePageDrop = () => {
+    const latestDrop = pageDropRef.current;
+    if (drag?.type !== 'page' || !latestDrop) return stopDrag();
+    const changed = moveInternalPageInList(drag.pageId, latestDrop.pageGroupId, latestDrop.targetIndex);
+    if (changed) showToast('页面顺序已调整，可撤销', 'success');
+    stopDrag();
+  };
+
+  const completeGroupDrop = (targetIndex: number) => {
+    if (drag?.type === 'group' && targetIndex !== drag.sourceIndex) {
+      reorderInternalPageGroups(drag.sourceIndex, targetIndex);
+      showToast('分组顺序已调整，可撤销', 'success');
+    }
+    setDrag(null);
+    setPageDrop(null);
+    setGroupDropIndex(null);
   };
 
   const requestMove = (pageId: string, target: SubPage & { internalPages: InternalPage[] }) => {
@@ -167,106 +414,220 @@ export default function FocusWorkspace() {
     if (!page) return;
     const impact = analyzeInternalPageMove(subPage, target, page.id);
     if (!impact) return;
-    const targetIndex = target.internalPages.filter((item) => item.kind === page.kind).length;
+    const targetGroups = new Set(getInternalPageGroups(target).map((group) => group.id));
+    const targetIndex = target.internalPages.filter((item) => !item.pageGroupId || !targetGroups.has(item.pageGroupId)).length;
     setMoveRequest({ pageId, targetSubPageId: target.id, targetIndex, targetName: target.name, impact });
     setMovePageId(null);
     stopDrag();
   };
 
-  const handleTargetScrollDrag = (event: React.DragEvent) => {
-    event.preventDefault();
-    edgeRef.current = { direction: 0, since: 0 };
-    const rect = targetScrollRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const direction: -1 | 0 | 1 = event.clientY < rect.top + 72 ? -1 : event.clientY > rect.bottom - 72 ? 1 : 0;
-    if (targetEdgeRef.current.direction !== direction) targetEdgeRef.current = { direction, since: Date.now() };
+  const pageDropSlot = (groupId: string | undefined, targetIndex: number) => {
+    if (drag?.type !== 'page' || sortingDisabled) return null;
+    const active = pageDrop?.pageGroupId === groupId && pageDrop?.targetIndex === targetIndex;
+    return (
+      <div
+        key={`page-slot-${groupId ?? UNGROUPED_KEY}-${targetIndex}`}
+        className={`mx-2 flex items-center transition-[height] duration-150 ${active ? 'h-9' : 'h-3'}`}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const next = { pageGroupId: groupId, targetIndex };
+          pageDropRef.current = next;
+          setPageDrop(next);
+        }}
+        onDrop={(event) => { event.preventDefault(); event.stopPropagation(); completePageDrop(); }}
+      >
+        <div className={`w-full rounded border transition-all ${active ? 'h-7 border-blue-400 bg-blue-500/10' : 'h-0 border-transparent'}`} />
+      </div>
+    );
   };
 
-  const renderPage = (page: (typeof pages)[number], index: number) => {
+  const renderPage = (internal: InternalPage) => {
+    const page = pages.find((item) => item.id === internal.id);
+    if (!page) return null;
     const selected = currentInternalPageId === page.id;
-    const internal = page.internalPage;
     const pageIssues = issues.filter((issue) => issue.pageId === page.id);
+    const dragging = drag?.type === 'page' && drag.pageId === page.id;
+    const groupId = pageGroupId(internal);
     return (
-      <div key={page.id} className="relative">
-        {drag?.kind === page.kind && lastDrop?.visualIndex === index && !lastDrop.after && <div className="h-0.5 bg-blue-400 mx-2 rounded" />}
-        <div
-          draggable={page.kind !== 'main'}
-          onDragStart={(event) => {
-            if (page.kind === 'main') return;
-            event.dataTransfer.effectAllowed = 'move';
-            const fullGroup = internalPages.filter((item) => item.kind === page.kind);
-            setDrag({ pageId: page.id, kind: page.kind, index: fullGroup.findIndex((item) => item.id === page.id) });
-            setMovePageId(page.id);
-          }}
-          onDragEnd={() => { stopDrag(); setMovePageId(null); }}
-          onDragOver={(event) => {
-            if (!drag || drag.kind !== page.kind) return;
-            event.preventDefault();
-            const rect = event.currentTarget.getBoundingClientRect();
-            const fullGroup = internalPages.filter((item) => item.kind === page.kind);
-            const targetIndex = fullGroup.findIndex((item) => item.id === page.id);
-            const before = event.clientY < rect.top + rect.height / 2;
-            const finalIndex = before
-              ? targetIndex - (drag.index < targetIndex ? 1 : 0)
-              : targetIndex + (drag.index > targetIndex ? 1 : 0);
-            setLastDrop({
-              visualIndex: index,
-              targetIndex: Math.max(0, Math.min(finalIndex, fullGroup.length - 1)),
-              after: !before,
-            });
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            if (drag && drag.kind === page.kind && lastDrop && drag.index !== lastDrop.targetIndex) {
-              reorderInternalPages(drag.kind, drag.index, lastDrop.targetIndex);
-            }
-            stopDrag();
-          }}
-          onClick={() => setCurrentInternalPage(page.id)}
-          className={`group mx-2 mt-1 rounded-lg border transition-colors ${selected ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}
-        >
-          <div className="flex items-center gap-2 p-2">
-            <span className={`shrink-0 ${page.kind === 'main' ? 'w-3' : 'text-slate-500 cursor-grab'}`}>
-              {page.kind !== 'main' && <GripVertical size={14} />}
-            </span>
-            <div className="w-16 aspect-video rounded bg-slate-950 overflow-hidden flex items-center justify-center text-[9px] text-slate-500">
-              {pageThumbnails[page.id] ? <img src={pageThumbnails[page.id]} className="w-full h-full object-cover" alt="" /> : page.kind === 'main' ? '主界面' : page.kind === 'dialog' ? '弹窗' : '内容页'}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div
-                className="text-xs text-slate-100 truncate"
-                onDoubleClick={(event) => {
-                  if (!internal) return;
-                  event.stopPropagation();
-                  const next = window.prompt('页面名称', internal.name);
-                  if (next !== null && !renameInternalPage(internal.id, next)) showToast('页面名称不能为空或与现有页面重复', 'error');
-                }}
-              >{page.name}</div>
-              <div className="text-[10px] text-slate-500">{page.kind === 'main' ? '固定入口' : page.kind === 'dialog' ? '弹窗' : '内容页'} · {page.elements.length} 元素</div>
-            </div>
-            {pageIssues.length > 0 && <AlertTriangle size={14} className={pageIssues.some((issue) => issue.severity === 'blocking') ? 'text-red-400' : 'text-amber-400'} />}
-            {internal && (
-              <div className="flex items-center opacity-0 group-hover:opacity-100">
-                <button className="p-1 hover:bg-slate-600 rounded" title="复制页面" onClick={(event) => { event.stopPropagation(); duplicateInternalPage(page.id); }}><Copy size={13} /></button>
-                <button className="p-1 hover:bg-slate-600 rounded" title="移动到其他小关卡" onClick={(event) => { event.stopPropagation(); setMovePageId(page.id); }}><MoveRight size={13} /></button>
-                <button className="p-1 hover:bg-red-500/30 text-red-400 rounded" title="删除页面" onClick={(event) => { event.stopPropagation(); setDeletePage(internal); }}><Trash2 size={13} /></button>
-              </div>
-            )}
+      <div
+        key={page.id}
+        data-internal-page-id={page.id}
+        onDragOver={(event) => {
+          if (drag?.type !== 'page' || sortingDisabled || dragging) return;
+          event.preventDefault();
+          const groupPages = internalPages.filter((item) => pageGroupId(item) === groupId && item.id !== drag.pageId);
+          const index = groupPages.findIndex((item) => item.id === page.id);
+          const rect = event.currentTarget.getBoundingClientRect();
+          const next = { pageGroupId: groupId, targetIndex: index + (event.clientY > rect.top + rect.height / 2 ? 1 : 0) };
+          pageDropRef.current = next;
+          setPageDrop(next);
+        }}
+        onDrop={(event) => { event.preventDefault(); event.stopPropagation(); completePageDrop(); }}
+        onClick={() => setCurrentInternalPage(page.id)}
+        className={`group mx-2 rounded-lg border transition-all duration-150 ${dragging ? 'scale-[0.98] opacity-35' : ''} ${selected ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}
+      >
+        <div className="flex items-center gap-2 p-2">
+          <span
+            draggable={!sortingDisabled}
+            onDragStart={(event) => {
+              if (sortingDisabled) return event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', page.id);
+              beginDragImage(event, page.name);
+              setDrag({ type: 'page', pageId: page.id });
+            }}
+            onDragEnd={stopDrag}
+            className={`shrink-0 p-1 text-slate-500 ${sortingDisabled ? 'cursor-not-allowed opacity-35' : 'cursor-grab active:cursor-grabbing'}`}
+            title={sortingDisabled ? '搜索或筛选状态下不能排序' : '拖动页面'}
+          >
+            <GripVertical size={14} />
+          </span>
+          <div className="w-16 aspect-video rounded bg-slate-950 overflow-hidden flex items-center justify-center text-[9px] text-slate-500">
+            {pageThumbnails[page.id] ? <img src={pageThumbnails[page.id]} className="w-full h-full object-cover" alt="" /> : page.kind === 'dialog' ? '弹窗' : '内容页'}
           </div>
-          {pageIssues.length > 0 && selected && (
-            <div className="px-3 pb-2 space-y-1">
-              {pageIssues.map((issue, issueIndex) => <div key={`${issue.code}-${issueIndex}`} className={`text-[10px] ${issue.severity === 'blocking' ? 'text-red-300' : 'text-amber-300'}`}>{issue.message}</div>)}
+          <div className="min-w-0 flex-1">
+            <div
+              className="text-xs text-slate-100 truncate"
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                const next = window.prompt('页面名称', internal.name);
+                if (next !== null && !renameInternalPage(internal.id, next)) showToast('页面名称不能为空或与现有页面重复', 'error');
+              }}
+            >{page.name}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
+              <span className={`rounded px-1 py-0.5 ${page.kind === 'dialog' ? 'bg-violet-500/15 text-violet-300' : 'bg-cyan-500/15 text-cyan-300'}`}>{page.kind === 'dialog' ? '弹窗' : '内容页'}</span>
+              <span>{page.elements.length} 元素</span>
             </div>
-          )}
+          </div>
+          {pageIssues.length > 0 && <AlertTriangle size={14} className={pageIssues.some((issue) => issue.severity === 'blocking') ? 'text-red-400' : 'text-amber-400'} />}
+          <div className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+            <button className="p-1 hover:bg-slate-600 rounded" title="复制页面" onClick={(event) => { event.stopPropagation(); duplicateInternalPage(page.id); }}><Copy size={13} /></button>
+            <button className="p-1 hover:bg-slate-600 rounded" title="移动到其他小关卡" onClick={(event) => { event.stopPropagation(); movePanelByDragRef.current = false; setMovePageId(page.id); }}><MoveRight size={13} /></button>
+            <button className="p-1 hover:bg-red-500/30 text-red-400 rounded" title="删除页面" onClick={(event) => { event.stopPropagation(); setDeletePage(internal); }}><Trash2 size={13} /></button>
+          </div>
         </div>
-        {drag?.kind === page.kind && lastDrop?.visualIndex === index && lastDrop.after && <div className="h-0.5 bg-blue-400 mx-2 rounded" />}
-        {selected && (
-          <div className="mx-3 mb-2 h-56 border-x border-b border-slate-700 rounded-b-lg bg-slate-900/60 overflow-hidden">
-            <ElementList />
+        {pageIssues.length > 0 && selected && (
+          <div className="px-3 pb-2 space-y-1">
+            {pageIssues.map((issue, issueIndex) => <div key={`${issue.code}-${issueIndex}`} className={`text-[10px] ${issue.severity === 'blocking' ? 'text-red-300' : 'text-amber-300'}`}>{issue.message}</div>)}
           </div>
         )}
       </div>
     );
+  };
+
+  const renderQuickAdd = (groupId?: string) => {
+    if (sortingDisabled) return null;
+    const key = groupId ?? UNGROUPED_KEY;
+    return (
+      <div className="relative mx-2 mt-1">
+        <button onClick={() => setQuickAddGroupKey((current) => current === key ? null : key)} className="w-full py-2 border border-dashed border-slate-700 rounded text-[11px] text-slate-500 hover:text-slate-300 hover:border-slate-500">+ 新增页面</button>
+        {quickAddGroupKey === key && (
+          <div className="absolute left-1/2 bottom-full mb-1 -translate-x-1/2 z-40 flex overflow-hidden rounded-lg border border-slate-600 bg-slate-800 shadow-xl p-1">
+            <button onClick={() => startCreate('content', { pageGroupId: groupId })} className="whitespace-nowrap rounded px-3 py-2 text-xs hover:bg-slate-700">内容页</button>
+            <button onClick={() => startCreate('dialog', { pageGroupId: groupId })} className="whitespace-nowrap rounded px-3 py-2 text-xs hover:bg-slate-700">弹窗</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderGroup = (group: InternalPageGroup) => {
+    const allPages = internalPages.filter((page) => pageGroupId(page) === group.id);
+    const visiblePages = allPages.filter((page) => matchesPage(page, group.name));
+    const collapsed = !sortingDisabled && collapsedGroupIds.has(group.id);
+    const groupDragging = drag?.type === 'group' && drag.groupId === group.id;
+    const collapsedDropIndex = allPages.filter((page) => drag?.type !== 'page' || page.id !== drag.pageId).length;
+    const collapsedPageTarget = collapsed
+      && drag?.type === 'page'
+      && pageDrop?.pageGroupId === group.id
+      && pageDrop.targetIndex === collapsedDropIndex;
+    if (sortingDisabled && visiblePages.length === 0) return null;
+    return (
+      <section key={group.id} className={`mt-2 transition-all ${groupDragging ? 'opacity-35 scale-[0.99]' : ''}`}>
+        <div
+          onDragOver={(event) => {
+            if (!collapsed || drag?.type !== 'page' || sortingDisabled) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const next = { pageGroupId: group.id, targetIndex: collapsedDropIndex };
+            pageDropRef.current = next;
+            setPageDrop(next);
+          }}
+          onDrop={(event) => {
+            if (!collapsedPageTarget) return;
+            event.preventDefault();
+            event.stopPropagation();
+            completePageDrop();
+          }}
+          className={`mx-2 flex items-center gap-1 rounded-md px-1 py-1 text-slate-400 transition-all hover:bg-slate-800/70 ${collapsedPageTarget ? 'ring-1 ring-blue-400 bg-blue-500/10' : ''}`}
+        >
+          <span
+            draggable={!sortingDisabled}
+            onDragStart={(event) => {
+              if (sortingDisabled) return event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.effectAllowed = 'move';
+              beginDragImage(event, group.name);
+              setDrag({ type: 'group', groupId: group.id, sourceIndex: groups.findIndex((item) => item.id === group.id) });
+            }}
+            onDragEnd={stopDrag}
+            className={`p-1 ${sortingDisabled ? 'cursor-not-allowed opacity-35' : 'cursor-grab active:cursor-grabbing'}`}
+            title={sortingDisabled ? '搜索或筛选状态下不能排序' : '拖动分组'}
+          ><GripVertical size={13} /></span>
+          <button onClick={() => toggleGroup(group.id)} className="p-1 rounded hover:bg-slate-700" title={collapsed ? '展开分组' : '收起分组'}>{collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button>
+          <button onDoubleClick={() => {
+            const next = window.prompt('分组名称', group.name);
+            if (next !== null && !renameInternalPageGroup(group.id, next)) showToast('分组名称不能为空或与现有分组重复', 'error');
+          }} className="min-w-0 flex-1 text-left text-[11px] font-medium truncate">{group.name}</button>
+          <span className="text-[10px] text-slate-600">{allPages.length}</span>
+          <div className="relative">
+            <button onClick={() => setGroupMenuId((id) => id === group.id ? null : group.id)} className="p-1 rounded hover:bg-slate-700"><MoreHorizontal size={13} /></button>
+            {groupMenuId === group.id && (
+              <div className="absolute right-0 top-full z-40 w-28 rounded-md border border-slate-600 bg-slate-800 p-1 shadow-xl">
+                <button onClick={() => {
+                  const next = window.prompt('分组名称', group.name);
+                  setGroupMenuId(null);
+                  if (next !== null && !renameInternalPageGroup(group.id, next)) showToast('分组名称不能为空或与现有分组重复', 'error');
+                }} className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-700">重命名</button>
+                <button onClick={() => { setGroupMenuId(null); setDeleteGroup(group); }} className="w-full rounded px-2 py-1.5 text-left text-xs text-red-400 hover:bg-red-500/15">删除分组</button>
+              </div>
+            )}
+          </div>
+        </div>
+        {!collapsed && (
+          <div>
+            {(() => {
+              let targetIndex = 0;
+              return visiblePages.flatMap((page) => {
+                const isDragged = drag?.type === 'page' && drag.pageId === page.id;
+                const slot = isDragged ? null : pageDropSlot(group.id, targetIndex++);
+                return [slot, renderPage(page)];
+              });
+            })()}
+            {pageDropSlot(group.id, visiblePages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length)}
+            {visiblePages.length === 0 && <div className="mx-3 py-2 text-[10px] text-slate-600">分组内暂无页面</div>}
+            {renderQuickAdd(group.id)}
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const ungroupedPages = internalPages.filter((page) => pageGroupId(page) === undefined && matchesPage(page));
+
+  const startResizeLayerPanel = (event: React.PointerEvent) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = layerPanelHeight;
+    const move = (moveEvent: PointerEvent) => setLayerPanelHeight(Math.max(140, Math.min(420, startHeight + startY - moveEvent.clientY)));
+    const end = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
   };
 
   return (
@@ -278,25 +639,13 @@ export default function FocusWorkspace() {
           <div className="text-sm font-medium truncate">{subPage.name}</div>
         </div>
         <div ref={createMenuRef} className="relative">
-          <button
-            onClick={() => setCreateMenuOpen((open) => !open)}
-            className={`p-1.5 rounded text-blue-300 ${createMenuOpen ? 'bg-slate-700' : 'hover:bg-slate-700'}`}
-            title="新增页面"
-            aria-haspopup="menu"
-            aria-expanded={createMenuOpen}
-          >
-            <Plus size={16} />
-          </button>
+          <button onClick={() => setCreateMenuOpen((open) => !open)} className={`p-1.5 rounded text-blue-300 ${createMenuOpen ? 'bg-slate-700' : 'hover:bg-slate-700'}`} title="新增页面或分组" aria-haspopup="menu" aria-expanded={createMenuOpen}><Plus size={16} /></button>
           {createMenuOpen && (
             <div role="menu" className="absolute right-0 top-full mt-2 w-40 overflow-hidden rounded-lg border border-slate-600 bg-slate-800 shadow-2xl z-50 p-1">
-              <button role="menuitem" onClick={() => startCreate('content')} className="w-full rounded px-3 py-2 text-left hover:bg-slate-700">
-                <div className="text-xs text-slate-100">新增内容页</div>
-                <div className="mt-0.5 text-[10px] text-slate-500">同级页面内容</div>
-              </button>
-              <button role="menuitem" onClick={() => startCreate('dialog')} className="w-full rounded px-3 py-2 text-left hover:bg-slate-700">
-                <div className="text-xs text-slate-100">新增弹窗</div>
-                <div className="mt-0.5 text-[10px] text-slate-500">覆盖当前主界面</div>
-              </button>
+              <button role="menuitem" onClick={() => startCreate('content', topPlacement())} className="w-full rounded px-3 py-2 text-left hover:bg-slate-700"><div className="text-xs text-slate-100">新增内容页</div><div className="mt-0.5 text-[10px] text-slate-500">插入当前页面下方</div></button>
+              <button role="menuitem" onClick={() => startCreate('dialog', topPlacement())} className="w-full rounded px-3 py-2 text-left hover:bg-slate-700"><div className="text-xs text-slate-100">新增弹窗</div><div className="mt-0.5 text-[10px] text-slate-500">插入当前页面下方</div></button>
+              <div className="my-1 border-t border-slate-700" />
+              <button role="menuitem" onClick={() => { setCreateGroupName(''); setCreateGroupOpen(true); setCreateMenuOpen(false); }} className="w-full rounded px-3 py-2 text-left text-xs text-slate-100 hover:bg-slate-700">新建分组</button>
             </div>
           )}
         </div>
@@ -304,63 +653,71 @@ export default function FocusWorkspace() {
 
       {showSearch && (
         <div className="p-2 border-b border-slate-800 space-y-2 shrink-0">
-          <div className="relative">
-            <Search size={13} className="absolute left-2 top-2 text-slate-500" />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索页面或元素" className="w-full h-7 pl-7 pr-2 text-xs bg-slate-800 border border-slate-700 rounded outline-none focus:border-blue-500" />
-          </div>
+          <div className="relative"><Search size={13} className="absolute left-2 top-2 text-slate-500" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索页面、元素或分组" className="w-full h-7 pl-7 pr-2 text-xs bg-slate-800 border border-slate-700 rounded outline-none focus:border-blue-500" /></div>
           <div className="flex gap-1">
-            {([['all', '全部'], ['content', '内容页'], ['dialog', '弹窗'], ['issues', '有问题']] as const).map(([key, label]) => (
-              <button key={key} onClick={() => setFilter(key)} className={`px-2 py-1 text-[10px] rounded ${filter === key ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{label}</button>
-            ))}
+            {([['all', '全部'], ['content', '内容页'], ['dialog', '弹窗'], ['issues', '有问题']] as const).map(([key, label]) => <button key={key} onClick={() => setFilter(key)} className={`px-2 py-1 text-[10px] rounded ${filter === key ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'}`}>{label}</button>)}
           </div>
+          {sortingDisabled && <div className="text-[10px] text-slate-500">搜索或筛选期间暂停排序，清除条件后可继续拖动。</div>}
         </div>
       )}
 
-      {issues.some((issue) => issue.code === 'capacity') && (
-        <div className="mx-2 mt-2 p-2 rounded bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-300">当前小关卡规模较大，请通过真实预览检查首次加载性能。</div>
-      )}
+      {issues.some((issue) => issue.code === 'capacity') && <div className="mx-2 mt-2 p-2 rounded bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-300">当前小关卡规模较大，请通过真实预览检查首次加载性能。</div>}
 
-      <div
-        ref={scrollRef}
-        onDragOver={handleScrollDrag}
-        onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) edgeRef.current = { direction: 0, since: 0 }; }}
-        className="flex-1 min-h-0 overflow-y-auto pb-6"
-      >
-        <div className="px-3 pt-3 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide">内容页</div>
-        {contentPages.map((page, index) => renderPage(page, index))}
-        <div className="px-3 pt-4 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide flex items-center justify-between">
-          <span>弹窗</span><span>{dialogPages.length}</span>
-        </div>
-        {dialogPages.length === 0 && <button onClick={() => startCreate('dialog')} className="mx-2 w-[calc(100%-16px)] py-3 border border-dashed border-slate-700 rounded text-xs text-slate-500 hover:text-slate-300 hover:border-slate-500">+ 新增弹窗</button>}
-        {dialogPages.map((page, index) => renderPage(page, index))}
+      <div ref={scrollRef} onDragOver={(event) => updateEdge(event, scrollRef.current, 'list')} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) edgeRef.current = { direction: 0, since: 0, intensity: 0 }; }} className="flex-1 min-h-0 overflow-y-auto pb-4">
+        <div className="px-3 pt-3 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide">主界面</div>
+        {mainPage && (
+          <button onClick={() => setCurrentInternalPage(mainPage.id)} className={`mx-2 w-[calc(100%-16px)] rounded-lg border text-left transition-colors ${currentInternalPageId === mainPage.id ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}>
+            <div className="flex items-center gap-2 p-2"><span className="w-6" /><div className="w-16 aspect-video rounded bg-slate-950 overflow-hidden flex items-center justify-center text-[9px] text-slate-500">{pageThumbnails[mainPage.id] ? <img src={pageThumbnails[mainPage.id]} className="w-full h-full object-cover" alt="" /> : '主界面'}</div><div className="min-w-0 flex-1"><div className="text-xs text-slate-100 truncate">{mainPage.name}</div><div className="text-[10px] text-slate-500">固定入口 · {mainPage.elements.length} 元素</div></div></div>
+          </button>
+        )}
+
+        <div className="px-3 pt-4 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide flex items-center justify-between"><span>页面列表</span><span>{internalPages.length}</span></div>
+        {(() => {
+          let targetIndex = 0;
+          const rendered = groups.flatMap((group) => {
+            const isDragged = drag?.type === 'group' && drag.groupId === group.id;
+            const slot = drag?.type === 'group' && !sortingDisabled && !isDragged ? (
+              <GroupDropSlot
+                key={`group-slot-${group.id}`}
+                active={groupDropIndex === targetIndex}
+                onTarget={() => setGroupDropIndex(targetIndex)}
+                onComplete={() => completeGroupDrop(targetIndex)}
+              />
+            ) : null;
+            if (!isDragged) targetIndex++;
+            return [slot, renderGroup(group)];
+          });
+          return drag?.type === 'group' && !sortingDisabled
+            ? [...rendered, <GroupDropSlot key="group-slot-last" active={groupDropIndex === targetIndex} onTarget={() => setGroupDropIndex(targetIndex)} onComplete={() => completeGroupDrop(targetIndex)} />]
+            : rendered;
+        })()}
+
+        {(ungroupedPages.length > 0 || !sortingDisabled) && <div className="px-3 pt-4 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide flex items-center justify-between"><span>未分组</span><span>{internalPages.filter((page) => pageGroupId(page) === undefined).length}</span></div>}
+        {(() => {
+          let targetIndex = 0;
+          return ungroupedPages.flatMap((page) => {
+            const isDragged = drag?.type === 'page' && drag.pageId === page.id;
+            const slot = isDragged ? null : pageDropSlot(undefined, targetIndex++);
+            return [slot, renderPage(page)];
+          });
+        })()}
+        {pageDropSlot(undefined, ungroupedPages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length)}
+        {ungroupedPages.length === 0 && !sortingDisabled && <div className="mx-3 py-2 text-[10px] text-slate-600">暂无未分组页面</div>}
+        {renderQuickAdd()}
+      </div>
+
+      <div className="shrink-0 border-t border-slate-700 bg-slate-900">
+        {layerPanelOpen && <div onPointerDown={startResizeLayerPanel} className="h-1 cursor-row-resize bg-slate-800 hover:bg-blue-500/60" title="拖动调整图层面板高度" />}
+        <button onClick={() => setLayerPanelOpen((open) => !open)} className="h-9 w-full px-3 flex items-center justify-between text-xs text-slate-300 hover:bg-slate-800"><span>图层 ({selectedPage?.elements.length ?? 0})</span>{layerPanelOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
+        {layerPanelOpen && <div style={{ height: layerPanelHeight }} className="border-t border-slate-800 overflow-y-auto bg-slate-900/80"><ElementList showHeader={false} /></div>}
       </div>
 
       {movePageId && (
-        <div
-          ref={targetScrollRef}
-          onDragOver={handleTargetScrollDrag}
-          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) targetEdgeRef.current = { direction: 0, since: 0 }; }}
-          className="absolute left-full top-12 ml-2 w-64 max-h-[70vh] overflow-y-auto rounded-lg border border-slate-600 bg-slate-800 shadow-2xl p-2 z-50"
-        >
-          <div className="flex items-center justify-between px-1 pb-2">
-            <span className="text-xs font-medium">移动到其他小关卡</span>
-            <button onClick={() => { setMovePageId(null); stopDrag(); }} className="text-slate-400 hover:text-white"><X size={14} /></button>
-          </div>
+        <div ref={targetScrollRef} onDragOver={(event) => updateEdge(event, targetScrollRef.current, 'targets')} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) targetEdgeRef.current = { direction: 0, since: 0, intensity: 0 }; }} className="absolute left-full top-12 ml-2 w-64 max-h-[70vh] overflow-y-auto rounded-lg border border-slate-600 bg-slate-800 shadow-2xl p-2 z-50">
+          <div className="flex items-center justify-between px-1 pb-2"><span className="text-xs font-medium">移动到其他小关卡</span><button onClick={() => { setMovePageId(null); stopDrag(); }} className="text-slate-400 hover:text-white"><X size={14} /></button></div>
           {allSameAreaSubPages.length === 0 ? <div className="p-3 text-xs text-slate-500">没有兼容的小关卡</div> : allSameAreaSubPages.map((target) => (
-            <button
-              key={target.id}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                requestMove(movePageId, target);
-              }}
-              onClick={() => {
-                requestMove(movePageId, target);
-              }}
-              className="w-full text-left px-3 py-2 mb-1 rounded border border-slate-700 bg-slate-900/60 hover:border-blue-500 hover:bg-blue-500/10"
-            >
-              <div className="text-xs text-slate-200 truncate">{target.name}</div>
-              <div className="text-[10px] text-slate-500">移入末尾 · {target.internalPages.length + 1} 页</div>
+            <button key={target.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); requestMove(movePageId, target); }} onClick={() => requestMove(movePageId, target)} className="w-full text-left px-3 py-2 mb-1 rounded border border-slate-700 bg-slate-900/60 hover:border-blue-500 hover:bg-blue-500/10">
+              <div className="text-xs text-slate-200 truncate">{target.name}</div><div className="text-[10px] text-slate-500">移入未分组末尾 · {target.internalPages.length + 1} 页</div>
             </button>
           ))}
         </div>
@@ -370,49 +727,25 @@ export default function FocusWorkspace() {
         <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center" onClick={() => setCreateKind(null)}>
           <div className="w-96 rounded-lg border border-slate-700 bg-slate-800 shadow-2xl" onClick={(event) => event.stopPropagation()}>
             <div className="px-4 py-3 border-b border-slate-700 text-sm font-medium">新增{createKind === 'dialog' ? '弹窗' : '内容页'}</div>
-            <div className="p-4 space-y-3">
-              <label className="block text-xs text-slate-400">页面名称</label>
-              <input autoFocus value={createName} onChange={(event) => setCreateName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && createName.trim()) { addInternalPage(createKind, createName); setCreateKind(null); } }} className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-sm outline-none focus:border-blue-500" />
-              {internalPages.some((page) => page.name === createName.trim()) && <div className="text-xs text-red-400">同一小关卡内页面名称不能重复</div>}
-            </div>
-            <div className="p-3 border-t border-slate-700 flex justify-end gap-2">
-              <button onClick={() => setCreateKind(null)} className="px-4 py-2 text-xs bg-slate-700 rounded">取消</button>
-              <button disabled={!createName.trim() || internalPages.some((page) => page.name === createName.trim())} onClick={() => { addInternalPage(createKind, createName); setCreateKind(null); }} className="px-4 py-2 text-xs bg-blue-600 disabled:opacity-40 rounded">创建</button>
-            </div>
+            <div className="p-4 space-y-3"><label className="block text-xs text-slate-400">页面名称</label><input autoFocus value={createName} onChange={(event) => setCreateName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && createName.trim()) commitCreate(); }} className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-sm outline-none focus:border-blue-500" />{internalPages.some((page) => page.name === createName.trim()) && <div className="text-xs text-red-400">同一小关卡内页面名称不能重复</div>}</div>
+            <div className="p-3 border-t border-slate-700 flex justify-end gap-2"><button onClick={() => setCreateKind(null)} className="px-4 py-2 text-xs bg-slate-700 rounded">取消</button><button disabled={!createName.trim() || internalPages.some((page) => page.name === createName.trim())} onClick={commitCreate} className="px-4 py-2 text-xs bg-blue-600 disabled:opacity-40 rounded">创建</button></div>
           </div>
         </div>
       )}
 
-      {deletePage && (
-        <ConfirmDialog
-          title={`删除${deletePage.kind === 'dialog' ? '弹窗' : '内容页'}`}
-          message={`${deletePage.elements.length > 0 ? `页面包含 ${deletePage.elements.length} 个元素。\n` : ''}${referenceCount(subPage, deletePage.id) > 0 ? `删除后将有 ${referenceCount(subPage, deletePage.id)} 条页面关系失效。\n` : ''}确定删除“${deletePage.name}”吗？可使用撤销恢复。`}
-          danger
-          onCancel={() => setDeletePage(null)}
-          onConfirm={() => { deleteInternalPage(deletePage.id); setDeletePage(null); }}
-        />
+      {createGroupOpen && (
+        <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center" onClick={() => setCreateGroupOpen(false)}>
+          <div className="w-96 rounded-lg border border-slate-700 bg-slate-800 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-slate-700 text-sm font-medium">新建页面分组</div>
+            <div className="p-4 space-y-3"><label className="block text-xs text-slate-400">分组名称</label><input autoFocus value={createGroupName} onChange={(event) => setCreateGroupName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && createGroupName.trim()) commitCreateGroup(); }} className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded text-sm outline-none focus:border-blue-500" /></div>
+            <div className="p-3 border-t border-slate-700 flex justify-end gap-2"><button onClick={() => setCreateGroupOpen(false)} className="px-4 py-2 text-xs bg-slate-700 rounded">取消</button><button disabled={!createGroupName.trim()} onClick={commitCreateGroup} className="px-4 py-2 text-xs bg-blue-600 disabled:opacity-40 rounded">创建</button></div>
+          </div>
+        </div>
       )}
-      {moveRequest && (
-        <ConfirmDialog
-          title="确认跨小关卡移动"
-          message={[
-            `目标：${moveRequest.targetName}`,
-            moveRequest.impact.invalidRelationCount > 0
-              ? `将产生 ${moveRequest.impact.invalidRelationCount} 条失效页面关系，移动后会保留断链提醒。`
-              : '不会产生失效页面关系。',
-            moveRequest.impact.changesDialogBase ? '该弹窗的底板将切换为目标小关卡主界面。' : '',
-            moveRequest.impact.nameCollision ? `目标存在同名页面，将自动命名为“${moveRequest.impact.resolvedName}”。` : '',
-          ].filter(Boolean).join('\n')}
-          confirmText="确认移动"
-          onConfirm={() => {
-            const result = moveInternalPage(moveRequest.pageId, moveRequest.targetSubPageId, moveRequest.targetIndex);
-            if (!result.ok) showToast(result.error ?? '移动失败', 'error');
-            else showToast(`已移动到 ${moveRequest.targetName}`, 'success');
-            setMoveRequest(null);
-          }}
-          onCancel={() => setMoveRequest(null)}
-        />
-      )}
+
+      {deleteGroup && <ConfirmDialog title="删除页面分组" message={`删除“${deleteGroup.name}”后，组内页面会保留并移到未分组末尾。可使用撤销恢复。`} danger onCancel={() => setDeleteGroup(null)} onConfirm={() => { deleteInternalPageGroup(deleteGroup.id); setDeleteGroup(null); }} />}
+      {deletePage && <ConfirmDialog title={`删除${deletePage.kind === 'dialog' ? '弹窗' : '内容页'}`} message={`${deletePage.elements.length > 0 ? `页面包含 ${deletePage.elements.length} 个元素。\n` : ''}${referenceCount(subPage, deletePage.id) > 0 ? `删除后将有 ${referenceCount(subPage, deletePage.id)} 条页面关系失效。\n` : ''}确定删除“${deletePage.name}”吗？可使用撤销恢复。`} danger onCancel={() => setDeletePage(null)} onConfirm={() => { deleteInternalPage(deletePage.id); setDeletePage(null); }} />}
+      {moveRequest && <ConfirmDialog title="确认跨小关卡移动" message={[`目标：${moveRequest.targetName}`, moveRequest.impact.invalidRelationCount > 0 ? `将产生 ${moveRequest.impact.invalidRelationCount} 条失效页面关系，移动后会保留断链提醒。` : '不会产生失效页面关系。', moveRequest.impact.changesDialogBase ? '该弹窗的底板将切换为目标小关卡主界面。' : '', moveRequest.impact.nameCollision ? `目标存在同名页面，将自动命名为“${moveRequest.impact.resolvedName}”。` : ''].filter(Boolean).join('\n')} confirmText="确认移动" onConfirm={() => { const result = moveInternalPage(moveRequest.pageId, moveRequest.targetSubPageId, moveRequest.targetIndex); if (!result.ok) showToast(result.error ?? '移动失败', 'error'); else showToast(`已移动到 ${moveRequest.targetName}`, 'success'); setMoveRequest(null); }} onCancel={() => setMoveRequest(null)} />}
     </div>
   );
 }

@@ -27,11 +27,15 @@ import {
   createInternalPagesSubPage,
   findActiveElementPage,
   getElementPage,
+  getInternalPageGroups,
   isInternalPagesSubPage,
   INTERNAL_PAGES_MIN_VERSION,
   INTERNAL_PAGES_TEMPLATE_ID,
   resolveMovedPageName,
+  validInternalPageGroupId,
 } from '../utils/internalPages';
+
+type InternalPagePlacement = { pageGroupId?: string; afterPageId?: string };
 
 export type { Element, SubPage, Stage, Course };
 // Backwards alias: many call sites still import `Page`
@@ -81,11 +85,15 @@ interface EditorState {
   enterFocusWorkspace: (stageId: string, subPageId: string) => void;
   exitFocusWorkspace: () => void;
   setCurrentInternalPage: (pageId: string) => void;
-  addInternalPage: (kind: InternalPageKind, name: string) => void;
+  addInternalPage: (kind: InternalPageKind, name: string, placement?: InternalPagePlacement) => string | null;
   renameInternalPage: (pageId: string, name: string) => boolean;
   duplicateInternalPage: (pageId: string) => void;
   deleteInternalPage: (pageId: string) => void;
-  reorderInternalPages: (kind: InternalPageKind, fromIndex: number, toIndex: number) => void;
+  addInternalPageGroup: (name: string) => string | null;
+  renameInternalPageGroup: (groupId: string, name: string) => boolean;
+  deleteInternalPageGroup: (groupId: string) => void;
+  reorderInternalPageGroups: (fromIndex: number, toIndex: number) => void;
+  moveInternalPageInList: (pageId: string, pageGroupId: string | undefined, targetIndex: number) => boolean;
   moveInternalPage: (pageId: string, targetSubPageId: string, targetIndex: number) => { ok: boolean; error?: string };
   updateDialogSettings: (pageId: string, updates: Partial<DialogSettings>) => void;
   setNoEntryDeferred: (pageId: string, deferred: boolean) => void;
@@ -313,6 +321,33 @@ function markInternalPagesFeature(course: Course, subPage: SubPage): void {
   course.minimumEditorVersion = INTERNAL_PAGES_MIN_VERSION;
 }
 
+function pageBelongsToEditorGroup(subPage: SubPage, page: InternalPage, pageGroupId: string | undefined): boolean {
+  const validIds = new Set(getInternalPageGroups(subPage).map((group) => group.id));
+  if (pageGroupId) return page.pageGroupId === pageGroupId;
+  return !page.pageGroupId || !validIds.has(page.pageGroupId);
+}
+
+function insertInternalPageAtGroupIndex(
+  subPage: SubPage & { internalPages: InternalPage[] },
+  page: InternalPage,
+  requestedGroupId: string | undefined,
+  requestedIndex: number,
+): void {
+  const pageGroupId = validInternalPageGroupId(subPage, requestedGroupId);
+  if (pageGroupId) page.pageGroupId = pageGroupId;
+  else delete page.pageGroupId;
+  const candidates = subPage.internalPages
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => pageBelongsToEditorGroup(subPage, item, pageGroupId));
+  const targetIndex = Math.max(0, Math.min(requestedIndex, candidates.length));
+  const storageIndex = targetIndex < candidates.length
+    ? candidates[targetIndex].index
+    : candidates.length > 0
+      ? candidates[candidates.length - 1].index + 1
+      : subPage.internalPages.length;
+  subPage.internalPages.splice(storageIndex, 0, page);
+}
+
 export const useEditorStore = create<EditorState>()(
   immer((set, get) => ({
     currentCourse: null,
@@ -446,8 +481,9 @@ export const useEditorStore = create<EditorState>()(
         state.selectedElementIds = [];
       }),
 
-    addInternalPage: (kind, name) => {
+    addInternalPage: (kind, name, placement) => {
       let changed = false;
+      let createdPageId: string | null = null;
       set((state) => {
         const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
         if (!isInternalPagesSubPage(subPage)) return;
@@ -472,12 +508,26 @@ export const useEditorStore = create<EditorState>()(
           closeButton.actions = [{ id: genId('action'), event: 'onClick', actionType: 'closeInternalDialog' }];
           page.elements.push(closeButton);
         }
-        subPage.internalPages.push(page);
+        const afterIndex = placement?.afterPageId
+          ? subPage.internalPages.findIndex((item) => item.id === placement.afterPageId)
+          : -1;
+        if (afterIndex >= 0) {
+          const afterPage = subPage.internalPages[afterIndex];
+          const inheritedGroupId = validInternalPageGroupId(subPage, afterPage.pageGroupId);
+          if (inheritedGroupId) page.pageGroupId = inheritedGroupId;
+          subPage.internalPages.splice(afterIndex + 1, 0, page);
+        } else {
+          const pageGroupId = validInternalPageGroupId(subPage, placement?.pageGroupId);
+          const groupLength = subPage.internalPages.filter((item) => pageBelongsToEditorGroup(subPage, item, pageGroupId)).length;
+          insertInternalPageAtGroupIndex(subPage, page, pageGroupId, groupLength);
+        }
         state.currentInternalPageId = page.id;
         state.selectedElementIds = [];
+        createdPageId = page.id;
         changed = true;
       });
       if (changed) get().saveHistory();
+      return createdPageId;
     },
 
     renameInternalPage: (pageId, name) => {
@@ -540,20 +590,96 @@ export const useEditorStore = create<EditorState>()(
       if (changed) get().saveHistory();
     },
 
-    reorderInternalPages: (kind, fromIndex, toIndex) => {
+    addInternalPageGroup: (name) => {
+      let groupId: string | null = null;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const trimmed = name.trim();
+        const groups = subPage.internalPageGroups ?? (subPage.internalPageGroups = []);
+        if (!trimmed || groups.some((group) => group.name === trimmed)) return;
+        groupId = genId('page-group');
+        groups.push({ id: groupId, name: trimmed });
+      });
+      if (groupId) get().saveHistory();
+      return groupId;
+    },
+
+    renameInternalPageGroup: (groupId, name) => {
       let changed = false;
       set((state) => {
         const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
         if (!isInternalPagesSubPage(subPage)) return;
-        const indices = subPage.internalPages.map((page, index) => ({ page, index })).filter(({ page }) => page.kind === kind);
-        if (!indices[fromIndex] || !indices[toIndex]) return;
-        const [removed] = subPage.internalPages.splice(indices[fromIndex].index, 1);
-        const refreshed = subPage.internalPages.map((page, index) => ({ page, index })).filter(({ page }) => page.kind === kind);
-        const insertIndex = toIndex >= refreshed.length ? subPage.internalPages.length : refreshed[toIndex].index;
-        subPage.internalPages.splice(insertIndex, 0, removed);
+        const trimmed = name.trim();
+        const groups = getInternalPageGroups(subPage);
+        const group = groups.find((item) => item.id === groupId);
+        if (!group || !trimmed || groups.some((item) => item.id !== groupId && item.name === trimmed)) return;
+        if (group.name === trimmed) return;
+        group.name = trimmed;
         changed = true;
       });
       if (changed) get().saveHistory();
+      return changed;
+    },
+
+    deleteInternalPageGroup: (groupId) => {
+      let changed = false;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const groups = subPage.internalPageGroups ?? [];
+        const groupIndex = groups.findIndex((group) => group.id === groupId);
+        if (groupIndex < 0) return;
+        const moved = subPage.internalPages.filter((page) => page.pageGroupId === groupId);
+        subPage.internalPages = subPage.internalPages.filter((page) => page.pageGroupId !== groupId);
+        for (const page of moved) {
+          delete page.pageGroupId;
+          subPage.internalPages.push(page);
+        }
+        groups.splice(groupIndex, 1);
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+    },
+
+    reorderInternalPageGroups: (fromIndex, toIndex) => {
+      let changed = false;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const groups = subPage.internalPageGroups ?? [];
+        if (!groups[fromIndex] || fromIndex === toIndex) return;
+        const nextIndex = Math.max(0, Math.min(toIndex, groups.length - 1));
+        const [removed] = groups.splice(fromIndex, 1);
+        groups.splice(nextIndex, 0, removed);
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+    },
+
+    moveInternalPageInList: (pageId, requestedGroupId, targetIndex) => {
+      let changed = false;
+      set((state) => {
+        const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
+        if (!isInternalPagesSubPage(subPage)) return;
+        const sourceStorageIndex = subPage.internalPages.findIndex((page) => page.id === pageId);
+        if (sourceStorageIndex < 0) return;
+        const source = subPage.internalPages[sourceStorageIndex];
+        const sourceGroupId = validInternalPageGroupId(subPage, source.pageGroupId);
+        const targetGroupId = validInternalPageGroupId(subPage, requestedGroupId);
+        const sourceVisualIndex = subPage.internalPages
+          .filter((page) => pageBelongsToEditorGroup(subPage, page, sourceGroupId))
+          .findIndex((page) => page.id === pageId);
+        const targetLengthAfterRemoval = subPage.internalPages
+          .filter((page) => page.id !== pageId && pageBelongsToEditorGroup(subPage, page, targetGroupId)).length;
+        const normalizedTargetIndex = Math.max(0, Math.min(targetIndex, targetLengthAfterRemoval));
+        if (sourceGroupId === targetGroupId && sourceVisualIndex === normalizedTargetIndex) return;
+        subPage.internalPages.splice(sourceStorageIndex, 1);
+        insertInternalPageAtGroupIndex(subPage, source, targetGroupId, normalizedTargetIndex);
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+      return changed;
     },
 
     moveInternalPage: (pageId, targetSubPageId, targetIndex) => {
@@ -572,9 +698,9 @@ export const useEditorStore = create<EditorState>()(
         const page = sourceSubPage.internalPages[sourceIndex];
         page.name = resolveMovedPageName(targetSubPage, page.name);
         sourceSubPage.internalPages.splice(sourceIndex, 1);
-        const compatible = targetSubPage.internalPages.map((item, index) => ({ item, index })).filter(({ item }) => item.kind === page.kind);
-        const insertIndex = targetIndex >= compatible.length ? targetSubPage.internalPages.length : compatible[targetIndex].index;
-        targetSubPage.internalPages.splice(insertIndex, 0, page);
+        delete page.pageGroupId;
+        const ungroupedLength = targetSubPage.internalPages.filter((item) => pageBelongsToEditorGroup(targetSubPage, item, undefined)).length;
+        insertInternalPageAtGroupIndex(targetSubPage, page, undefined, Math.min(targetIndex, ungroupedLength));
         const targetStage = findStageOfSubPage(state.currentCourse, targetSubPage.id);
         state.currentStageId = targetStage?.id ?? state.currentStageId;
         state.currentSubPageId = targetSubPage.id;
