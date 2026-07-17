@@ -60,6 +60,8 @@ export interface SubPage {
   schemaVersion?: 1;
   /** 主界面继续使用 elements；这里只保存内容页与弹窗。 */
   internalPages?: InternalPage[];
+  /** 仅用于编辑器整理的单层页面分组；不参与课件运行与导出。 */
+  internalPageGroups?: InternalPageGroup[];
 }
 
 export type InternalPageKind = 'content' | 'dialog';
@@ -70,12 +72,19 @@ export interface DialogSettings {
   closeOnMask: boolean;
 }
 
+export interface InternalPageGroup {
+  id: string;
+  name: string;
+}
+
 export interface InternalPage {
   id: string;
   name: string;
   kind: InternalPageKind;
   elements: Element[];
   dialogSettings?: DialogSettings;
+  /** 编辑器页面分组 ID；缺省或失效时显示在“未分组”。 */
+  pageGroupId?: string;
   /** 内容页允许把“无入口”降级为暂不配置。 */
   noEntryDeferred?: boolean;
 }

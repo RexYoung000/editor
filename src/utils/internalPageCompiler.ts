@@ -86,11 +86,15 @@ export function compileInternalSubPage(subPage: SubPage): SubPage {
     pageElements.push(...page.elements);
     flattened.push(...clonePageElements(page.id, pageElements, false));
   }
+  const { internalPageGroups: _editorPageGroups, ...runtimeSubPage } = subPage;
   return {
-    ...subPage,
+    ...runtimeSubPage,
     elements: flattened,
     // 编译后只保留页面清单，避免资源重复扫描，同时让空白页面也能参与运行时切换。
-    internalPages: subPage.internalPages.map((page) => ({ ...page, elements: [] })),
+    internalPages: subPage.internalPages.map((page) => {
+      const { pageGroupId: _editorPageGroupId, ...runtimePage } = page;
+      return { ...runtimePage, elements: [] };
+    }),
   };
 }
 

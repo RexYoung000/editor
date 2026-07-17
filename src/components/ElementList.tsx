@@ -22,7 +22,7 @@ type DropTarget =
   }
   | { kind: 'into-container'; containerId: string };
 
-export default function ElementList() {
+export default function ElementList({ showHeader = true }: { showHeader?: boolean } = {}) {
   const { t } = useI18n();
   const currentCourse = useEditorStore((s) => s.currentCourse);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
@@ -284,9 +284,11 @@ export default function ElementList() {
       onDragOver={handleDragOverTopLevel}
       onDrop={handleDropTopLevel}
     >
-      <div className="h-9 flex items-center px-3 text-xs font-medium text-slate-400">
-        {t('elementList')} ({elements.length})
-      </div>
+      {showHeader && (
+        <div className="h-9 flex items-center px-3 text-xs font-medium text-slate-400">
+          {t('elementList')} ({elements.length})
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto">
         {elements.length === 0 ? (
           <div className="flex items-center justify-center h-full">

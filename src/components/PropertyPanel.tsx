@@ -512,7 +512,12 @@ export default function PropertyPanel() {
               {activePageIssues.length > 0 && (
                 <div className="border-t border-slate-700 pt-3 space-y-2">
                   <div className="text-xs font-medium text-slate-300">页面提醒</div>
-                  {activePageIssues.map((issue, index) => <div key={`${issue.code}-${index}`} className={`text-[10px] leading-relaxed ${issue.severity === 'blocking' ? 'text-red-300' : 'text-amber-300'}`}>{issue.message}</div>)}
+                  {activePageIssues.map((issue, index) => (
+                    <div key={`${issue.code}-${index}`} className={`flex items-start gap-1.5 text-[10px] leading-relaxed ${issue.severity === 'blocking' ? 'text-red-300' : 'text-amber-300'}`}>
+                      <TriangleAlert size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+                      <span>{issue.message}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

@@ -48,16 +48,19 @@ test('创建内部页面模板时只给新模板写入能力字段', () => {
   assert.equal(page.templateId, 'internal-pages-v1');
   assert.equal(page.schemaVersion, 1);
   assert.deepEqual(page.internalPages, []);
+  assert.deepEqual(page.internalPageGroups, []);
   assert.equal(isInternalPagesSubPage(page), true);
   assert.equal(isInternalPagesSubPage({ id: 'legacy', name: '旧页面', elements: [] }), false);
 });
 
 test('复制完整小关卡会重建页面、元素、动作及分组 ID，并维持内部关系', () => {
   const source = createInternalPagesSubPage('sub-old', '小关卡');
+  source.internalPageGroups = [{ id: 'page-group-old', name: '第一题' }];
   const content: InternalPage = {
     id: 'content-old',
     name: '内容页',
     kind: 'content',
+    pageGroupId: 'page-group-old',
     elements: [element('content-el', [{ id: 'action-content', event: 'onClick', actionType: 'toggleVisible', targetId: 'main-el', groupId: 'group-old', branchId: 'branch-old' }])],
   };
   source.elements = [element('main-el', [{ id: 'action-main', event: 'onClick', actionType: 'navigateInternalPage', pageTargetId: content.id, pageTargetNameSnapshot: content.name, groupId: 'group-old' }])];
@@ -66,6 +69,8 @@ test('复制完整小关卡会重建页面、元素、动作及分组 ID，并�
   const cloned = cloneSubPageWithNewIds(source, makeId);
   assert.notEqual(cloned.id, source.id);
   assert.notEqual(cloned.internalPages?.[0].id, content.id);
+  assert.notEqual(cloned.internalPageGroups?.[0].id, source.internalPageGroups[0].id);
+  assert.equal(cloned.internalPages?.[0].pageGroupId, cloned.internalPageGroups?.[0].id);
   assert.notEqual(cloned.elements[0].id, source.elements[0].id);
   assert.notEqual(cloned.elements[0].actions?.[0].id, source.elements[0].actions?.[0].id);
   assert.equal(cloned.elements[0].actions?.[0].pageTargetId, cloned.internalPages?.[0].id);
@@ -73,6 +78,21 @@ test('复制完整小关卡会重建页面、元素、动作及分组 ID，并�
   assert.notEqual(cloned.elements[0].actions?.[0].groupId, 'group-old');
   assert.equal(cloned.elements[0].actions?.[0].groupId, cloned.internalPages?.[0].elements[0].actions?.[0].groupId);
   assert.notEqual(cloned.internalPages?.[0].elements[0].actions?.[0].branchId, 'branch-old');
+});
+
+test('编译内部页面时剥离编辑器页面分组但保持页面类型与顺序', () => {
+  const source = createInternalPagesSubPage('sub-grouped', '小关卡');
+  source.internalPageGroups = [{ id: 'page-group', name: '第一题' }];
+  source.internalPages = [
+    { id: 'content', name: '讲解', kind: 'content', pageGroupId: 'page-group', elements: [] },
+    { id: 'dialog', name: '提示', kind: 'dialog', pageGroupId: 'page-group', elements: [], dialogSettings: { maskColor: '#000000', maskOpacity: 0.5, closeOnMask: true } },
+  ];
+
+  const compiled = compileInternalSubPage(source);
+  assert.equal(compiled.internalPageGroups, undefined);
+  assert.deepEqual(compiled.internalPages?.map((page) => page.id), ['content', 'dialog']);
+  assert.equal(compiled.internalPages?.some((page) => page.pageGroupId !== undefined), false);
+  assert.equal(compiled.internalPages?.[1].kind, 'dialog');
 });
 
 test('删除目标后保留断链，发布校验会阻断而不会静默清除', () => {
