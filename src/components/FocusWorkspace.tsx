@@ -459,21 +459,28 @@ export default function FocusWorkspace() {
     stopDrag();
   };
 
-  const pageDropSlot = (groupId: string | undefined, targetIndex: number) => {
-    if (drag?.type !== 'page' || sortingDisabled) return null;
-    const active = pageDrop?.pageGroupId === groupId && pageDrop?.targetIndex === targetIndex;
+  const pageDropSlot = (groupId: string | undefined, targetIndex: number, slotId: string, enabled = true) => {
+    const available = drag?.type === 'page' && !sortingDisabled && enabled;
+    const active = available && pageDrop?.pageGroupId === groupId && pageDrop?.targetIndex === targetIndex;
     return (
       <div
-        key={`page-slot-${groupId ?? UNGROUPED_KEY}-${targetIndex}`}
-        className={`${groupId ? 'ml-7 mr-2' : 'mx-2'} flex items-center transition-[height] duration-150 ${active ? 'h-9' : 'h-3'}`}
+        key={`page-slot-${groupId ?? UNGROUPED_KEY}-${slotId}`}
+        data-page-drop-slot={`${groupId ?? UNGROUPED_KEY}:${slotId}`}
+        className={`${groupId ? 'ml-7 mr-2' : 'mx-2'} flex items-center transition-[height] duration-150 ${available ? (active ? 'h-9' : 'h-3') : 'h-0 pointer-events-none'}`}
         onDragOver={(event) => {
+          if (!available) return;
           event.preventDefault();
           event.stopPropagation();
           const next = { pageGroupId: groupId, targetIndex };
           pageDropRef.current = next;
           setPageDrop(next);
         }}
-        onDrop={(event) => { event.preventDefault(); event.stopPropagation(); completePageDrop(); }}
+        onDrop={(event) => {
+          if (!available) return;
+          event.preventDefault();
+          event.stopPropagation();
+          completePageDrop();
+        }}
       >
         <div className={`w-full rounded border transition-all ${active ? 'h-7 border-blue-400 bg-blue-500/10' : 'h-0 border-transparent'}`} />
       </div>
@@ -487,20 +494,21 @@ export default function FocusWorkspace() {
     const pageIssues = issues.filter((issue) => issue.pageId === page.id);
     const dragging = drag?.type === 'page' && drag.pageId === page.id;
     const groupId = pageGroupId(internal);
+    const startPageDrag = (event: React.DragEvent) => {
+      const target = event.target as HTMLElement;
+      if (sortingDisabled || target.closest('[data-page-action]')) return event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', page.id);
+      beginDragImage(event, page.name);
+      setDrag({ type: 'page', pageId: page.id });
+    };
     return (
       <div
         key={page.id}
         data-internal-page-id={page.id}
         draggable={!sortingDisabled}
-        onDragStart={(event) => {
-          const target = event.target as HTMLElement;
-          if (sortingDisabled || target.closest('[data-page-action]')) return event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.effectAllowed = 'move';
-          event.dataTransfer.setData('text/plain', page.id);
-          beginDragImage(event, page.name);
-          setDrag({ type: 'page', pageId: page.id });
-        }}
+        onDragStart={startPageDrag}
         onDragEnd={stopDrag}
         onDragOver={(event) => {
           if (drag?.type !== 'page' || sortingDisabled || dragging) return;
@@ -514,10 +522,13 @@ export default function FocusWorkspace() {
         }}
         onDrop={(event) => { event.preventDefault(); event.stopPropagation(); completePageDrop(); }}
         onClick={() => setCurrentInternalPage(page.id)}
-        className={`group ${grouped ? 'ml-7 mr-2' : 'mx-2'} rounded-lg border transition-all duration-150 ${sortingDisabled ? '' : 'cursor-grab active:cursor-grabbing'} ${dragging ? 'scale-[0.98] opacity-35' : ''} ${selected ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}
+        className={`group ${grouped ? 'ml-7 mr-2' : 'mx-2'} rounded-lg border transition-all duration-150 ${dragging ? 'cursor-grabbing scale-[0.98] opacity-35' : 'cursor-pointer'} ${selected ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}
       >
-        <div className="flex items-center gap-2 p-2">
+        <div className="relative flex items-center gap-2 p-2">
           <span
+            draggable={!sortingDisabled}
+            onDragStart={startPageDrag}
+            onDragEnd={(event) => { event.stopPropagation(); stopDrag(); }}
             className={`shrink-0 p-1 text-slate-500 ${sortingDisabled ? 'cursor-not-allowed opacity-35' : 'cursor-grab active:cursor-grabbing'}`}
             title={sortingDisabled ? '搜索或筛选状态下不能排序' : '拖动页面'}
           >
@@ -536,12 +547,12 @@ export default function FocusWorkspace() {
               }}
             >{page.name}</div>
             <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-500">
-              <span className={`rounded px-1 py-0.5 ${page.kind === 'dialog' ? 'bg-violet-500/15 text-violet-300' : 'bg-cyan-500/15 text-cyan-300'}`}>{page.kind === 'dialog' ? '弹窗' : '内容页'}</span>
-              <span>{page.elements.length} 元素</span>
+              <span className={`shrink-0 whitespace-nowrap rounded px-1 py-0.5 ${page.kind === 'dialog' ? 'bg-violet-500/15 text-violet-300' : 'bg-cyan-500/15 text-cyan-300'}`}>{page.kind === 'dialog' ? '弹窗' : '内容'}</span>
+              <span className="shrink-0 whitespace-nowrap">{page.elements.length} 元素</span>
             </div>
           </div>
           {pageIssues.length > 0 && <AlertTriangle size={14} className={pageIssues.some((issue) => issue.severity === 'blocking') ? 'text-red-400' : 'text-amber-400'} />}
-          <div data-page-action className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+          <div data-page-action className="pointer-events-none absolute right-2 top-1/2 z-10 flex -translate-y-1/2 items-center rounded-md bg-slate-800/95 pl-1 opacity-0 shadow-lg transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
             <button className="p-1 hover:bg-slate-600 rounded" title="复制页面" onClick={(event) => { event.stopPropagation(); duplicateInternalPage(page.id); }}><Copy size={13} /></button>
             <button className="p-1 hover:bg-slate-600 rounded" title="移动到其他小关卡" onClick={(event) => {
               event.stopPropagation();
@@ -585,6 +596,10 @@ export default function FocusWorkspace() {
     return (
       <section key={group.id} className={`mt-1 transition-all ${groupDragging ? 'opacity-35 scale-[0.99]' : ''}`}>
         <div
+          onClick={(event) => {
+            if ((event.target as HTMLElement).closest('[data-group-action]')) return;
+            toggleGroup(group.id);
+          }}
           onDragOver={(event) => {
             if (drag?.type !== 'page' || sortingDisabled) return;
             event.preventDefault();
@@ -600,9 +615,10 @@ export default function FocusWorkspace() {
             event.stopPropagation();
             completePageDrop();
           }}
-          className={`mx-2 flex items-center gap-1 rounded-md px-1 py-1.5 text-slate-400 transition-all hover:bg-slate-800/70 ${groupPageTarget ? 'ring-1 ring-blue-400 bg-blue-500/10 text-blue-200' : ''}`}
+          className={`mx-2 flex cursor-pointer items-center gap-1 rounded-md px-1 py-1.5 text-slate-400 transition-all hover:bg-slate-800/70 ${groupPageTarget ? 'ring-1 ring-blue-400 bg-blue-500/10 text-blue-200' : ''}`}
         >
           <span
+            data-group-action
             draggable={!sortingDisabled}
             onDragStart={(event) => {
               if (sortingDisabled) return event.preventDefault();
@@ -615,15 +631,13 @@ export default function FocusWorkspace() {
             className={`p-1 ${sortingDisabled ? 'cursor-not-allowed opacity-35' : 'cursor-grab active:cursor-grabbing'}`}
             title={sortingDisabled ? '搜索或筛选状态下不能排序' : '拖动分组'}
           ><GripVertical size={13} /></span>
-          <button onClick={() => toggleGroup(group.id)} className="p-1 rounded hover:bg-slate-700" title={collapsed ? '展开分组' : '收起分组'}>{collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button>
+          <button data-group-action onClick={() => toggleGroup(group.id)} className="p-1 rounded hover:bg-slate-700" title={collapsed ? '展开分组' : '收起分组'}>{collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button>
           <Folder size={13} className={groupPageTarget ? 'text-blue-300' : 'text-slate-500'} />
-          <button onDoubleClick={() => {
-            const next = window.prompt('分组名称', group.name);
-            if (next !== null && !renameInternalPageGroup(group.id, next)) showToast('分组名称不能为空或与现有分组重复', 'error');
-          }} className="min-w-0 flex-1 text-left text-[11px] font-medium truncate">{group.name}</button>
+          <span className="min-w-0 flex-1 truncate text-left text-[11px] font-medium">{group.name}</span>
           <span className="text-[10px] text-slate-600">{allPages.length}</span>
-          <div className="relative" data-focus-transient>
-            <button onClick={() => {
+          <div className="relative" data-focus-transient data-group-action>
+            <button onClick={(event) => {
+              event.stopPropagation();
               setCreateMenuOpen(false);
               setMovePageId(null);
               setGroupMenuId((id) => id === group.id ? null : group.id);
@@ -647,11 +661,12 @@ export default function FocusWorkspace() {
               let targetIndex = 0;
               return visiblePages.flatMap((page) => {
                 const isDragged = drag?.type === 'page' && drag.pageId === page.id;
-                const slot = isDragged ? null : pageDropSlot(group.id, targetIndex++);
+                const slot = pageDropSlot(group.id, targetIndex, `before-${page.id}`, !isDragged);
+                if (!isDragged) targetIndex++;
                 return [slot, renderPage(page, true)];
               });
             })()}
-            {pageDropSlot(group.id, visiblePages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length)}
+            {pageDropSlot(group.id, visiblePages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length, 'last')}
             {visiblePages.length === 0 && <div className="ml-8 mr-3 py-2 text-[10px] text-slate-600">暂无页面，可拖入或快速创建</div>}
             {renderQuickAdd(group.id)}
           </div>
@@ -746,11 +761,12 @@ export default function FocusWorkspace() {
           let targetIndex = 0;
           return ungroupedPages.flatMap((page) => {
             const isDragged = drag?.type === 'page' && drag.pageId === page.id;
-            const slot = isDragged ? null : pageDropSlot(undefined, targetIndex++);
+            const slot = pageDropSlot(undefined, targetIndex, `before-${page.id}`, !isDragged);
+            if (!isDragged) targetIndex++;
             return [slot, renderPage(page)];
           });
         })()}
-        {pageDropSlot(undefined, ungroupedPages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length)}
+        {pageDropSlot(undefined, ungroupedPages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length, 'last')}
         {renderQuickAdd()}
       </div>
 
