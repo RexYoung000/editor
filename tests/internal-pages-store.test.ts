@@ -75,6 +75,38 @@ test('页面分组支持创建、组内新增、跨组排序和删除后移入�
   assert.deepEqual(updated.internalPageGroups?.map((group) => group.name), ['第二题']);
 });
 
+test('删除分组及组内页面只提交一次历史，并把选中状态安全切回主界面', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  const subPage = createInternalPagesSubPage('delete-group-sub', '内部页面关卡');
+  const course: Course = {
+    id: 'delete-group-course',
+    stages: [{ id: 'stage', name: '关卡 1', subPages: [subPage] }],
+  };
+
+  useEditorStore.getState().setCurrentCourse(course);
+  const groupId = useEditorStore.getState().addInternalPageGroup('待删除题目')!;
+  const contentId = useEditorStore.getState().addInternalPage('content', '题目内容', { pageGroupId: groupId })!;
+  useEditorStore.getState().addInternalPage('dialog', '题目提示', { pageGroupId: groupId });
+  useEditorStore.getState().addInternalPage('content', '保留页面');
+  useEditorStore.getState().setCurrentInternalPage(contentId);
+  const historyBeforeDelete = useEditorStore.getState().history.length;
+
+  useEditorStore.getState().deleteInternalPageGroup(groupId, true);
+
+  let state = useEditorStore.getState();
+  let updated = state.currentCourse!.stages[0].subPages[0];
+  assert.deepEqual(updated.internalPages?.map((page) => page.name), ['保留页面']);
+  assert.equal(updated.internalPageGroups?.length, 0);
+  assert.equal(state.currentInternalPageId, updated.id);
+  assert.equal(state.history.length, historyBeforeDelete + 1);
+
+  state.undo();
+  state = useEditorStore.getState();
+  updated = state.currentCourse!.stages[0].subPages[0];
+  assert.deepEqual(updated.internalPages?.map((page) => page.name), ['题目内容', '题目提示', '保留页面']);
+  assert.equal(updated.internalPageGroups?.[0].id, groupId);
+});
+
 test('顶部新增继承当前页面分组并插在当前页面下方', async () => {
   const { useEditorStore } = await import('../src/store/editorStore');
   const subPage = createInternalPagesSubPage('insert-sub', '内部页面关卡');

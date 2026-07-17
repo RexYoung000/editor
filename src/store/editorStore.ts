@@ -91,7 +91,7 @@ interface EditorState {
   deleteInternalPage: (pageId: string) => void;
   addInternalPageGroup: (name: string) => string | null;
   renameInternalPageGroup: (groupId: string, name: string) => boolean;
-  deleteInternalPageGroup: (groupId: string) => void;
+  deleteInternalPageGroup: (groupId: string, deletePages?: boolean) => void;
   reorderInternalPageGroups: (fromIndex: number, toIndex: number) => void;
   moveInternalPageInList: (pageId: string, pageGroupId: string | undefined, targetIndex: number) => boolean;
   moveInternalPage: (pageId: string, targetSubPageId: string, targetIndex: number) => { ok: boolean; error?: string };
@@ -622,7 +622,7 @@ export const useEditorStore = create<EditorState>()(
       return changed;
     },
 
-    deleteInternalPageGroup: (groupId) => {
+    deleteInternalPageGroup: (groupId, deletePages = false) => {
       let changed = false;
       set((state) => {
         const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
@@ -630,11 +630,18 @@ export const useEditorStore = create<EditorState>()(
         const groups = subPage.internalPageGroups ?? [];
         const groupIndex = groups.findIndex((group) => group.id === groupId);
         if (groupIndex < 0) return;
-        const moved = subPage.internalPages.filter((page) => page.pageGroupId === groupId);
+        const groupedPages = subPage.internalPages.filter((page) => page.pageGroupId === groupId);
         subPage.internalPages = subPage.internalPages.filter((page) => page.pageGroupId !== groupId);
-        for (const page of moved) {
-          delete page.pageGroupId;
-          subPage.internalPages.push(page);
+        if (deletePages) {
+          if (groupedPages.some((page) => page.id === state.currentInternalPageId)) {
+            state.currentInternalPageId = subPage.id;
+            state.selectedElementIds = [];
+          }
+        } else {
+          for (const page of groupedPages) {
+            delete page.pageGroupId;
+            subPage.internalPages.push(page);
+          }
         }
         groups.splice(groupIndex, 1);
         changed = true;

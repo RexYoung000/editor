@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Folder,
   GripVertical,
   MoreHorizontal,
   MoveRight,
@@ -34,6 +35,7 @@ type DragState =
   | { type: 'group'; groupId: string; sourceIndex: number };
 type PageDrop = { pageGroupId?: string; targetIndex: number };
 type MoveRequest = { pageId: string; targetSubPageId: string; targetIndex: number; targetName: string; impact: InternalPageMoveImpact };
+type DeleteGroupRequest = { group: InternalPageGroup; deletePages: boolean };
 
 const UNGROUPED_KEY = '__ungrouped__';
 const LAYER_PANEL_KEY = 'forge:focus-workspace:layer-panel';
@@ -49,6 +51,20 @@ function referenceCount(subPage: SubPage, pageId: string): number {
     for (const element of page.elements) {
       for (const action of element.actions ?? []) {
         if (action.pageTargetId === pageId || action.afterClose?.pageTargetId === pageId) count++;
+      }
+    }
+  }
+  return count;
+}
+
+function externalGroupReferenceCount(subPage: SubPage, pageIds: Set<string>): number {
+  let count = 0;
+  for (const page of getElementPages(subPage)) {
+    if (pageIds.has(page.id)) continue;
+    for (const element of page.elements) {
+      for (const action of element.actions ?? []) {
+        if (action.pageTargetId && pageIds.has(action.pageTargetId)) count++;
+        if (action.afterClose?.pageTargetId && pageIds.has(action.afterClose.pageTargetId)) count++;
       }
     }
   }
@@ -124,11 +140,10 @@ export default function FocusWorkspace() {
   const [createKind, setCreateKind] = useState<InternalPageKind | null>(null);
   const [createName, setCreateName] = useState('');
   const [createPlacement, setCreatePlacement] = useState<PagePlacement | undefined>();
-  const [quickAddGroupKey, setQuickAddGroupKey] = useState<string | null>(null);
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const [createGroupName, setCreateGroupName] = useState('');
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null);
-  const [deleteGroup, setDeleteGroup] = useState<InternalPageGroup | null>(null);
+  const [deleteGroup, setDeleteGroup] = useState<DeleteGroupRequest | null>(null);
   const [deletePage, setDeletePage] = useState<InternalPage | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [pageDrop, setPageDrop] = useState<PageDrop | null>(null);
@@ -142,7 +157,6 @@ export default function FocusWorkspace() {
   const [pendingScrollPageId, setPendingScrollPageId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const createMenuRef = useRef<HTMLDivElement>(null);
   const targetScrollRef = useRef<HTMLDivElement>(null);
   const ghostRef = useRef<HTMLElement | null>(null);
   const pageDropRef = useRef<PageDrop | null>(null);
@@ -186,12 +200,18 @@ export default function FocusWorkspace() {
   }, [pendingScrollPageId, currentCourse]);
 
   useEffect(() => {
-    if (!createMenuOpen) return;
+    if (!createMenuOpen && !groupMenuId && !movePageId) return;
+    const closeTransientSurfaces = () => {
+      setCreateMenuOpen(false);
+      setGroupMenuId(null);
+      if (!movePanelByDragRef.current) setMovePageId(null);
+    };
     const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!createMenuRef.current?.contains(event.target as Node)) setCreateMenuOpen(false);
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-focus-transient]')) closeTransientSurfaces();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setCreateMenuOpen(false);
+      if (event.key === 'Escape') closeTransientSurfaces();
     };
     document.addEventListener('pointerdown', closeOnOutsideClick);
     window.addEventListener('keydown', closeOnEscape);
@@ -199,7 +219,7 @@ export default function FocusWorkspace() {
       document.removeEventListener('pointerdown', closeOnOutsideClick);
       window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [createMenuOpen]);
+  }, [createMenuOpen, groupMenuId, movePageId]);
 
   useEffect(() => {
     if (!drag) return;
@@ -295,16 +315,33 @@ export default function FocusWorkspace() {
     return current ? { afterPageId: current.id } : undefined;
   };
 
-  const startCreate = (kind: InternalPageKind, placement?: PagePlacement) => {
+  const nextPageName = (kind: InternalPageKind) => {
     const base = kind === 'content' ? '内容页' : '弹窗';
     let index = 1;
     let name = `${base} ${index}`;
     while (internalPages.some((page) => page.name === name)) name = `${base} ${++index}`;
+    return name;
+  };
+
+  const startCreate = (kind: InternalPageKind, placement?: PagePlacement) => {
     setCreateMenuOpen(false);
-    setQuickAddGroupKey(null);
-    setCreateName(name);
+    setGroupMenuId(null);
+    setMovePageId(null);
+    setCreateName(nextPageName(kind));
     setCreatePlacement(placement);
     setCreateKind(kind);
+  };
+
+  const quickCreate = (kind: InternalPageKind, placement?: PagePlacement) => {
+    setCreateMenuOpen(false);
+    setGroupMenuId(null);
+    setMovePageId(null);
+    const createdId = addInternalPage(kind, nextPageName(kind), placement);
+    if (!createdId) {
+      showToast('页面创建失败，请重试', 'error');
+      return;
+    }
+    setPendingScrollPageId(createdId);
   };
 
   const commitCreate = () => {
@@ -328,6 +365,7 @@ export default function FocusWorkspace() {
     setCreateGroupOpen(false);
     setCreateGroupName('');
     setCreateMenuOpen(false);
+    setGroupMenuId(null);
   };
 
   const persistCollapsedGroups = (next: Set<string>) => {
@@ -427,7 +465,7 @@ export default function FocusWorkspace() {
     return (
       <div
         key={`page-slot-${groupId ?? UNGROUPED_KEY}-${targetIndex}`}
-        className={`mx-2 flex items-center transition-[height] duration-150 ${active ? 'h-9' : 'h-3'}`}
+        className={`${groupId ? 'ml-7 mr-2' : 'mx-2'} flex items-center transition-[height] duration-150 ${active ? 'h-9' : 'h-3'}`}
         onDragOver={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -442,7 +480,7 @@ export default function FocusWorkspace() {
     );
   };
 
-  const renderPage = (internal: InternalPage) => {
+  const renderPage = (internal: InternalPage, grouped = false) => {
     const page = pages.find((item) => item.id === internal.id);
     if (!page) return null;
     const selected = currentInternalPageId === page.id;
@@ -465,7 +503,7 @@ export default function FocusWorkspace() {
         }}
         onDrop={(event) => { event.preventDefault(); event.stopPropagation(); completePageDrop(); }}
         onClick={() => setCurrentInternalPage(page.id)}
-        className={`group mx-2 rounded-lg border transition-all duration-150 ${dragging ? 'scale-[0.98] opacity-35' : ''} ${selected ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}
+        className={`group ${grouped ? 'ml-7 mr-2' : 'mx-2'} rounded-lg border transition-all duration-150 ${dragging ? 'scale-[0.98] opacity-35' : ''} ${selected ? 'border-blue-400 bg-blue-500/15' : 'border-slate-700 bg-slate-800 hover:bg-slate-700/70'}`}
       >
         <div className="flex items-center gap-2 p-2">
           <span
@@ -504,7 +542,13 @@ export default function FocusWorkspace() {
           {pageIssues.length > 0 && <AlertTriangle size={14} className={pageIssues.some((issue) => issue.severity === 'blocking') ? 'text-red-400' : 'text-amber-400'} />}
           <div className="flex items-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
             <button className="p-1 hover:bg-slate-600 rounded" title="复制页面" onClick={(event) => { event.stopPropagation(); duplicateInternalPage(page.id); }}><Copy size={13} /></button>
-            <button className="p-1 hover:bg-slate-600 rounded" title="移动到其他小关卡" onClick={(event) => { event.stopPropagation(); movePanelByDragRef.current = false; setMovePageId(page.id); }}><MoveRight size={13} /></button>
+            <button className="p-1 hover:bg-slate-600 rounded" title="移动到其他小关卡" onClick={(event) => {
+              event.stopPropagation();
+              movePanelByDragRef.current = false;
+              setCreateMenuOpen(false);
+              setGroupMenuId(null);
+              setMovePageId((current) => current === page.id ? null : page.id);
+            }}><MoveRight size={13} /></button>
             <button className="p-1 hover:bg-red-500/30 text-red-400 rounded" title="删除页面" onClick={(event) => { event.stopPropagation(); setDeletePage(internal); }}><Trash2 size={13} /></button>
           </div>
         </div>
@@ -519,16 +563,10 @@ export default function FocusWorkspace() {
 
   const renderQuickAdd = (groupId?: string) => {
     if (sortingDisabled) return null;
-    const key = groupId ?? UNGROUPED_KEY;
     return (
-      <div className="relative mx-2 mt-1">
-        <button onClick={() => setQuickAddGroupKey((current) => current === key ? null : key)} className="w-full py-2 border border-dashed border-slate-700 rounded text-[11px] text-slate-500 hover:text-slate-300 hover:border-slate-500">+ 新增页面</button>
-        {quickAddGroupKey === key && (
-          <div className="absolute left-1/2 bottom-full mb-1 -translate-x-1/2 z-40 flex overflow-hidden rounded-lg border border-slate-600 bg-slate-800 shadow-xl p-1">
-            <button onClick={() => startCreate('content', { pageGroupId: groupId })} className="whitespace-nowrap rounded px-3 py-2 text-xs hover:bg-slate-700">内容页</button>
-            <button onClick={() => startCreate('dialog', { pageGroupId: groupId })} className="whitespace-nowrap rounded px-3 py-2 text-xs hover:bg-slate-700">弹窗</button>
-          </div>
-        )}
+      <div className={`${groupId ? 'ml-7 mr-2' : 'mx-2'} mt-1 flex items-center gap-1`}>
+        <button onClick={() => quickCreate('content', { pageGroupId: groupId })} className="flex flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Plus size={12} />内容页</button>
+        <button onClick={() => quickCreate('dialog', { pageGroupId: groupId })} className="flex flex-1 items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Plus size={12} />弹窗</button>
       </div>
     );
   };
@@ -538,30 +576,30 @@ export default function FocusWorkspace() {
     const visiblePages = allPages.filter((page) => matchesPage(page, group.name));
     const collapsed = !sortingDisabled && collapsedGroupIds.has(group.id);
     const groupDragging = drag?.type === 'group' && drag.groupId === group.id;
-    const collapsedDropIndex = allPages.filter((page) => drag?.type !== 'page' || page.id !== drag.pageId).length;
-    const collapsedPageTarget = collapsed
-      && drag?.type === 'page'
+    const groupEndDropIndex = allPages.filter((page) => drag?.type !== 'page' || page.id !== drag.pageId).length;
+    const groupPageTarget = drag?.type === 'page'
       && pageDrop?.pageGroupId === group.id
-      && pageDrop.targetIndex === collapsedDropIndex;
+      && pageDrop.targetIndex === groupEndDropIndex;
     if (sortingDisabled && visiblePages.length === 0) return null;
     return (
-      <section key={group.id} className={`mt-2 transition-all ${groupDragging ? 'opacity-35 scale-[0.99]' : ''}`}>
+      <section key={group.id} className={`mt-1 transition-all ${groupDragging ? 'opacity-35 scale-[0.99]' : ''}`}>
         <div
           onDragOver={(event) => {
-            if (!collapsed || drag?.type !== 'page' || sortingDisabled) return;
+            if (drag?.type !== 'page' || sortingDisabled) return;
             event.preventDefault();
             event.stopPropagation();
-            const next = { pageGroupId: group.id, targetIndex: collapsedDropIndex };
+            const next = { pageGroupId: group.id, targetIndex: groupEndDropIndex };
             pageDropRef.current = next;
             setPageDrop(next);
           }}
           onDrop={(event) => {
-            if (!collapsedPageTarget) return;
+            const latestDrop = pageDropRef.current;
+            if (drag?.type !== 'page' || latestDrop?.pageGroupId !== group.id) return;
             event.preventDefault();
             event.stopPropagation();
             completePageDrop();
           }}
-          className={`mx-2 flex items-center gap-1 rounded-md px-1 py-1 text-slate-400 transition-all hover:bg-slate-800/70 ${collapsedPageTarget ? 'ring-1 ring-blue-400 bg-blue-500/10' : ''}`}
+          className={`mx-2 flex items-center gap-1 rounded-md px-1 py-1.5 text-slate-400 transition-all hover:bg-slate-800/70 ${groupPageTarget ? 'ring-1 ring-blue-400 bg-blue-500/10 text-blue-200' : ''}`}
         >
           <span
             draggable={!sortingDisabled}
@@ -577,21 +615,27 @@ export default function FocusWorkspace() {
             title={sortingDisabled ? '搜索或筛选状态下不能排序' : '拖动分组'}
           ><GripVertical size={13} /></span>
           <button onClick={() => toggleGroup(group.id)} className="p-1 rounded hover:bg-slate-700" title={collapsed ? '展开分组' : '收起分组'}>{collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}</button>
+          <Folder size={13} className={groupPageTarget ? 'text-blue-300' : 'text-slate-500'} />
           <button onDoubleClick={() => {
             const next = window.prompt('分组名称', group.name);
             if (next !== null && !renameInternalPageGroup(group.id, next)) showToast('分组名称不能为空或与现有分组重复', 'error');
           }} className="min-w-0 flex-1 text-left text-[11px] font-medium truncate">{group.name}</button>
           <span className="text-[10px] text-slate-600">{allPages.length}</span>
-          <div className="relative">
-            <button onClick={() => setGroupMenuId((id) => id === group.id ? null : group.id)} className="p-1 rounded hover:bg-slate-700"><MoreHorizontal size={13} /></button>
+          <div className="relative" data-focus-transient>
+            <button onClick={() => {
+              setCreateMenuOpen(false);
+              setMovePageId(null);
+              setGroupMenuId((id) => id === group.id ? null : group.id);
+            }} className="p-1 rounded hover:bg-slate-700"><MoreHorizontal size={13} /></button>
             {groupMenuId === group.id && (
-              <div className="absolute right-0 top-full z-40 w-28 rounded-md border border-slate-600 bg-slate-800 p-1 shadow-xl">
+              <div className="absolute right-0 top-full z-40 w-40 rounded-md border border-slate-600 bg-slate-800 p-1 shadow-xl">
                 <button onClick={() => {
                   const next = window.prompt('分组名称', group.name);
                   setGroupMenuId(null);
                   if (next !== null && !renameInternalPageGroup(group.id, next)) showToast('分组名称不能为空或与现有分组重复', 'error');
                 }} className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-700">重命名</button>
-                <button onClick={() => { setGroupMenuId(null); setDeleteGroup(group); }} className="w-full rounded px-2 py-1.5 text-left text-xs text-red-400 hover:bg-red-500/15">删除分组</button>
+                <button onClick={() => { setGroupMenuId(null); setDeleteGroup({ group, deletePages: false }); }} className="w-full rounded px-2 py-1.5 text-left text-xs hover:bg-slate-700">解散分组并保留页面</button>
+                <button onClick={() => { setGroupMenuId(null); setDeleteGroup({ group, deletePages: true }); }} className="w-full rounded px-2 py-1.5 text-left text-xs text-red-400 hover:bg-red-500/15">删除分组及页面…</button>
               </div>
             )}
           </div>
@@ -603,11 +647,11 @@ export default function FocusWorkspace() {
               return visiblePages.flatMap((page) => {
                 const isDragged = drag?.type === 'page' && drag.pageId === page.id;
                 const slot = isDragged ? null : pageDropSlot(group.id, targetIndex++);
-                return [slot, renderPage(page)];
+                return [slot, renderPage(page, true)];
               });
             })()}
             {pageDropSlot(group.id, visiblePages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length)}
-            {visiblePages.length === 0 && <div className="mx-3 py-2 text-[10px] text-slate-600">分组内暂无页面</div>}
+            {visiblePages.length === 0 && <div className="ml-8 mr-3 py-2 text-[10px] text-slate-600">暂无页面，可拖入或快速创建</div>}
             {renderQuickAdd(group.id)}
           </div>
         )}
@@ -638,8 +682,12 @@ export default function FocusWorkspace() {
           <div className="text-xs text-slate-500 truncate">{stage.name}</div>
           <div className="text-sm font-medium truncate">{subPage.name}</div>
         </div>
-        <div ref={createMenuRef} className="relative">
-          <button onClick={() => setCreateMenuOpen((open) => !open)} className={`p-1.5 rounded text-blue-300 ${createMenuOpen ? 'bg-slate-700' : 'hover:bg-slate-700'}`} title="新增页面或分组" aria-haspopup="menu" aria-expanded={createMenuOpen}><Plus size={16} /></button>
+        <div className="relative" data-focus-transient>
+          <button onClick={() => {
+            setGroupMenuId(null);
+            setMovePageId(null);
+            setCreateMenuOpen((open) => !open);
+          }} className={`p-1.5 rounded text-blue-300 ${createMenuOpen ? 'bg-slate-700' : 'hover:bg-slate-700'}`} title="新增页面或分组" aria-haspopup="menu" aria-expanded={createMenuOpen}><Plus size={16} /></button>
           {createMenuOpen && (
             <div role="menu" className="absolute right-0 top-full mt-2 w-40 overflow-hidden rounded-lg border border-slate-600 bg-slate-800 shadow-2xl z-50 p-1">
               <button role="menuitem" onClick={() => startCreate('content', topPlacement())} className="w-full rounded px-3 py-2 text-left hover:bg-slate-700"><div className="text-xs text-slate-100">新增内容页</div><div className="mt-0.5 text-[10px] text-slate-500">插入当前页面下方</div></button>
@@ -671,7 +719,7 @@ export default function FocusWorkspace() {
           </button>
         )}
 
-        <div className="px-3 pt-4 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide flex items-center justify-between"><span>页面列表</span><span>{internalPages.length}</span></div>
+        <div className="h-3" />
         {(() => {
           let targetIndex = 0;
           const rendered = groups.flatMap((group) => {
@@ -692,7 +740,7 @@ export default function FocusWorkspace() {
             : rendered;
         })()}
 
-        {(ungroupedPages.length > 0 || !sortingDisabled) && <div className="px-3 pt-4 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide flex items-center justify-between"><span>未分组</span><span>{internalPages.filter((page) => pageGroupId(page) === undefined).length}</span></div>}
+        {groups.length > 0 && ungroupedPages.length > 0 && <div className="h-2" />}
         {(() => {
           let targetIndex = 0;
           return ungroupedPages.flatMap((page) => {
@@ -702,7 +750,6 @@ export default function FocusWorkspace() {
           });
         })()}
         {pageDropSlot(undefined, ungroupedPages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length)}
-        {ungroupedPages.length === 0 && !sortingDisabled && <div className="mx-3 py-2 text-[10px] text-slate-600">暂无未分组页面</div>}
         {renderQuickAdd()}
       </div>
 
@@ -713,7 +760,7 @@ export default function FocusWorkspace() {
       </div>
 
       {movePageId && (
-        <div ref={targetScrollRef} onDragOver={(event) => updateEdge(event, targetScrollRef.current, 'targets')} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) targetEdgeRef.current = { direction: 0, since: 0, intensity: 0 }; }} className="absolute left-full top-12 ml-2 w-64 max-h-[70vh] overflow-y-auto rounded-lg border border-slate-600 bg-slate-800 shadow-2xl p-2 z-50">
+        <div ref={targetScrollRef} data-focus-transient onDragOver={(event) => updateEdge(event, targetScrollRef.current, 'targets')} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) targetEdgeRef.current = { direction: 0, since: 0, intensity: 0 }; }} className="absolute left-full top-12 ml-2 w-64 max-h-[70vh] overflow-y-auto rounded-lg border border-slate-600 bg-slate-800 shadow-2xl p-2 z-50">
           <div className="flex items-center justify-between px-1 pb-2"><span className="text-xs font-medium">移动到其他小关卡</span><button onClick={() => { setMovePageId(null); stopDrag(); }} className="text-slate-400 hover:text-white"><X size={14} /></button></div>
           {allSameAreaSubPages.length === 0 ? <div className="p-3 text-xs text-slate-500">没有兼容的小关卡</div> : allSameAreaSubPages.map((target) => (
             <button key={target.id} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); requestMove(movePageId, target); }} onClick={() => requestMove(movePageId, target)} className="w-full text-left px-3 py-2 mb-1 rounded border border-slate-700 bg-slate-900/60 hover:border-blue-500 hover:bg-blue-500/10">
@@ -743,7 +790,26 @@ export default function FocusWorkspace() {
         </div>
       )}
 
-      {deleteGroup && <ConfirmDialog title="删除页面分组" message={`删除“${deleteGroup.name}”后，组内页面会保留并移到未分组末尾。可使用撤销恢复。`} danger onCancel={() => setDeleteGroup(null)} onConfirm={() => { deleteInternalPageGroup(deleteGroup.id); setDeleteGroup(null); }} />}
+      {deleteGroup && (() => {
+        const groupPages = internalPages.filter((page) => pageGroupId(page) === deleteGroup.group.id);
+        const affectedRelations = externalGroupReferenceCount(subPage, new Set(groupPages.map((page) => page.id)));
+        return deleteGroup.deletePages
+          ? <ConfirmDialog
+              title="删除分组及全部页面"
+              message={[`将删除“${deleteGroup.group.name}”及其中 ${groupPages.length} 个页面。`, affectedRelations > 0 ? `删除后将有 ${affectedRelations} 条来自其他页面的关系失效。` : '', '该操作会作为一次修改记录，可使用撤销完整恢复。'].filter(Boolean).join('\n')}
+              confirmText={`删除 ${groupPages.length} 个页面`}
+              danger
+              onCancel={() => setDeleteGroup(null)}
+              onConfirm={() => { deleteInternalPageGroup(deleteGroup.group.id, true); setDeleteGroup(null); }}
+            />
+          : <ConfirmDialog
+              title="解散页面分组"
+              message={`解散“${deleteGroup.group.name}”后，组内 ${groupPages.length} 个页面会保留并移到列表末尾。可使用撤销恢复。`}
+              confirmText="解散分组"
+              onCancel={() => setDeleteGroup(null)}
+              onConfirm={() => { deleteInternalPageGroup(deleteGroup.group.id); setDeleteGroup(null); }}
+            />;
+      })()}
       {deletePage && <ConfirmDialog title={`删除${deletePage.kind === 'dialog' ? '弹窗' : '内容页'}`} message={`${deletePage.elements.length > 0 ? `页面包含 ${deletePage.elements.length} 个元素。\n` : ''}${referenceCount(subPage, deletePage.id) > 0 ? `删除后将有 ${referenceCount(subPage, deletePage.id)} 条页面关系失效。\n` : ''}确定删除“${deletePage.name}”吗？可使用撤销恢复。`} danger onCancel={() => setDeletePage(null)} onConfirm={() => { deleteInternalPage(deletePage.id); setDeletePage(null); }} />}
       {moveRequest && <ConfirmDialog title="确认跨小关卡移动" message={[`目标：${moveRequest.targetName}`, moveRequest.impact.invalidRelationCount > 0 ? `将产生 ${moveRequest.impact.invalidRelationCount} 条失效页面关系，移动后会保留断链提醒。` : '不会产生失效页面关系。', moveRequest.impact.changesDialogBase ? '该弹窗的底板将切换为目标小关卡主界面。' : '', moveRequest.impact.nameCollision ? `目标存在同名页面，将自动命名为“${moveRequest.impact.resolvedName}”。` : ''].filter(Boolean).join('\n')} confirmText="确认移动" onConfirm={() => { const result = moveInternalPage(moveRequest.pageId, moveRequest.targetSubPageId, moveRequest.targetIndex); if (!result.ok) showToast(result.error ?? '移动失败', 'error'); else showToast(`已移动到 ${moveRequest.targetName}`, 'success'); setMoveRequest(null); }} onCancel={() => setMoveRequest(null)} />}
     </div>
