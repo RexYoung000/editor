@@ -74,6 +74,16 @@ test('容器内部点击穿透到普通组件，内部空白用于框选', () =>
   assert.equal(findTopElementAtPoint(elements, { x: 430, y: 30 }, [])?.id, 'empty-covered');
 });
 
+test('弹窗编辑态底板与遮罩不参与点击或框选，只命中弹窗内容', () => {
+  const base = element('dialog-base', { width: 1920, height: 1080, locked: true, props: { __editorCanvasHitThrough: true } });
+  const mask = element('dialog-mask', { width: 1920, height: 1080, locked: true, props: { __editorCanvasHitThrough: true } });
+  const content = element('dialog-content', { x: 100, y: 100 });
+  const elements = [base, mask, content];
+  assert.equal(findTopElementAtPoint(elements, { x: 120, y: 120 }, [])?.id, 'dialog-content');
+  assert.equal(findTopElementAtPoint(elements, { x: 500, y: 500 }, []), null);
+  assert.deepEqual(selectElementsInRect(elements, { x: 0, y: 0, width: 1920, height: 1080 }), ['dialog-content']);
+});
+
 test('选中子组件只派生直接父容器上下文，不把几何覆盖视为父子关系', () => {
   const parent = element('parent', { type: 'ContainerBox', width: 300, height: 300 });
   const child = element('child', { parentId: 'parent' });

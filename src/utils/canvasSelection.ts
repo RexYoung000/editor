@@ -7,6 +7,7 @@ import {
   type CanvasRect,
 } from './canvasGeometry';
 import { isContainerElementType } from './elementContainers';
+import { isEditorCanvasHitThrough } from './canvasComposite';
 
 export function isElementHidden(element: Element, elementMap: Map<string, Element>): boolean {
   let current: Element | undefined = element;
@@ -165,6 +166,7 @@ export function findTopElementAtPoint(
   const containerIds = getContainerIds(elements);
   const hits = elements.filter((element) => (
     !containerIds.has(element.id)
+    && !isEditorCanvasHitThrough(element)
     && !isElementHidden(element, elementMap)
     && isPointInsideElement(point, element, elements)
   ));
@@ -200,6 +202,7 @@ export function selectElementsInRect(
   const containerIds = getContainerIds(elements);
   const hits = elements.filter((element) => {
     if (containerIds.has(element.id)) return false;
+    if (isEditorCanvasHitThrough(element)) return false;
     if (isElementHidden(element, elementMap) || isLocked(element, elementMap)) return false;
     return doesElementIntersectRect(element, elements, rect);
   });

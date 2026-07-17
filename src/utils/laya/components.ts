@@ -8,6 +8,7 @@ import { getKeyboardPreset } from '../../elements/keyboardPresets';
 import { getCachedVideoThumbnail } from '../videoThumbnail';
 import { getDefaultSkins, generateButtonSkin, generateCheckboxSkin, generateRadioSkin, generateInputSkin } from '../skinGenerator';
 import { resolveElementFont } from '../fontLoader';
+import { getEditorCanvasFillColor, isEditorCanvasHitThrough } from '../canvasComposite';
 
 function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string | null, stroke?: string, sw?: number) {
   if (stroke && sw && sw > 0) g.drawRect(x, y, w, h, fill, stroke, sw);
@@ -87,7 +88,8 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
   }
 
   comp.name = element.name || element.id;
-  comp.mouseEnabled = true;
+  comp.mouseEnabled = !isEditorCanvasHitThrough(element);
+  if (isEditorCanvasHitThrough(element)) comp.mouseThrough = true;
 
   if (element.layaType && !preview) {
     // 编辑模式：移除 ScaleButton 缩放动画事件（干扰拖拽）
@@ -143,6 +145,13 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
   // 合并 defaultProps 和 element.props（旧数据可能缺少 defaultProps 里的字段）
   const meta = elementMeta[element.type];
   const props: Record<string, unknown> = { ...(meta?.defaultProps ?? {}), ...(element.props ?? {}) };
+
+  // 编辑态合成层直接绘制纯色，避免 1x1 图片异步加载导致遮罩不可见。
+  const editorCanvasFillColor = getEditorCanvasFillColor(element);
+  if (!isPreviewMode() && editorCanvasFillColor && comp.graphics) {
+    comp.graphics.clear();
+    comp.graphics.drawRect(0, 0, element.width, element.height, editorCanvasFillColor);
+  }
 
   // ─── Spine 动画：编辑模式下直接用 Skeleton.load() 加载 .sk 并播放 ───
   const urlStr = typeof props.url === 'string' ? props.url : '';
@@ -494,7 +503,7 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
   const isMatchBox = element.type === 'Box' && element.name === '_matchBox';
   // NewBrushSprite 画笔容器：编辑器里不画占位背景和"画笔区域"文字
   const isNewBrushSprite = element.type === 'NewBrushSprite';
-  if (!hasSkin && !hasChildren && !hasItemImage && !isTextAreaEdit && !isDragViewBox && !isMatchBox && !isNewBrushSprite) {
+  if (!hasSkin && !editorCanvasFillColor && !hasChildren && !hasItemImage && !isTextAreaEdit && !isDragViewBox && !isMatchBox && !isNewBrushSprite) {
     drawPlaceholder(comp, element);
   }
 }
