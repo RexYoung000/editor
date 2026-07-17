@@ -1,6 +1,6 @@
 import { useEditorStore } from '../store/editorStore';
-import { Plus, Trash2, Copy, ChevronDown, ChevronRight, ArrowUp, ArrowDown, BookmarkPlus, PanelTopOpen } from 'lucide-react';
-import { useState } from 'react';
+import { Plus, Trash2, Copy, ChevronDown, ChevronRight, ArrowUp, ArrowDown, BookmarkPlus, MoreHorizontal, PanelTopOpen } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/context';
 import { showToast } from '../utils/toast';
 import { PRESET_TEMPLATES } from '../presets';
@@ -8,6 +8,124 @@ import ConfirmDialog from './ConfirmDialog';
 import NewStageDialog from './NewStageDialog';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
 import { isInternalPagesSubPage } from '../utils/internalPages';
+import type { SubPage } from '../types';
+
+type InternalPageCardActionsProps = {
+  subPage: SubPage;
+  open: boolean;
+  onToggle: () => void;
+  onRename: (name: string) => void;
+  onEnter: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  moveUpDisabled?: boolean;
+  moveDownDisabled?: boolean;
+  onDuplicate?: () => void;
+  onSaveTemplate?: () => void;
+  onDelete: () => void;
+};
+
+function InternalPageCardActions({
+  subPage,
+  open,
+  onToggle,
+  onRename,
+  onEnter,
+  onMoveUp,
+  onMoveDown,
+  moveUpDisabled,
+  moveDownDisabled,
+  onDuplicate,
+  onSaveTemplate,
+  onDelete,
+}: InternalPageCardActionsProps) {
+  return (
+    <div
+      data-internal-card-actions
+      className="mt-1"
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      <div className="flex min-w-0 items-center gap-1">
+        <div
+          className="min-w-0 flex-1 truncate text-[11px]"
+          onDoubleClick={(event) => {
+            const container = event.currentTarget;
+            const input = document.createElement('input');
+            input.value = subPage.name;
+            input.className = 'text-[11px] bg-slate-600 text-white rounded px-1 w-full outline-none';
+            container.textContent = '';
+            container.appendChild(input);
+            input.focus();
+            input.select();
+            const finish = () => {
+              const name = input.value.trim() || subPage.name;
+              container.textContent = name;
+              if (name !== subPage.name) onRename(name);
+            };
+            input.onblur = finish;
+            input.onkeydown = (keyEvent) => {
+              if (keyEvent.key === 'Enter') input.blur();
+              if (keyEvent.key === 'Escape') {
+                input.value = subPage.name;
+                input.blur();
+              }
+            };
+          }}
+        >
+          {subPage.name}
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-200 ${open ? 'bg-slate-800/80' : 'bg-slate-900/30 hover:bg-slate-800/60'}`}
+          title="更多关卡操作"
+          aria-label="更多关卡操作"
+          aria-expanded={open}
+        >
+          <MoreHorizontal size={14} />
+        </button>
+      </div>
+      <button
+        type="button"
+        onClick={onEnter}
+        className="mt-1 flex h-8 w-full items-center justify-center gap-1.5 rounded border border-cyan-300/60 bg-cyan-600 text-[11px] font-medium text-white hover:bg-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-200"
+      >
+        <PanelTopOpen size={13} />
+        进入编辑
+      </button>
+      {open && (
+        <div role="menu" className="mt-1.5 grid grid-cols-2 gap-0.5 rounded border border-slate-600 bg-slate-800 p-1 shadow-lg">
+          {onMoveUp && (
+            <button type="button" role="menuitem" onClick={onMoveUp} disabled={moveUpDisabled} className="flex h-7 w-full items-center gap-2 rounded px-2 text-[11px] text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40">
+              <ArrowUp size={12} /> 上移
+            </button>
+          )}
+          {onMoveDown && (
+            <button type="button" role="menuitem" onClick={onMoveDown} disabled={moveDownDisabled} className="flex h-7 w-full items-center gap-2 rounded px-2 text-[11px] text-slate-200 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40">
+              <ArrowDown size={12} /> 下移
+            </button>
+          )}
+          {onDuplicate && (
+            <button type="button" role="menuitem" onClick={onDuplicate} className="flex h-7 w-full items-center gap-2 rounded px-2 text-[11px] text-slate-200 hover:bg-slate-700">
+              <Copy size={12} /> 复制关卡
+            </button>
+          )}
+          {onSaveTemplate && (
+            <button type="button" role="menuitem" onClick={onSaveTemplate} className="flex h-7 w-full items-center gap-2 rounded px-2 text-[11px] text-slate-200 hover:bg-slate-700">
+              <BookmarkPlus size={12} /> 保存为模板
+            </button>
+          )}
+          <div className="col-span-2 mt-0.5 border-t border-slate-700 pt-0.5">
+            <button type="button" role="menuitem" onClick={onDelete} className="flex h-7 w-full items-center gap-2 rounded px-2 text-[11px] text-red-300 hover:bg-red-950/60">
+              <Trash2 size={12} /> 删除关卡
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function PageList() {
   const { t } = useI18n();
@@ -62,6 +180,24 @@ export default function PageList() {
   const [deleteStageConfirm, setDeleteStageConfirm] = useState<{ stageId: string; name: string; target: 'preview' | 'normal' } | null>(null);
   const [clearAllConfirm, setClearAllConfirm] = useState(false);
   const [newStageDialog, setNewStageDialog] = useState<'normalStage' | 'previewStage' | { mode: 'subPage'; stageId: string } | null>(null);
+  const [openSubPageActions, setOpenSubPageActions] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!openSubPageActions) return;
+    const closeOnOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-internal-card-actions]')) setOpenSubPageActions(null);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenSubPageActions(null);
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [openSubPageActions]);
 
   if (!currentCourse) return null;
 
@@ -248,33 +384,55 @@ export default function PageList() {
                                 : <span>{stageIdx + 1}-{subIdx + 1}</span>
                               }
                             </div>
-                            <div
-                              className="text-[11px] truncate"
-                              onDoubleClick={(e) => {
-                                e.stopPropagation();
-                                const div = e.currentTarget;
-                                const input = document.createElement('input');
-                                input.value = sub.name;
-                                input.className = 'text-[11px] bg-slate-600 text-white rounded px-1 w-full outline-none';
-                                div.textContent = '';
-                                div.appendChild(input);
-                                input.focus();
-                                input.select();
-                                const finish = () => {
-                                  const name = input.value.trim() || sub.name;
-                                  div.textContent = name;
-                                  if (name !== sub.name) renameSubPage(sub.id, name);
-                                };
-                                input.onblur = finish;
-                                input.onkeydown = (ke) => {
-                                  if (ke.key === 'Enter') input.blur();
-                                  if (ke.key === 'Escape') { input.value = sub.name; input.blur(); }
-                                };
-                              }}
-                            >
-                              {sub.name}
-                            </div>
-                            <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {isInternalPagesSubPage(sub) ? (
+                              <InternalPageCardActions
+                                subPage={sub}
+                                open={openSubPageActions === `${stage.id}:${sub.id}`}
+                                onToggle={() => setOpenSubPageActions((current) => current === `${stage.id}:${sub.id}` ? null : `${stage.id}:${sub.id}`)}
+                                onRename={(name) => renameSubPage(sub.id, name)}
+                                onEnter={() => enterFocusWorkspace(stage.id, sub.id)}
+                                onDuplicate={!sub.frozen ? () => {
+                                  setOpenSubPageActions(null);
+                                  duplicateSubPage(stage.id, sub.id);
+                                } : undefined}
+                                onSaveTemplate={!sub.frozen ? () => {
+                                  setOpenSubPageActions(null);
+                                  handleSaveTemplate(sub.id);
+                                } : undefined}
+                                onDelete={() => {
+                                  setOpenSubPageActions(null);
+                                  setDeleteSubConfirm({ stageId: stage.id, subId: sub.id, name: sub.name });
+                                }}
+                              />
+                            ) : (
+                              <div
+                                className="text-[11px] truncate"
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  const div = e.currentTarget;
+                                  const input = document.createElement('input');
+                                  input.value = sub.name;
+                                  input.className = 'text-[11px] bg-slate-600 text-white rounded px-1 w-full outline-none';
+                                  div.textContent = '';
+                                  div.appendChild(input);
+                                  input.focus();
+                                  input.select();
+                                  const finish = () => {
+                                    const name = input.value.trim() || sub.name;
+                                    div.textContent = name;
+                                    if (name !== sub.name) renameSubPage(sub.id, name);
+                                  };
+                                  input.onblur = finish;
+                                  input.onkeydown = (ke) => {
+                                    if (ke.key === 'Enter') input.blur();
+                                    if (ke.key === 'Escape') { input.value = sub.name; input.blur(); }
+                                  };
+                                }}
+                              >
+                                {sub.name}
+                              </div>
+                            )}
+                            <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                               {isInternalPagesSubPage(sub) && (
                                 <button onClick={(e) => { e.stopPropagation(); enterFocusWorkspace(stage.id, sub.id); }} className="p-0.5 bg-cyan-600 hover:bg-cyan-500 rounded" title="专注编辑"><PanelTopOpen size={10} /></button>
                               )}
@@ -497,34 +655,72 @@ export default function PageList() {
                             : <span>{stageIdx + 1}-{subIdx + 1}</span>
                           }
                         </div>
-                        <div
-                          className="text-[11px] truncate"
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            const div = e.currentTarget;
-                            const input = document.createElement('input');
-                            input.value = sub.name;
-                            input.className = 'text-[11px] bg-slate-600 text-white rounded px-1 w-full outline-none';
-                            div.textContent = '';
-                            div.appendChild(input);
-                            input.focus();
-                            input.select();
-                            const finish = () => {
-                              const name = input.value.trim() || sub.name;
-                              div.textContent = name;
-                              if (name !== sub.name) renameSubPage(sub.id, name);
-                            };
-                            input.onblur = finish;
-                            input.onkeydown = (ke) => {
-                              if (ke.key === 'Enter') input.blur();
-                              if (ke.key === 'Escape') { input.value = sub.name; input.blur(); }
-                            };
-                          }}
-                        >
-                          {sub.name}
-                        </div>
+                        {isInternalPagesSubPage(sub) ? (
+                          <InternalPageCardActions
+                            subPage={sub}
+                            open={openSubPageActions === `${stage.id}:${sub.id}`}
+                            onToggle={() => setOpenSubPageActions((current) => current === `${stage.id}:${sub.id}` ? null : `${stage.id}:${sub.id}`)}
+                            onRename={(name) => renameSubPage(sub.id, name)}
+                            onEnter={() => enterFocusWorkspace(stage.id, sub.id)}
+                            onMoveUp={() => {
+                              setOpenSubPageActions(null);
+                              if (subIdx > 0) {
+                                reorderSubPages(stage.id, subIdx, subIdx - 1);
+                                setCurrentSubPage(stage.id, sub.id);
+                              }
+                            }}
+                            onMoveDown={() => {
+                              setOpenSubPageActions(null);
+                              if (subIdx < stage.subPages.length - 1) {
+                                reorderSubPages(stage.id, subIdx, subIdx + 1);
+                                setCurrentSubPage(stage.id, sub.id);
+                              }
+                            }}
+                            moveUpDisabled={subIdx === 0}
+                            moveDownDisabled={subIdx === stage.subPages.length - 1}
+                            onDuplicate={!sub.frozen ? () => {
+                              setOpenSubPageActions(null);
+                              duplicateSubPage(stage.id, sub.id);
+                            } : undefined}
+                            onSaveTemplate={!sub.frozen ? () => {
+                              setOpenSubPageActions(null);
+                              handleSaveTemplate(sub.id);
+                            } : undefined}
+                            onDelete={() => {
+                              setOpenSubPageActions(null);
+                              setDeleteSubConfirm({ stageId: stage.id, subId: sub.id, name: sub.name });
+                            }}
+                          />
+                        ) : (
+                          <div
+                            className="text-[11px] truncate"
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              const div = e.currentTarget;
+                              const input = document.createElement('input');
+                              input.value = sub.name;
+                              input.className = 'text-[11px] bg-slate-600 text-white rounded px-1 w-full outline-none';
+                              div.textContent = '';
+                              div.appendChild(input);
+                              input.focus();
+                              input.select();
+                              const finish = () => {
+                                const name = input.value.trim() || sub.name;
+                                div.textContent = name;
+                                if (name !== sub.name) renameSubPage(sub.id, name);
+                              };
+                              input.onblur = finish;
+                              input.onkeydown = (ke) => {
+                                if (ke.key === 'Enter') input.blur();
+                                if (ke.key === 'Escape') { input.value = sub.name; input.blur(); }
+                              };
+                            }}
+                          >
+                            {sub.name}
+                          </div>
+                        )}
                         {!isFlat && (
-                        <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           {isInternalPagesSubPage(sub) && (
                             <button onClick={(e) => { e.stopPropagation(); enterFocusWorkspace(stage.id, sub.id); }} className="p-0.5 bg-cyan-600 hover:bg-cyan-500 rounded" title="专注编辑"><PanelTopOpen size={10} /></button>
                           )}

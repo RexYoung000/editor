@@ -13,7 +13,7 @@ import { downloadLibraryFile, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './QuickPresetDialog';
 import type { Action, Element } from '../types';
-import { findActiveElementPage, getElementPages, type ElementPageRef } from '../utils/internalPages';
+import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -111,6 +111,7 @@ export default function ElementToolbar() {
     const course = s.currentCourse;
     if (!course) return true;
     if (!s.currentSubPageId) return true;
+    if (isInternalPagesWorkbenchReadonly(course, s.currentSubPageId, s.focusSubPageId)) return true;
     for (const stage of course.stages) {
       for (const page of stage.subPages) {
         if (page.id === s.currentSubPageId) return !!page.frozen;

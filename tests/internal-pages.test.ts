@@ -8,6 +8,7 @@ import {
   createInternalPagesSubPage,
   findCanvasElementPage,
   getElementPages,
+  isInternalPagesWorkbenchReadonly,
   isInternalPagesSubPage,
   visitCourseElementPages,
 } from '../src/utils/internalPages';
@@ -52,6 +53,18 @@ test('创建内部页面模板时只给新模板写入能力字段', () => {
   assert.deepEqual(page.internalPageGroups, []);
   assert.equal(isInternalPagesSubPage(page), true);
   assert.equal(isInternalPagesSubPage({ id: 'legacy', name: '旧页面', elements: [] }), false);
+});
+
+test('内部页面只在工作台状态锁定画布，进入专注工作区后恢复编辑', () => {
+  const internal = createInternalPagesSubPage('internal-readonly', '内部页面');
+  const course = internalCourse(internal);
+  assert.equal(isInternalPagesWorkbenchReadonly(course, internal.id, null), true);
+  assert.equal(isInternalPagesWorkbenchReadonly(course, internal.id, internal.id), false);
+
+  const normal: SubPage = { id: 'normal-page', name: '普通页面', elements: [] };
+  const normalCourse = internalCourse(normal);
+  assert.equal(isInternalPagesWorkbenchReadonly(normalCourse, normal.id, null), false);
+  assert.equal(isInternalPagesWorkbenchReadonly(course, null, null), false);
 });
 
 test('弹窗编辑画布按底板、遮罩、弹窗内容合成，并保持合成层不可交互', () => {

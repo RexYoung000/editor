@@ -11,12 +11,13 @@ import { objects, canvasRoot, laya } from '../utils/laya/core';
 import CanvasOverlay from './CanvasOverlay';
 import { useI18n } from '../i18n/context';
 import CanvasRuler, { RULER_PX } from './CanvasRuler';
+import { LockKeyhole, PanelTopOpen } from 'lucide-react';
 import { createDefaultElement } from '../elements/elementMeta';
 import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
-import { findCanvasElementPage } from '../utils/internalPages';
+import { findCanvasElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import {
   CANVAS_ZOOM_BUTTON_STEP,
   constrainViewportToWorkspace,
@@ -81,8 +82,12 @@ function sortChildrenParentFirst(children: Element[], topLevelIds: Set<string>):
 export default function Canvas() {
   const { t } = useI18n();
   const currentCourse    = useEditorStore((s) => s.currentCourse);
+  const currentStageId = useEditorStore((s) => s.currentStageId);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
   const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
+  const focusSubPageId = useEditorStore((s) => s.focusSubPageId);
+  const enterFocusWorkspace = useEditorStore((s) => s.enterFocusWorkspace);
+  const clearSelection = useEditorStore((s) => s.clearSelection);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement    = useEditorStore((s) => s.selectElement);
   const updateElement    = useEditorStore((s) => s.updateElement);
@@ -96,6 +101,8 @@ export default function Canvas() {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [layaReady, setLayaReady] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showReadonlyTip, setShowReadonlyTip] = useState(false);
+  const readonlyTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevPageIdRef = useRef<string | null>(null);
   const prevElementsRef = useRef<Map<string, Element>>(new Map());
 
@@ -128,6 +135,36 @@ export default function Canvas() {
     () => findCanvasElementPage(currentCourse, currentSubPageId, currentInternalPageId),
     [currentCourse, currentSubPageId, currentInternalPageId],
   );
+  const workbenchReadonly = isInternalPagesWorkbenchReadonly(currentCourse, currentSubPageId, focusSubPageId);
+
+  useEffect(() => {
+    if (!workbenchReadonly) return;
+    clearSelection();
+    const editingResetTimer = setTimeout(() => setEditingId(null), 0);
+    return () => clearTimeout(editingResetTimer);
+  }, [clearSelection, workbenchReadonly]);
+
+  useEffect(() => () => {
+    if (readonlyTipTimerRef.current) clearTimeout(readonlyTipTimerRef.current);
+  }, []);
+
+  const showWorkbenchReadonlyTip = useCallback(() => {
+    if (!workbenchReadonly) return;
+    if (readonlyTipTimerRef.current) clearTimeout(readonlyTipTimerRef.current);
+    setShowReadonlyTip(true);
+    readonlyTipTimerRef.current = setTimeout(() => {
+      setShowReadonlyTip(false);
+      readonlyTipTimerRef.current = null;
+    }, 4000);
+  }, [workbenchReadonly]);
+
+  const enterReadonlySubPage = useCallback(() => {
+    if (!currentStageId || !currentSubPageId) return;
+    if (readonlyTipTimerRef.current) clearTimeout(readonlyTipTimerRef.current);
+    readonlyTipTimerRef.current = null;
+    setShowReadonlyTip(false);
+    enterFocusWorkspace(currentStageId, currentSubPageId);
+  }, [currentStageId, currentSubPageId, enterFocusWorkspace]);
 
   const spacePressedRef = useRef(false);
   const panningRef = useRef(false);
@@ -475,6 +512,7 @@ export default function Canvas() {
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
+      if (workbenchReadonly) return;
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         // locked 元素不允许删除
@@ -503,7 +541,7 @@ export default function Canvas() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedElementIds, deleteElement, currentPage, updateElement, saveHistory]);
+  }, [selectedElementIds, deleteElement, currentPage, updateElement, saveHistory, workbenchReadonly]);
 
   const [assistPreferences, setAssistPreferences] = useState(loadCanvasAssistPreferences);
   const [assistPanelOpen, setAssistPanelOpen] = useState(false);
@@ -902,6 +940,52 @@ export default function Canvas() {
         {currentPage?.kind === 'dialog' && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 py-1 rounded-full bg-slate-950/80 border border-violet-400/40 text-[11px] text-violet-200">
             弹窗编辑 · 主界面底板只读
+          </div>
+        )}
+        {workbenchReadonly && (
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label="内部页面工作台只读预览"
+            className="absolute inset-0 z-[60] cursor-default"
+            onClick={showWorkbenchReadonlyTip}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') showWorkbenchReadonlyTip();
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = 'none';
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              showWorkbenchReadonlyTip();
+            }}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <div className="pointer-events-none absolute right-3 top-3 flex h-7 items-center gap-1.5 rounded border border-slate-500/70 bg-slate-950/85 px-2.5 text-[11px] text-slate-200 shadow-lg">
+              <LockKeyhole size={12} />
+              工作台预览
+            </div>
+          </div>
+        )}
+        {workbenchReadonly && showReadonlyTip && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="absolute bottom-5 left-1/2 z-[70] flex min-h-12 -translate-x-1/2 items-center justify-between gap-4 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-xs text-slate-100 shadow-2xl"
+            style={{ width: 'min(520px, calc(100% - 32px))' }}
+          >
+            <span>内部页面请进入专注工作区编辑</span>
+            <button
+              type="button"
+              onClick={enterReadonlySubPage}
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded bg-cyan-600 px-3 font-medium text-white hover:bg-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+            >
+              <PanelTopOpen size={14} />
+              进入编辑
+            </button>
           </div>
         )}
         {layaReady && (

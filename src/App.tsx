@@ -11,7 +11,7 @@ import { writeBackToLocalFile, getCourseFilePath, getCourseDirPath, cleanupUnref
 import { I18nProvider } from './i18n';
 import type { Course } from './types';
 import FocusWorkspace from './components/FocusWorkspace';
-import { isInternalPagesSubPage } from './utils/internalPages';
+import { isInternalPagesSubPage, isInternalPagesWorkbenchReadonly } from './utils/internalPages';
 
 function App() {
   const setCurrentCourse = useEditorStore((state) => state.setCurrentCourse);
@@ -34,6 +34,7 @@ function App() {
   const [isDirty, setIsDirty] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [focusWidth, setFocusWidth] = useState(() => Math.min(440, Math.max(280, Number(localStorage.getItem('forge_focus_workspace_width')) || 320)));
+  const internalPageWorkbenchReadonly = isInternalPagesWorkbenchReadonly(currentCourse, currentSubPageId, focusSubPageId);
 
   // GameLoader 初始化时会创建 layaContainer 并以黑色 canvas 覆盖整个视口
   // 在 landing 阶段需要隐藏它，进入 editor 后 Canvas 组件会把它移到正确位置
@@ -94,6 +95,15 @@ function App() {
       const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable;
       const mod = e.ctrlKey || e.metaKey;
 
+      const blockedReadonlyShortcut = internalPageWorkbenchReadonly && !isInput && (
+        (mod && ['z', 'Z', 'c', 'v', 'd', 'a', 'g'].includes(e.key))
+        || (mod && (e.code === 'BracketRight' || e.code === 'BracketLeft'))
+      );
+      if (blockedReadonlyShortcut) {
+        e.preventDefault();
+        return;
+      }
+
       if (mod && e.key === 'z' && !e.shiftKey) {
         e.preventDefault(); undo();
       } else if (mod && (e.key === 'Z' || (e.shiftKey && e.key === 'z'))) {
@@ -139,7 +149,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo, copyElements, pasteElements, duplicateElements, selectAll, selectedElementIds, moveElementLayer, groupElements, ungroupElements, currentCourse, currentStageId, currentSubPageId, focusSubPageId, enterFocusWorkspace, phase]);
+  }, [undo, redo, copyElements, pasteElements, duplicateElements, selectAll, selectedElementIds, moveElementLayer, groupElements, ungroupElements, currentCourse, currentStageId, currentSubPageId, focusSubPageId, enterFocusWorkspace, internalPageWorkbenchReadonly, phase]);
 
   // 点 Laya host 外的 UI 区域（Toolbar / 面板等）取消选中。
   // Laya host 内的点击（无论画布内外）由 selection.ts 的 hit-test 统一处理：
