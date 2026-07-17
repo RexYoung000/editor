@@ -311,6 +311,27 @@ test('预习导出保持独立资源前缀、预习页面类型和视频差异',
   );
 });
 
+test('正式与预习导出复用同一套场景节点和特殊组件规则', () => {
+  const course = normalCourseFixture();
+  course.previewStages = [structuredClone(course.stages[0])];
+
+  const normal = buildExportRegressionArtifacts(course);
+  const preview = buildPreviewExportRegressionArtifacts(course);
+  const normalScene = normal.scenes[0].scene;
+  const previewScene = preview.scenes[0].scene;
+  const normalizeNamespace = (scene: Record<string, unknown>) => JSON.parse(
+    JSON.stringify(scene)
+      .replaceAll('game_lt', 'game_preview')
+      .replaceAll('GameLT1_1', 'Game1'),
+  ) as Record<string, unknown>;
+
+  assert.deepEqual(
+    previewScene,
+    normalizeNamespace(normalScene),
+    '[共享场景] 除工程命名空间和场景名外，节点、变量、包装和特殊组件结构应一致',
+  );
+});
+
 test('复习课只生成视频配置并保持固定重命名与分级关系', () => {
   const artifacts = buildExportRegressionArtifacts(reviewCourseFixture());
 

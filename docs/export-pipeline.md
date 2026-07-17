@@ -93,9 +93,9 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 [exportProject.ts:21-44](../src/utils/exportProject.ts#L21-L44)。`structuredClone` 深拷 course，把所有 `NewTextArea` 元素就地替换成 `Image`，`skin` = `renderTextToImage` 渲染出的 `data:image/png;base64,...`。后续流程对它一无所知，data URL 走 `data:image` 通道。
 
-### 4.2 资源收集 `collectResources(course, viewDir)`
+### 4.2 资源收集 `collectResources(course, viewDir, stages, options)`
 
-[exportProject.ts:100-194](../src/utils/exportProject.ts#L100-L194)。遍历所有元素的 `props` / `actions` / `exportChildren` / `_keyboardPreset.children`，产出 `Map<src, dest>`：
+[exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用该入口，通过 `viewDir` 和待遍历 stages 决定课程命名空间，遍历所有元素的 `props` / `actions` / `exportChildren` / `_keyboardPreset.children`，产出 `Map<src, dest>`：
 
 | src 形态 | 落点（`viewDir = game_lt` 为例） | 说明 |
 |---|---|---|
@@ -117,11 +117,11 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 ### 4.5 路径重写 `rewriteProps`
 
-[exportProject.ts:223-236](../src/utils/exportProject.ts#L223-L236)。把元素 props 中的所有 src 路径替换成 resourceMap 里的 dest。**跳过 `runtime`** 字段（scene 里只有根节点写 runtime）。
+[exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用，把元素 props 中的所有 src 路径替换成 resourceMap 里的 dest。**跳过 `runtime`** 字段（scene 里只有根节点写 runtime）。
 
 ### 4.6 `.scene` 节点构建 `buildSceneNode`
 
-[exportProject.ts:243-415](../src/utils/exportProject.ts#L243-L415)。遍历元素树产出 LayaAir Designer 风格的节点（`{x, type, searchKey, label, compId, nodeParent, props, child}`）。特殊行为：
+[exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程统一从 `buildScene` 进入，复用变量分配、包装节点和特殊组件子节点规则；课程类型只传入不同 `viewDir` 和场景名。节点构建遍历元素树产出 LayaAir Designer 风格结构（`{x, type, searchKey, label, compId, nodeParent, props, child}`）。特殊行为：
 
 - **DragObj/DropObj 锚点 0.5 补偿**：sdk_baiya 运行时构造函数强制 `anchorX=0.5, anchorY=0.5`（中心锚点），编辑器 `element.x/y` 是左上角。导出时 `props.x = element.x + element.width / 2`、y 同理，让 Laya 可见左上角与编辑器一致
 - **SelectableObj 双 skin 拆子节点**：`_foregroundSkin` 和 `_bgSkin` 拆成两个 Image 子节点（`name='img'` / `name='bg'`），用 `left/top/right/bottom = 0` 撑满
@@ -200,7 +200,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 ### 4.11 模板与 game.zip 解压 `extractZipFromServer`
 
-[exportProject.ts:1198-1235](../src/utils/exportProject.ts#L1198-L1235)。统一从 `${getApiBaseUrl()}/builtin/...` 用 fetch 拉 zip，JSZip 内存解压：
+[exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用下载、目录创建和二进制写盘实现，统一从 `${getApiBaseUrl()}/builtin/...` 用 fetch 拉 zip，JSZip 内存解压：
 
 1. **工程模板**：`Game1_LT.zip` / `Game1_HW.zip` / `Game1_PREVIEW.zip` 解压到 `${dirPath}/project/<cid>/Game1_XX/`，`pathMapper` 不传，整包还原
 2. **`game.zip` 内置资源**：`collectGameZipFiles(resourceMap)` 算出**实际被引用**的精确路径集合（去掉 `game/` 前缀），filter 命中才解压；`pathMapper` 把 `<topDir>/...` 映射到 `<viewDir>/image/<destDirName>/...`，其中 `topDir === 'image'` 时 `destDirName = 'img'`，其他原样
@@ -222,12 +222,12 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 ## 五、`exportPreviewProject` 与主流程的差异
 
-文件 [src/utils/exportPreviewProject.ts](../src/utils/exportPreviewProject.ts)。结构镜像 exportProject，但有以下实质差异：
+文件 [src/utils/exportPreviewProject.ts](../src/utils/exportPreviewProject.ts)。预习只保留课程类型特有的场景代码、配置和写盘编排；资源收集、路径重写、变量分配、包装节点、特殊组件节点、内置资源筛选和 zip 解压均复用 [exportProject.ts](../src/utils/exportProject.ts) 的共享核心。实质差异如下：
 
 1. **入参**：直接接收**已 baked** 的 course（由 `exportProject` 统一调用前传入），自身**不重做** `bakeTextElements`
 2. **资源前缀**：`game_preview/` 一以贯之
 3. **不调 `enrichAnimAudioResources`**：preview 工程不补 Spine 同目录音频（实际差异，按需评估是否要补齐）
-4. **`.scene` 构建**：`buildPreviewScene` 与主流程节点结构一致，差别只在 `runtime` 路径前缀 `view/game_preview/`
+4. **`.scene` 构建**：直接复用 `buildScene`，只把 `viewDir` 设为 `game_preview`，因此节点、变量、包装和特殊组件规则与正式工程保持一致
 5. **`.ts` 模板** `generatePreviewSceneTs`：
    - **有** `GameUtils.initConfirm`、PageTurnBox 翻页、DragObj `EVENT_SUCCESS/FAILD`
    - **无** `btn_ok + choiceBox` 对错音效绑定（preview 通常不出题判对错）
@@ -250,14 +250,14 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 | 阶段 | 主入口 | preview 入口 |
 |---|---|---|
 | 文本烘焙 | `bakeTextElements` ([exportProject.ts:21](../src/utils/exportProject.ts#L21)) | 复用主流程的 baked course |
-| 资源收集 | `collectResources` ([exportProject.ts:100](../src/utils/exportProject.ts#L100)) | `collectPreviewResources` ([exportPreviewProject.ts:56](../src/utils/exportPreviewProject.ts#L56)) |
+| 资源收集 | `collectResources` ([exportProject.ts](../src/utils/exportProject.ts)) | 复用 `collectResources`，传入 `previewStages` 与 `game_preview` |
 | 动画音频补全 | `enrichAnimAudioResources` ([exportProject.ts:198](../src/utils/exportProject.ts#L198)) | （无） |
-| `.scene` 节点 | `buildSceneNode` ([exportProject.ts:243](../src/utils/exportProject.ts#L243)) | `buildSceneNode` ([exportPreviewProject.ts](../src/utils/exportPreviewProject.ts)) |
-| 顶层场景 | `buildTopLevelSceneChildren` ([exportProject.ts:452](../src/utils/exportProject.ts#L452)) | `buildTopLevelSceneChildren` ([exportPreviewProject.ts](../src/utils/exportPreviewProject.ts)) |
-| 场景根 | `buildScene` ([exportProject.ts:619](../src/utils/exportProject.ts#L619)) | `buildPreviewScene` ([exportPreviewProject.ts:514](../src/utils/exportPreviewProject.ts#L514)) |
+| `.scene` 节点 | `buildSceneNode` ([exportProject.ts](../src/utils/exportProject.ts)) | 复用同一实现 |
+| 顶层场景 | `buildTopLevelSceneChildren` ([exportProject.ts](../src/utils/exportProject.ts)) | 复用同一实现 |
+| 场景根 | `buildScene` ([exportProject.ts](../src/utils/exportProject.ts)) | 复用 `buildScene`，使用 `game_preview` 命名空间 |
 | `.ts` 生成 | `generateSceneTs` / `generateHomeworkSceneTs` ([exportProject.ts:639](../src/utils/exportProject.ts#L639), [exportProject.ts:855](../src/utils/exportProject.ts#L855)) | `generatePreviewSceneTs` ([exportPreviewProject.ts:534](../src/utils/exportPreviewProject.ts#L534)) |
 | `finalConfig.json` | `buildConfigJson` / `buildHomeworkConfigJson` ([exportProject.ts:939](../src/utils/exportProject.ts#L939), [exportProject.ts:1088](../src/utils/exportProject.ts#L1088)) | `buildPreviewConfigJson` ([exportPreviewProject.ts:655](../src/utils/exportPreviewProject.ts#L655)) |
-| zip 解压 | `extractZipFromServer` ([exportProject.ts:1198](../src/utils/exportProject.ts#L1198)) | `extractZipFromServer` ([exportPreviewProject.ts:799](../src/utils/exportPreviewProject.ts#L799)) |
+| zip 解压 | `extractZipFromServer` ([exportProject.ts](../src/utils/exportProject.ts)) | 复用同一实现 |
 | 主入口 | `exportProject` ([exportProject.ts:1239](../src/utils/exportProject.ts#L1239)) | `exportPreviewProject` ([exportPreviewProject.ts:844](../src/utils/exportPreviewProject.ts#L844)) |
 
 ---
@@ -268,6 +268,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 - `buildExportRegressionArtifacts` 生成正常课、作业、专题测评、复习课和内部页面的资源映射、`.scene` 结构、场景代码与 `config.json`。
 - `buildPreviewExportRegressionArtifacts` 生成预习课对应的同类结构产物。
+- 共享场景断言使用同一页面分别生成正式与预习 `.scene`，除工程命名空间和场景名外，节点、变量、包装与特殊组件结构必须完全一致。
 - 真实导出写盘复用与测试入口相同的结构组合逻辑；测试不会另写一套模拟导出规则。
 - 图片尺寸由测试显式传入，用于稳定验证大图散图与小图 atlas 规则，不读取开发者本机文件。
 - 断言只覆盖组件树、坐标属性、变量、动作、内部页面运行代码、课程类型差异和关键资源路径，不保存整文件快照。

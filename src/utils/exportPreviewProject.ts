@@ -1,11 +1,19 @@
 import type { Action, Course, SubPage, Element } from '../types';
 import { elementMeta, type ExportChild } from '../elements/elementMeta';
 import { getKeyboardPreset } from '../elements/keyboardPresets';
-import { lookupBuiltinByExportPath, lookupBuiltinBySrcPath } from '../elements/builtinAssets';
+import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
 import { getCourseDirPath } from './electronFs';
-import JSZip from 'jszip';
 import { getApiBaseUrl } from './apiConfig';
 import { collectImageSizes, isLargeImage } from './imageSize';
+import {
+  buildScene,
+  collectGameZipFiles,
+  collectResources,
+  extractZipFromServer,
+  isLocalSkPath,
+  isLocalSoundPath,
+  isLocalVideoPath,
+} from './exportProject';
 import {
   buildInternalPageActionBindings,
   buildInternalPageRuntime,
@@ -13,472 +21,7 @@ import {
   internalPageActionBody,
 } from './internalPageCompiler';
 
-// ─── 资源路径映射（预习工程，使用 game_preview 前缀）───
-
-const RESOURCE_EXTS: Record<string, string> = {
-  '.png': 'game_preview/image', '.jpg': 'game_preview/image', '.jpeg': 'game_preview/image', '.gif': 'game_preview/image',
-  '.wav': 'game_preview/sound', '.mp3': 'game_preview/sound',
-  '.mp4': 'game_preview/animation', '.sk': 'game_preview/animation',
-};
-
-function getExt(url: string): string {
-  const idx = url.lastIndexOf('.');
-  return idx >= 0 ? url.slice(idx).toLowerCase() : '';
-}
-
-function isUploadPath(v: unknown): v is string {
-  return typeof v === 'string' && (v.startsWith('/uploads/') || (v.startsWith('images/') && !v.startsWith('images/animation/') && !v.startsWith('images/sound/')));
-}
-
-function isLocalVideoPath(v: unknown): v is string {
-  return typeof v === 'string' && v.startsWith('images/animation/') && /\.(mp4|webm|mov)$/i.test(v);
-}
-
-function isLocalSkPath(v: unknown): v is string {
-  return typeof v === 'string' && v.startsWith('images/animation/') && /\.sk$/i.test(v);
-}
-
-function isLocalSoundPath(v: unknown): v is string {
-  return typeof v === 'string' && v.startsWith('images/sound/') && /\.(wav|mp3)$/i.test(v);
-}
-
-function isBuiltinResourcePath(v: unknown): v is string {
-  return typeof v === 'string' && lookupBuiltinByExportPath(v) !== undefined;
-}
-
-/** game/xxx/file.png → game_preview/image/xxx/file.png，game/image/file.png → game_preview/image/img/file.png，game/sound/file → game_preview/sound/file */
-function builtinExportToPreviewPath(exportPath: string): string {
-  const parts = exportPath.split('/');
-  if (parts.length >= 3 && parts[0] === 'game') {
-    const dir = parts[1];
-    const rest = parts.slice(2).join('/');
-    if (dir === 'sound') {
-      return `game_preview/sound/${rest}`;
-    }
-    const targetDir = dir === 'image' ? 'img' : dir;
-    return `game_preview/image/${targetDir}/${rest}`;
-  }
-  return exportPath;
-}
-
-const VIDEO_EXTS = ['.mp4', '.webm', '.mov'];
-
-function collectPreviewResources(course: Course): Map<string, string> {
-  const map = new Map<string, string>();
-  let skinCounter = 0;
-
-  const collectValue = (value: unknown) => {
-    if (isUploadPath(value)) {
-      if (map.has(value)) return;
-      const filename = (value as string).split('/').pop() ?? 'unknown';
-      const ext = getExt(filename);
-      const dir = RESOURCE_EXTS[ext] ?? 'game_preview/image';
-      const isVideo = VIDEO_EXTS.includes(ext);
-      const targetPath = isVideo ? `${dir}/${filename}` : `${dir}/img/${filename}`;
-      map.set(value, targetPath);
-    } else if (isLocalVideoPath(value)) {
-      if (map.has(value)) return;
-      const filename = (value as string).split('/').pop() ?? 'unknown';
-      map.set(value, `game_preview/animation/${filename}`);
-    } else if (isLocalSkPath(value)) {
-      // images/animation/ani1/game.sk → game_preview/animation/ani1/game.sk（保留子目录）
-      if (map.has(value)) return;
-      const relPath = (value as string).slice('images/animation/'.length);
-      map.set(value, `game_preview/animation/${relPath}`);
-      // 同目录 .png 纹理
-      const pngPath = (value as string).replace(/\.sk$/i, '.png');
-      if (!map.has(pngPath)) {
-        const pngRelPath = relPath.replace(/\.sk$/i, '.png');
-        map.set(pngPath, `game_preview/animation/${pngRelPath}`);
-      }
-    } else if (isLocalSoundPath(value)) {
-      if (map.has(value)) return;
-      const filename = (value as string).split('/').pop() ?? 'unknown';
-      map.set(value, `game_preview/sound/${filename}`);
-    } else if (typeof value === 'string' && value.startsWith('data:image')) {
-      if (map.has(value)) return;
-      const ext = value.includes('image/png') ? '.png' : '.jpg';
-      map.set(value, `game_preview/image/img/skin_${skinCounter++}${ext}`);
-    } else if (isBuiltinResourcePath(value)) {
-      if (!map.has(value)) map.set(value, builtinExportToPreviewPath(value as string));
-    } else if (typeof value === 'string' && value.startsWith('/builtin/')) {
-      if (map.has(value)) return;
-      const asset = lookupBuiltinBySrcPath(value);
-      if (asset?.exportPath) map.set(value, builtinExportToPreviewPath(asset.exportPath));
-    }
-  };
-
-  const scanFixed = (children: ExportChild[] | undefined) => {
-    if (!children) return;
-    for (const c of children) {
-      if (c.props) for (const v of Object.values(c.props)) collectValue(v);
-      if (c.child) scanFixed(c.child);
-    }
-  };
-
-  const previewStages = course.previewStages ?? [];
-  for (const stage of previewStages) {
-    for (const page of stage.subPages) {
-      for (const el of page.elements) {
-        const meta = elementMeta[el.type];
-        const merged = { ...(meta?.defaultProps ?? {}), ...(el.props ?? {}) };
-        for (const v of Object.values(merged)) collectValue(v);
-        // playSound / stopSound 动作中的音频路径也需要收集
-        if (el.actions) {
-          for (const action of el.actions) {
-            if ((action.actionType === 'playSound' || action.actionType === 'stopSound') && action.value) {
-              collectValue(action.value);
-            }
-          }
-        }
-        scanFixed(meta?.exportChildren);
-        const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-        const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-        scanFixed(presetChildren);
-        // PageTurnBox 不携带额外资源，同 group ContainerBox 的资源由主循环收集
-      }
-    }
-  }
-  return map;
-}
-
-// ─── 路径重写 ───
-
-function rewriteProps(props: Record<string, unknown>, resourceMap: Map<string, string>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(props)) {
-    if (key === 'runtime') continue;
-    if (isUploadPath(value) || isLocalVideoPath(value) || isLocalSkPath(value) || isLocalSoundPath(value) || (typeof value === 'string' && value.startsWith('data:image')) || (typeof value === 'string' && value.startsWith('/builtin/'))) {
-      result[key] = resourceMap.get(value) ?? value;
-    } else if (isBuiltinResourcePath(value)) {
-      result[key] = resourceMap.get(value) ?? builtinExportToPreviewPath(value as string);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
-// ─── .scene 节点构建 ───
-
-let _compId = 0;
-function nextId() { return ++_compId; }
-
-/** 收集需要在 .ts 中通过 this.xxx 引用的元素 ID（预览导出版） */
-function collectElementsNeedingVar(page: SubPage): Set<string> {
-  const needsVar = new Set<string>();
-  const elements = page.elements;
-
-  for (const el of elements) {
-    if (typeof el.props?.__internalPageRootVar === 'string') needsVar.add(el.id);
-    if (el.actions && el.actions.length > 0) {
-      needsVar.add(el.id);
-      for (const action of el.actions) {
-        if (action.targetId) needsVar.add(action.targetId);
-      }
-    }
-  }
-
-  for (const el of elements) {
-    const meta = elementMeta[el.type];
-    const wrapperVar = (meta?.exportWrapper?.props as Record<string, unknown> | undefined)?.var;
-    if (wrapperVar === '_klInputBox') needsVar.add(el.id);
-    if (el.type === 'DragViewBox') needsVar.add(el.id);
-    if (el.type === 'NewBrushSprite' || el.type === 'BrushDrawBtn' || el.type === 'BrushClearBtn') {
-      needsVar.add(el.id);
-    }
-  }
-
-  const ptBoxes = elements.filter(e => e.type === 'PageTurnBox');
-  for (const ptBox of ptBoxes) {
-    needsVar.add(ptBox.id);
-    for (const e of elements) {
-      if (e.parentId !== ptBox.id) continue;
-      if (e.type === 'PageTurnLeftBtn' ||
-          e.type === 'PageTurnRightBtn' ||
-          e.type === 'SpeechSelectableObj' ||
-          e.type === 'ContainerBox') {
-        needsVar.add(e.id);
-      }
-    }
-  }
-
-  for (const el of elements) {
-    if (!el.actions?.some(a => a.event === 'onAutoClick')) continue;
-    if (!el.parentId) continue;
-    const parent = elements.find(e => e.id === el.parentId);
-    if (parent && parent.layaType === 'ChoiceBox') needsVar.add(parent.id);
-  }
-
-  return needsVar;
-}
-
-function buildVarAssignment(page: SubPage, needsVarSet: Set<string>): Map<string, string> {
-  const assignment = new Map<string, string>();
-  const used = new Set<string>();
-  used.add('_lockBox');
-  for (const el of page.elements) {
-    if (!needsVarSet.has(el.id)) continue;
-    const meta = elementMeta[el.type];
-    const merged = { ...(meta?.defaultProps ?? {}), ...(el.props ?? {}) } as Record<string, unknown>;
-    let base = (merged.var as string) || el.name || el.id;
-    base = String(base).replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
-    if (!base) base = `el_${el.id}`;
-    let candidate = base;
-    let i = 2;
-    while (used.has(candidate)) {
-      candidate = `${base}_${i}`;
-      i += 1;
-    }
-    used.add(candidate);
-    assignment.set(el.id, candidate);
-  }
-  return assignment;
-}
-
-function buildSceneNode(
-  element: Element,
-  allElements: Element[],
-  resourceMap: Map<string, string>,
-  parentId: number,
-  varAssignment?: Map<string, string>,
-): Record<string, unknown> {
-  const id = nextId();
-  const meta = elementMeta[element.type];
-  const rawProps = { ...(element.props ?? {}) };
-  // 旧数据兼容：_hidden → hidden
-  if ('_hidden' in rawProps && !('hidden' in rawProps)) rawProps.hidden = rawProps._hidden;
-  const merged = { ...(meta?.defaultProps ?? {}), ...rawProps };
-  const rewritten = rewriteProps(merged, resourceMap);
-
-  const props: Record<string, unknown> = { x: element.x, y: element.y, width: element.width, height: element.height };
-  // DragObj/DropObj：sdk_baiya 运行时构造函数强制 anchorX=0.5, anchorY=0.5（中心锚点）
-  // 编辑器 element.x/y 是左上角；Laya runtime sprite.x/y 是中心点。
-  // 补偿：exported.x = element.x + width/2，让 Laya 可见左上角 = element.x，与编辑器一致。
-  if (element.type === 'DragObj' || element.type === 'DropObj') {
-    props.x = element.x + element.width / 2;
-    props.y = element.y + element.height / 2;
-  }
-  if (element.name) props.name = element.name;
-  if (element.opacity !== 1) props.alpha = element.opacity;
-  if (element.rotation !== 0) props.rotation = element.rotation;
-  for (const [k, v] of Object.entries(rewritten)) {
-    if (k.startsWith('_')) continue;
-    if (k === 'runtime') continue;
-    if (k === 'hidden') continue;
-    if (k === 'blockThrough') continue;
-    if (v !== undefined && v !== null && v !== '') props[k] = v;
-  }
-  // var 按需导出：只有在 .ts 中需要 this.xxx 引用的元素才写 var
-  const assignedVar = varAssignment?.get(element.id);
-  const hasInheritVarChild = !!meta?.exportChildren?.some(c => c.inheritVar);
-  if (assignedVar && !hasInheritVarChild) {
-    props.var = assignedVar;
-  } else {
-    delete props.var;
-  }
-  if (hasInheritVarChild) {
-    delete props.name;
-  }
-  if (element.type === 'BrushClearBtn') {
-    delete props.width;
-    delete props.height;
-  }
-  // 拖拽组件导出 var/name 控制：
-  // DragViewBox 只导出 var（用于 this.xxx 引用），不导出 name
-  // DragDropBox/DragDragBox/DragObj/DropObj 只导出 name，不导出 var
-  if (element.type === 'DragViewBox') {
-    delete props.name;
-  } else if (['DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'].includes(element.type)) {
-    delete props.var;
-  }
-  // hidden=true → visible=false
-  if (rewritten.hidden === true) props.visible = false;
-  // blockThrough=true → mouseEnabled=true, mouseThrough=false
-  if (rewritten.blockThrough === true) {
-    props.mouseEnabled = true;
-    props.mouseThrough = false;
-  }
-  if (element.layaType === 'SoundButton') {
-    if ('isNeedAni' in props) props.isNeedAni = String(props.isNeedAni);
-    if ('showInStu' in props) props.showInStu = String(props.showInStu);
-  }
-  // Spine：.scene 中 isLoop/stopAt 始终写死，循环行为由动作控制
-  if (element.type === 'Spine') {
-    props.isLoop = 'false';
-    props.stopAt = 0;
-  }
-  // PageTurnBox 子节点的 SpeechSelectableObj：强制 isSelected=false，由 initView 运行时根据当前页设置
-  if (element.type === 'SpeechSelectableObj' && element.parentId) {
-    const parent = allElements.find(e => e.id === element.parentId);
-    if (parent?.type === 'PageTurnBox') {
-      props.isSelected = false;
-    }
-  }
-  // SelectableObj：将编辑器专用皮肤属性转换为子 Image 节点
-  const selectableObjChildren: Record<string, unknown>[] = [];
-  if (element.layaType === 'SelectableObj') {
-    const fgSkin = rewritten._foregroundSkin;
-    if (typeof fgSkin === 'string' && fgSkin !== '') {
-      const fgId = nextId();
-      selectableObjChildren.push({
-        x: 15, type: 'Image', searchKey: 'Image', label: 'Image',
-        isDirectory: false, isAniNode: true, hasChild: false,
-        compId: fgId, nodeParent: id,
-        props: { skin: fgSkin, left: 0, top: 0, right: 0, bottom: 0 },
-        child: [],
-      });
-    }
-    // 选中态 / 错误态：图片原始尺寸居中显示（anchor 0.5 + 父中心坐标，不指定 width/height）
-    const bgSkin = rewritten._bgSkin;
-    if (typeof bgSkin === 'string' && bgSkin !== '') {
-      const bgId = nextId();
-      selectableObjChildren.push({
-        x: 15, type: 'Image', searchKey: 'Image,bg', label: 'bg',
-        isDirectory: false, isAniNode: true, hasChild: false,
-        compId: bgId, nodeParent: id,
-        props: {
-          name: 'bg', skin: bgSkin,
-          anchorX: 0.5, anchorY: 0.5,
-          x: element.width / 2, y: element.height / 2,
-        },
-        child: [],
-      });
-    }
-    const wrongSkin = rewritten._wrongSkin;
-    if (typeof wrongSkin === 'string' && wrongSkin !== '') {
-      const wrongId = nextId();
-      selectableObjChildren.push({
-        x: 15, type: 'Image', searchKey: 'Image,wrong', label: 'wrong',
-        isDirectory: false, isAniNode: true, hasChild: false,
-        compId: wrongId, nodeParent: id,
-        props: {
-          name: 'wrong', skin: wrongSkin, visible: false,
-          anchorX: 0.5, anchorY: 0.5,
-          x: element.width / 2, y: element.height / 2,
-        },
-        child: [],
-      });
-    }
-  }
-
-  // DragObj/DropObj：若有 skin，生成 Image 子节点（编辑器不创建子元素，发布时才生成）
-  // 子 Image 用 anchor 0.5 + 父中心位置实现居中（与编辑器视觉一致）
-  const dragSkinChildren: Record<string, unknown>[] = [];
-  if ((element.type === 'DragObj' || element.type === 'DropObj') && props.skin) {
-    const skinVal = props.skin as string;
-    delete props.skin;
-    const imgId = nextId();
-    dragSkinChildren.push({
-      x: 15, type: 'Image', searchKey: 'Image', label: 'Image',
-      isDirectory: false, isAniNode: true, hasChild: false,
-      compId: imgId, nodeParent: id,
-      props: { skin: skinVal, anchorX: 0.5, anchorY: 0.5, x: element.width / 2, y: element.height / 2 },
-      child: [],
-    });
-  }
-  // DragObj：若有 dropSkin，生成第二个 Image 子节点（visible=false，放置成功时切换显示）
-  if (element.type === 'DragObj' && props.dropSkin) {
-    const dropSkinVal = props.dropSkin as string;
-    delete props.dropSkin;
-    const dropImgId = nextId();
-    dragSkinChildren.push({
-      x: 15, type: 'Image', searchKey: 'Image', label: 'Image',
-      isDirectory: false, isAniNode: true, hasChild: false,
-      compId: dropImgId, nodeParent: id,
-      props: { skin: dropSkinVal, anchorX: 0.5, anchorY: 0.5, x: element.width / 2, y: element.height / 2, visible: false },
-      child: [],
-    });
-  }
-  // DropObj：若有 tipSkin，生成 name=tip 的 Image 子节点（排在 skin Image 后面，居中）
-  if (element.type === 'DropObj' && props.tipSkin) {
-    const tipVal = props.tipSkin as string;
-    delete props.tipSkin;
-    props.isNeedTip = true;
-    const tipId = nextId();
-    dragSkinChildren.push({
-      x: 15, type: 'Image', searchKey: 'Image,tip', label: 'tip',
-      isDirectory: false, isAniNode: true, hasChild: false,
-      compId: tipId, nodeParent: id,
-      props: { name: 'tip', skin: tipVal, anchorX: 0.5, anchorY: 0.5, x: element.width / 2, y: element.height / 2 },
-      child: [],
-    });
-  } else if (element.type === 'DropObj') {
-    delete props.tipSkin;
-    props.isNeedTip = false;
-  }
-
-  const directChildren = allElements.filter(e => e.parentId === element.id);
-  const presetId = (element.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-  const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-  const fixedSource: ExportChild[] = presetChildren ?? meta?.exportChildren ?? [];
-
-  const propsToStrip = new Set<string>();
-  for (const c of fixedSource) {
-    if (c.inheritProps) for (const k of c.inheritProps) propsToStrip.add(k);
-  }
-
-  const cloneFixed = (c: ExportChild, pid: number): Record<string, unknown> => {
-    const cid = nextId();
-    const baseProps: Record<string, unknown> = { ...c.props };
-    if (c.inheritSize) {
-      baseProps.width = element.width;
-      baseProps.height = element.height;
-    }
-    if (c.inheritProps) {
-      for (const k of c.inheritProps) {
-        const v = (element.props as Record<string, unknown> | undefined)?.[k];
-        if (v !== undefined && v !== null && v !== '') baseProps[k] = v;
-      }
-    }
-    if (c.inheritVar) {
-      const v = varAssignment?.get(element.id);
-      if (v) baseProps.var = v;
-    }
-    const cProps = rewriteProps(baseProps, resourceMap);
-    const childTags: string[] = [c.type];
-    if (cProps.name) childTags.push(String(cProps.name));
-    if (cProps.var && cProps.var !== cProps.name) childTags.push(String(cProps.var));
-    const childLabel = (cProps.name as string | undefined) ?? (cProps.var as string | undefined) ?? c.type;
-    const node: Record<string, unknown> = {
-      x: 15, type: c.type, searchKey: childTags.join(','), label: childLabel,
-      isDirectory: !!(c.child?.length), isAniNode: true, hasChild: !!(c.child?.length),
-      compId: cid, nodeParent: pid, props: cProps, child: [],
-    };
-    if (c.child?.length) node.child = c.child.map(cc => cloneFixed(cc, cid));
-    return node;
-  };
-
-  const fixedChildren = fixedSource.map(c => cloneFixed(c, id));
-
-  for (const k of propsToStrip) {
-    delete props[k];
-  }
-  const userChildren = directChildren.map(c => buildSceneNode(c, allElements, resourceMap, id, varAssignment));
-  const child = [...selectableObjChildren, ...dragSkinChildren, ...fixedChildren, ...userChildren];
-
-  const layaType = element.layaType ?? 'Box';
-  const tags: string[] = [];
-  const nodeName = props.name as string | undefined;
-  const nodeVar = props.var as string | undefined;
-  if (nodeName) tags.push(nodeName);
-  if (nodeVar && nodeVar !== nodeName) tags.push(nodeVar);
-  const searchKey = tags.length > 0 ? `${layaType},${tags.join(',')}` : layaType;
-  const label = nodeName ?? nodeVar ?? layaType;
-  return {
-    x: 15, type: layaType, searchKey, label,
-    isOpen: child.length > 0, isDirectory: child.length > 0, isAniNode: true, hasChild: child.length > 0,
-    compId: id, nodeParent: parentId, props, child,
-  };
-}
-
-function getWrapper(el: Element) {
-  return elementMeta[el.type]?.exportWrapper;
-}
-
-function shouldWrap(_el: Element, _w: NonNullable<ReturnType<typeof getWrapper>>) {
-  return true;
-}
+// ─── 预习场景差异 ───
 
 interface SceneFlags {
   hasBtnConfirm: boolean;
@@ -487,135 +30,11 @@ interface SceneFlags {
 
 function detectSceneFlags(page: SubPage): SceneFlags {
   const hasBtnConfirm = false;
-  let hasKlInputBox = false;
-  for (const el of page.elements) {
-    const meta = elementMeta[el.type];
-    const wrapperVar = (meta?.exportWrapper?.props as Record<string, unknown> | undefined)?.var;
-    if (wrapperVar === '_klInputBox') hasKlInputBox = true;
-  }
-  return { hasBtnConfirm, hasKlInputBox };
-}
-
-function buildTopLevelSceneChildren(
-  page: SubPage,
-  resourceMap: Map<string, string>,
-  parentId: number,
-): { children: Record<string, unknown>[]; flags: SceneFlags; varAssignment: Map<string, string> } {
-  const needsVarSet = collectElementsNeedingVar(page);
-  const varAssignment = buildVarAssignment(page, needsVarSet);
-  const topLevel = page.elements.filter(e => !e.parentId);
-  type Group = { wrapper: NonNullable<ReturnType<typeof getWrapper>> | null; elements: Element[] };
-  const groups: Group[] = [];
-  const wrapperIndex = new Map<string, number>();
-
-  for (let ti = 0; ti < topLevel.length; ti++) {
-    const el = topLevel[ti];
-    const wrapper = getWrapper(el);
-    if (!wrapper || !shouldWrap(el, wrapper)) {
-      groups.push({ wrapper: null, elements: [el] });
-      continue;
-    }
-    const pageScope = typeof el.props.__internalPageId === 'string' ? el.props.__internalPageId : '';
-    const wrapperKey = `${pageScope}:${wrapper.type}`;
-    const idx = wrapperIndex.get(wrapperKey);
-    if (idx !== undefined) {
-      groups[idx].elements.push(el);
-    } else {
-      wrapperIndex.set(wrapperKey, groups.length);
-      groups.push({ wrapper, elements: [el] });
-    }
-  }
-
-  const out: Record<string, unknown>[] = [];
-  for (const g of groups) {
-    if (!g.wrapper) {
-      out.push(buildSceneNode(g.elements[0], page.elements, resourceMap, parentId, varAssignment));
-      continue;
-    }
-    const wrapperId = nextId();
-    const innerNodes = g.elements.map(el => buildSceneNode(el, page.elements, resourceMap, wrapperId, varAssignment));
-
-    const rawWrapperProps: Record<string, unknown> = { ...g.wrapper.props };
-    const rewrittenWrapper = rewriteProps(rawWrapperProps, resourceMap);
-    const wrapperProps: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(rewrittenWrapper)) {
-      if (k === 'runtime') continue;
-      if (v !== undefined && v !== null && v !== '') wrapperProps[k] = v;
-    }
-    const firstElId = g.elements[0]?.id;
-    const wrapperAssignedVar = firstElId ? varAssignment.get(firstElId) : undefined;
-    if (wrapperAssignedVar) {
-      wrapperProps.var = wrapperAssignedVar;
-    } else {
-      delete wrapperProps.var;
-    }
-
-    for (const key of g.wrapper.promoteProps ?? []) {
-      const values: string[] = [];
-      for (const node of innerNodes) {
-        const ip = node.props as Record<string, unknown>;
-        const v = ip[key];
-        if (v !== undefined && v !== null && v !== '') values.push(String(v));
-        delete ip[key];
-      }
-      if (values.length > 0) wrapperProps[key] = values.join(',');
-    }
-
-    const tags: string[] = [];
-    const nodeVar = wrapperProps.var as string | undefined;
-    const nodeName = wrapperProps.name as string | undefined;
-    if (nodeName) tags.push(nodeName);
-    if (nodeVar && nodeVar !== nodeName) tags.push(nodeVar);
-    const searchKey = tags.length > 0 ? `${g.wrapper.type},${tags.join(',')}` : g.wrapper.type;
-    const label = nodeName ?? nodeVar ?? g.wrapper.type;
-
-    out.push({
-      x: 15, type: g.wrapper.type, searchKey, label,
-      isOpen: true, isDirectory: innerNodes.length > 0, isAniNode: true, hasChild: innerNodes.length > 0,
-      compId: wrapperId, nodeParent: parentId, props: wrapperProps, child: innerNodes,
-    });
-  }
-
-  const lockId = nextId();
-  const lockInputId = nextId();
-  out.push({
-    x: 15, type: 'Box',
-    searchKey: 'Box,_lockBox',
-    label: '_lockBox',
-    isOpen: false, isDirectory: true, isAniNode: true, hasChild: true,
-    compId: lockId, nodeParent: parentId,
-    props: { x: 0, y: 0, width: 1920, height: 1080, visible: false, var: '_lockBox' },
-    child: [{
-      x: 30, type: 'KlInputImage',
-      searchKey: 'KlInputImage',
-      label: 'KlInputImage',
-      isDirectory: false, isAniNode: true, hasChild: false,
-      compId: lockInputId, nodeParent: lockId,
-      props: { spaceX: 0, place: 1, fontClipSkin: 'share/ui/0-9-fuhao_0.png', filterColor: 'ffff00', filterBlur: 5, contentType: 1, canSelected: 'false' },
-      child: [],
-    }],
+  const hasKlInputBox = page.elements.some((element) => {
+    const wrapperVar = (elementMeta[element.type]?.exportWrapper?.props as Record<string, unknown> | undefined)?.var;
+    return wrapperVar === '_klInputBox';
   });
-
-  return { children: out, flags: detectSceneFlags(page), varAssignment };
-}
-
-function buildPreviewScene(page: SubPage, sceneName: string, resourceMap: Map<string, string>): { json: Record<string, unknown>; flags: SceneFlags; varAssignment: Map<string, string> } {
-  _compId = 1;
-  const rootId = nextId();
-  const { children: child, flags, varAssignment } = buildTopLevelSceneChildren(page, resourceMap, rootId);
-  return {
-    json: {
-      x: 0, type: 'KlView', selectedBox: rootId, selecteID: rootId,
-      searchKey: 'KlView',
-      props: { width: 1920, height: 1080, sceneColor: '#000000', runtime: `view/game_preview/${sceneName}.ts` },
-      nodeParent: -1, maxID: _compId, label: 'KlView',
-      isOpen: true, isDirectory: true, isAniNode: true, hasChild: child.length > 0,
-      compId: rootId, child,
-      animations: [{ nodes: [], name: 'ani1', id: 1, frameRate: 24, action: 0 }],
-    },
-    flags,
-    varAssignment,
-  };
+  return { hasBtnConfirm, hasKlInputBox };
 }
 
 // ─── 生成 scene 对应的 ts 文件 ───
@@ -1034,7 +453,8 @@ function buildPreparedPreviewExportArtifacts(
     const page = stage.subPages[0];
     if (!page || page.frozen) continue;
     const name = `Game${si + 1}`;
-    const { json, flags, varAssignment } = buildPreviewScene(page, name, resourceMap);
+    const { json, varAssignment } = buildScene(page, name, resourceMap, 'game_preview');
+    const flags = detectSceneFlags(page);
     scenes.push({
       name,
       scene: json,
@@ -1057,69 +477,16 @@ export function buildPreviewExportRegressionArtifacts(
   imageSizes: ImageSizeMap = new Map(),
 ): PreviewExportRegressionArtifacts {
   const compiled = compileInternalPagesCourse(course);
-  const resourceMap = collectPreviewResources(compiled);
+  const resourceMap = collectResources(
+    compiled,
+    'game_preview',
+    compiled.previewStages ?? [],
+    { collectAllEditorProps: true, includeCHFeedback: false },
+  );
   return {
     resources: Object.fromEntries(resourceMap),
     ...buildPreparedPreviewExportArtifacts(compiled, resourceMap, imageSizes),
   };
-}
-
-// ─── 收集需要从 game.zip 解压的精确文件路径（去掉 game/ 前缀） ───
-
-function collectGameZipFiles(resourceMap: Map<string, string>): Set<string> {
-  const files = new Set<string>();
-  for (const [from] of resourceMap) {
-    let exportPath: string | undefined;
-    if (lookupBuiltinByExportPath(from) !== undefined) {
-      exportPath = from;
-    } else if (from.startsWith('/builtin/')) {
-      exportPath = lookupBuiltinBySrcPath(from)?.exportPath;
-    }
-    if (exportPath?.startsWith('game/')) {
-      files.add(exportPath.slice('game/'.length));
-    }
-  }
-  return files;
-}
-
-// ─── Zip 下载解压工具 ───
-
-async function extractZipFromServer(
-  zipUrl: string,
-  destRoot: string,
-  eApi: NonNullable<typeof window.electronAPI>,
-  filter?: (entryPath: string) => boolean,
-  pathMapper?: (entryPath: string) => string,
-): Promise<void> {
-  const response = await fetch(zipUrl);
-  if (!response.ok) throw new Error(`下载资源包失败: ${zipUrl} (${response.status})`);
-  const data = await response.arrayBuffer();
-  const zip = await JSZip.loadAsync(data);
-
-  const entries: [string, JSZip.JSZipObject][] = [];
-  const dirPaths: string[] = [];
-  zip.forEach((rawPath, file) => {
-    const entryPath = rawPath.replace(/\\/g, '/');
-    if (file.dir || entryPath.endsWith('/') || entryPath.endsWith('\\')) {
-      if (!filter || filter(entryPath)) dirPaths.push(entryPath);
-      return;
-    }
-    if (!filter || filter(entryPath)) {
-      entries.push([entryPath, file]);
-    }
-  });
-
-  for (const dirPath of dirPaths) {
-    const destRelPath = pathMapper ? pathMapper(dirPath) : dirPath;
-    await eApi.ensureDir(`${destRoot}/${destRelPath}`);
-  }
-
-  for (const [entryPath, file] of entries) {
-    const destRelPath = pathMapper ? pathMapper(entryPath) : entryPath;
-    const destPath = `${destRoot}/${destRelPath}`;
-    const b64 = await file.async('base64');
-    await eApi.writeBinaryFile(destPath, b64);
-  }
 }
 
 // ─── 主入口（预习工程）───
@@ -1139,7 +506,12 @@ export async function exportPreviewProject(course: Course): Promise<void> {
   const previewStages = course.previewStages ?? [];
   if (previewStages.length === 0) return;
 
-  const resourceMap = collectPreviewResources(course);
+  const resourceMap = collectResources(
+    course,
+    'game_preview',
+    course.previewStages ?? [],
+    { collectAllEditorProps: true, includeCHFeedback: false },
+  );
 
   // 读取所有图片的真实像素尺寸，用于判断大小图
   const imageSizes = await collectImageSizes(resourceMap, course.id);

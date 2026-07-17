@@ -7,7 +7,6 @@ import { getCourseDirPath } from './electronFs';
 import { sendCourseToServer, loadWsConfig } from './websocket';
 import JSZip from 'jszip';
 import { getApiBaseUrl } from './apiConfig';
-import { exportPreviewProject } from './exportPreviewProject';
 import { collectImageSizes, isLargeImage } from './imageSize';
 import { isFlatLesson, isVideoOnlyCourse, namespace, type CourseKind } from './courseKind';
 import { collectInternalPageIssues, getElementPages, isPageAction } from './internalPages';
@@ -64,32 +63,32 @@ function getExt(url: string): string {
   return idx >= 0 ? url.slice(idx).toLowerCase() : '';
 }
 
-function isUploadPath(v: unknown): v is string {
+export function isUploadPath(v: unknown): v is string {
   return typeof v === 'string' && (v.startsWith('/uploads/') || (v.startsWith('images/') && !v.startsWith('images/animation/') && !v.startsWith('images/sound/')));
 }
 
-function isLocalVideoPath(v: unknown): v is string {
+export function isLocalVideoPath(v: unknown): v is string {
   return typeof v === 'string' && v.startsWith('images/animation/') && /\.(mp4|webm|mov)$/i.test(v);
 }
 
-function isLocalSkPath(v: unknown): v is string {
+export function isLocalSkPath(v: unknown): v is string {
   return typeof v === 'string' && v.startsWith('images/animation/') && /\.sk$/i.test(v);
 }
 
-function isLocalSoundPath(v: unknown): v is string {
+export function isLocalSoundPath(v: unknown): v is string {
   return typeof v === 'string' && v.startsWith('images/sound/') && /\.(wav|mp3)$/i.test(v);
 }
 
-function isLocalAnimAudioPath(v: unknown): v is string {
+export function isLocalAnimAudioPath(v: unknown): v is string {
   return typeof v === 'string' && v.startsWith('images/animation/') && /\.(mp3|wav|ogg)$/i.test(v);
 }
 
-function isBuiltinResourcePath(v: unknown): v is string {
+export function isBuiltinResourcePath(v: unknown): v is string {
   return typeof v === 'string' && lookupBuiltinByExportPath(v) !== undefined;
 }
 
 /** game/xxx/file.png → <viewDir>/image/xxx/file.png，game/image/file.png → <viewDir>/image/img/file.png */
-function builtinExportToProjectPath(exportPath: string, viewDir = 'game_lt'): string {
+export function builtinExportToProjectPath(exportPath: string, viewDir = 'game_lt'): string {
   const parts = exportPath.split('/');
   // parts: ["game", "inputImg", "img_1.png"] 或 ["game", "image", "btn_qd2.png"] 或 ["game", "animation", "feedback_CH_yes", "zx_yes.sk"]
   if (parts.length >= 3 && parts[0] === 'game') {
@@ -114,7 +113,12 @@ function builtinExportToProjectPath(exportPath: string, viewDir = 'game_lt'): st
 
 const VIDEO_EXTS = ['.mp4', '.webm', '.mov'];
 
-function collectResources(course: Course, viewDir = 'game_lt'): Map<string, string> {
+export function collectResources(
+  course: Course,
+  viewDir = 'game_lt',
+  stages: Course['stages'] = course.stages,
+  options: { collectAllEditorProps?: boolean; includeCHFeedback?: boolean } = {},
+): Map<string, string> {
   const map = new Map<string, string>();
   let skinCounter = 0;
 
@@ -178,7 +182,7 @@ function collectResources(course: Course, viewDir = 'game_lt'): Map<string, stri
     }
   };
 
-  for (const stage of course.stages) {
+  for (const stage of stages) {
     for (const page of stage.subPages) {
       for (const el of page.elements) {
         const meta = elementMeta[el.type];
@@ -187,7 +191,7 @@ function collectResources(course: Course, viewDir = 'game_lt'): Map<string, stri
           // _ 前缀的编辑器专用属性默认不收集；以下例外字段需要参与资源收集和路径重写：
           // - SpeechSelectableObj: _foregroundSkin / _bgSkin / _wrongSkin（前后景皮肤）
           // - MatchingItem: _itemImage（导出时转为子 Image 节点的 skin）
-          if (k.startsWith('_') && k !== '_foregroundSkin' && k !== '_bgSkin' && k !== '_wrongSkin' && k !== '_itemImage') continue;
+          if (!options.collectAllEditorProps && k.startsWith('_') && k !== '_foregroundSkin' && k !== '_bgSkin' && k !== '_wrongSkin' && k !== '_itemImage') continue;
           collectValue(v);
         }
         // playSound / stopSound 动作中的音频路径也需要收集
@@ -209,7 +213,7 @@ function collectResources(course: Course, viewDir = 'game_lt'): Map<string, stri
 
   // 口才反馈动画：扫描 actions，发现 onClickInitConfirmCH / *WithLock 或 playKcRightAni / playKcWrongAni 时主动收集 4 个内置资源
   let needsCHFeedback = false;
-  for (const stage of course.stages) {
+  for (const stage of stages) {
     for (const page of stage.subPages) {
       for (const el of page.elements) {
         if ((el.actions ?? []).some(a => a.event === 'onClickInitConfirmCH' || a.event === 'onClickInitConfirmCHWithLock' || a.event === 'onClickInitGameConfirmCH' || a.event === 'onClickInitGameConfirmCHWithLock' || a.actionType === 'playKcRightAni' || a.actionType === 'playKcRightAniLock' || a.actionType === 'playKcWrongAni')) {
@@ -222,7 +226,7 @@ function collectResources(course: Course, viewDir = 'game_lt'): Map<string, stri
     if (needsCHFeedback) break;
   }
 
-  if (needsCHFeedback) {
+  if (options.includeCHFeedback !== false && needsCHFeedback) {
     const yesSkSrc = assetSrc('feedback.CH.yes.sk');
     const yesPngSrc = assetSrc('feedback.CH.yes.png');
     const noSkSrc = assetSrc('feedback.CH.no.sk');
@@ -268,7 +272,7 @@ async function enrichAnimAudioResources(
 
 // ─── 路径重写 ───
 
-function rewriteProps(props: Record<string, unknown>, resourceMap: Map<string, string>): Record<string, unknown> {
+export function rewriteProps(props: Record<string, unknown>, resourceMap: Map<string, string>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(props)) {
     if (key === 'runtime') continue; // scene 里只有根节点有 runtime
@@ -306,7 +310,7 @@ function nextId() { return ++_compId; }
  *  - 特殊硬编码组件：DragViewBox
  *  - 翻页组件：PageTurnBox 关联的 ContainerBox / PageTurnLeftBtn / PageTurnRightBtn
  *  - onAutoClick 所在 SelectableObj 的父 ChoiceBox */
-function collectElementsNeedingVar(page: SubPage): Set<string> {
+export function collectElementsNeedingVar(page: SubPage): Set<string> {
   const needsVar = new Set<string>();
   const elements = page.elements;
 
@@ -323,6 +327,9 @@ function collectElementsNeedingVar(page: SubPage): Set<string> {
 
   // 2. 特殊硬编码组件（generateSceneTs 里直接 this.xxx 引用）
   for (const el of elements) {
+    const meta = elementMeta[el.type];
+    const wrapperVar = (meta?.exportWrapper?.props as Record<string, unknown> | undefined)?.var;
+    if (wrapperVar === '_klInputBox') needsVar.add(el.id);
     // DragViewBox：generateSceneTs 监听 EVENT_SUCCESS / EVENT_FAILD
     if (el.type === 'DragViewBox') needsVar.add(el.id);
     // MatchingGame：onClickInitGameConfirm* 时需要 var 引用（this.<var>.allRight）
@@ -363,7 +370,7 @@ function collectElementsNeedingVar(page: SubPage): Set<string> {
  *  - 优先使用 element.props.var（用户手填值，如 _btnConfirm / btn_ok 等硬编码值）
  *  - 否则用 element.name
  *  - 冲突时追加数字后缀确保唯一 */
-function buildVarAssignment(page: SubPage, needsVarSet: Set<string>): Map<string, string> {
+export function buildVarAssignment(page: SubPage, needsVarSet: Set<string>): Map<string, string> {
   const assignment = new Map<string, string>();
   const used = new Set<string>();
   // 已知会被注入的固定 var（保留位）
@@ -783,7 +790,7 @@ function buildTopLevelSceneChildren(
   return { children: out, varAssignment };
 }
 
-function buildScene(page: SubPage, sceneName: string, resourceMap: Map<string, string>, viewDir = 'game_lt'): { json: Record<string, unknown>; varAssignment: Map<string, string> } {
+export function buildScene(page: SubPage, sceneName: string, resourceMap: Map<string, string>, viewDir = 'game_lt'): { json: Record<string, unknown>; varAssignment: Map<string, string> } {
   _compId = 1;
   const rootId = nextId();
   const { children: child, varAssignment } = buildTopLevelSceneChildren(page, resourceMap, rootId);
@@ -2266,7 +2273,7 @@ export function buildExportRegressionArtifacts(
 // ─── 收集需要整目录拷贝的内置 game 文件夹 ───
 
 /** 从 resourceMap 中提取 game.zip 内被实际引用的精确文件路径集合（去掉 game/ 前缀） */
-function collectGameZipFiles(resourceMap: Map<string, string>): Set<string> {
+export function collectGameZipFiles(resourceMap: Map<string, string>): Set<string> {
   const files = new Set<string>();
   for (const [from] of resourceMap) {
     let exportPath: string | undefined;
@@ -2285,7 +2292,7 @@ function collectGameZipFiles(resourceMap: Map<string, string>): Set<string> {
 // ─── Zip 下载解压工具 ───
 
 /** 从 vite 服务器下载 zip 并通过 IPC 写入本地磁盘 */
-async function extractZipFromServer(
+export async function extractZipFromServer(
   zipUrl: string,
   destRoot: string,
   eApi: typeof window.electronAPI,
@@ -2600,6 +2607,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
 
   // ─── 生成预习编辑器工程（如果 previewStages > 0）───
   if (!isFlat && (course.previewStages?.length ?? 0) > 0) {
+    const { exportPreviewProject } = await import('./exportPreviewProject');
     await exportPreviewProject(baked);
   }
   } // end of else (normal mode)
