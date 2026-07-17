@@ -145,7 +145,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 ### 4.8 场景根节点 `buildScene`
 
-[exportProject.ts:619-635](../src/utils/exportProject.ts#L619-L635)。包一层 `KlView` 根节点：`width=1920, height=1080, sceneColor='#000000', runtime='view/<viewDir>/<sceneName>.ts'`。
+[exportProject.ts](../src/utils/exportProject.ts)。包一层 `KlView` 根节点：`width=1920, height=1080, sceneColor='#000000', runtime='view/<viewDir>/<sceneName>.ts'`。正课默认按动作注入口才反馈动画节点；预习复用同一场景构建入口，但通过显式选项关闭这项正课专用能力，避免生成未收集资源的节点。
 
 内部页面小关卡仍只生成一个场景：主界面、内容页和弹窗分别编译为持久容器。内容页互斥显示；弹窗显示时以主界面为只读底板。切换仅改变容器显隐，不重新创建已进入页面，因此同一轮运行内保留输入、选择、拖拽和显隐状态。隐藏页面的加载动作延迟到首次显示时执行一次。
 
@@ -203,7 +203,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用下载、目录创建和二进制写盘实现，统一从 `${getApiBaseUrl()}/builtin/...` 用 fetch 拉 zip，JSZip 内存解压：
 
 1. **工程模板**：`Game1_LT.zip` / `Game1_HW.zip` / `Game1_PREVIEW.zip` 解压到 `${dirPath}/project/<cid>/Game1_XX/`，`pathMapper` 不传，整包还原
-2. **`game.zip` 内置资源**：`collectGameZipFiles(resourceMap)` 算出**实际被引用**的精确路径集合（去掉 `game/` 前缀），filter 命中才解压；`pathMapper` 把 `<topDir>/...` 映射到 `<viewDir>/image/<destDirName>/...`，其中 `topDir === 'image'` 时 `destDirName = 'img'`，其他原样
+2. **`game.zip` 内置资源**：`collectGameZipFiles(resourceMap)` 算出**实际被引用**的精确路径集合（去掉 `game/` 前缀），filter 命中才解压；引用路径和解压落点统一由同一映射决定：`sound/` → `<viewDir>/sound/`，`animation/` → `<viewDir>/animation/`，`image/` → `<viewDir>/image/img/`，其他图片目录 → `<viewDir>/image/<topDir>/`
 
 每个 zip entry 通过 `eApi.writeBinaryFile(destPath, base64)` IPC 写盘；空目录通过 `eApi.ensureDir` 创建。
 
@@ -227,7 +227,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 1. **入参**：直接接收**已 baked** 的 course（由 `exportProject` 统一调用前传入），自身**不重做** `bakeTextElements`
 2. **资源前缀**：`game_preview/` 一以贯之
 3. **不调 `enrichAnimAudioResources`**：preview 工程不补 Spine 同目录音频（实际差异，按需评估是否要补齐）
-4. **`.scene` 构建**：直接复用 `buildScene`，只把 `viewDir` 设为 `game_preview`，因此节点、变量、包装和特殊组件规则与正式工程保持一致
+4. **`.scene` 构建**：直接复用 `buildScene`，把 `viewDir` 设为 `game_preview`，并关闭正课专用的口才反馈动画注入；其余节点、变量、包装和特殊组件规则与正式工程保持一致
 5. **`.ts` 模板** `generatePreviewSceneTs`：
    - **有** `GameUtils.initConfirm`、PageTurnBox 翻页、DragObj `EVENT_SUCCESS/FAILD`
    - **无** `btn_ok + choiceBox` 对错音效绑定（preview 通常不出题判对错）

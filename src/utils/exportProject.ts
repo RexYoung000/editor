@@ -790,13 +790,19 @@ function buildTopLevelSceneChildren(
   return { children: out, varAssignment };
 }
 
-export function buildScene(page: SubPage, sceneName: string, resourceMap: Map<string, string>, viewDir = 'game_lt'): { json: Record<string, unknown>; varAssignment: Map<string, string> } {
+export function buildScene(
+  page: SubPage,
+  sceneName: string,
+  resourceMap: Map<string, string>,
+  viewDir = 'game_lt',
+  options: { includeCHFeedback?: boolean } = {},
+): { json: Record<string, unknown>; varAssignment: Map<string, string> } {
   _compId = 1;
   const rootId = nextId();
   const { children: child, varAssignment } = buildTopLevelSceneChildren(page, resourceMap, rootId);
 
   // 口才反馈动画：检测到 onClickInitConfirmCH / *WithLock 事件或 playKcRightAni / playKcWrongAni 动作时，在 child 末尾注入 2 个 Spine 节点（visible=false）
-  const needsCHFeedback = page.elements.some(el =>
+  const needsCHFeedback = options.includeCHFeedback !== false && page.elements.some(el =>
     (el.actions ?? []).some(a =>
       a.event === 'onClickInitConfirmCH' || a.event === 'onClickInitConfirmCHWithLock'
       || a.event === 'onClickInitGameConfirmCH' || a.event === 'onClickInitGameConfirmCHWithLock'
@@ -2289,6 +2295,10 @@ export function collectGameZipFiles(resourceMap: Map<string, string>): Set<strin
   return files;
 }
 
+export function mapGameZipEntryToProjectPath(entryPath: string, viewDir: string): string {
+  return builtinExportToProjectPath(`game/${entryPath}`, viewDir);
+}
+
 // ─── Zip 下载解压工具 ───
 
 /** 从 vite 服务器下载 zip 并通过 IPC 写入本地磁盘 */
@@ -2566,17 +2576,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
     `${projectRoot}/laya/assets`,
     eApi,
     (entryPath) => gameZipFiles.has(entryPath),
-    (entryPath) => {
-      const topDir = entryPath.split('/')[0];
-      if (topDir === 'sound') {
-        return `game_lt/sound/${entryPath.slice(topDir.length + 1)}`;
-      }
-      if (topDir === 'animation') {
-        return `game_lt/animation/${entryPath.slice(topDir.length + 1)}`;
-      }
-      const destDirName = topDir === 'image' ? 'img' : topDir;
-      return `game_lt/image/${destDirName}/${entryPath.slice(topDir.length + 1)}`;
-    },
+    (entryPath) => mapGameZipEntryToProjectPath(entryPath, 'game_lt'),
   );
 
   // 复制用户上传资源（images/xxx → game_lt/image/img/xxx）和 base64 图片

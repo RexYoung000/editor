@@ -13,6 +13,7 @@ import {
   isLocalSkPath,
   isLocalSoundPath,
   isLocalVideoPath,
+  mapGameZipEntryToProjectPath,
 } from './exportProject';
 import {
   buildInternalPageActionBindings,
@@ -453,7 +454,13 @@ function buildPreparedPreviewExportArtifacts(
     const page = stage.subPages[0];
     if (!page || page.frozen) continue;
     const name = `Game${si + 1}`;
-    const { json, varAssignment } = buildScene(page, name, resourceMap, 'game_preview');
+    const { json, varAssignment } = buildScene(
+      page,
+      name,
+      resourceMap,
+      'game_preview',
+      { includeCHFeedback: false },
+    );
     const flags = detectSceneFlags(page);
     scenes.push({
       name,
@@ -570,14 +577,7 @@ export async function exportPreviewProject(course: Course): Promise<void> {
     `${projectRoot}/laya/assets`,
     eApi,
     (entryPath) => gameZipFiles.has(entryPath),
-    (entryPath) => {
-      const topDir = entryPath.split('/')[0];
-      if (topDir === 'sound') {
-        return `game_preview/sound/${entryPath.slice(topDir.length + 1)}`;
-      }
-      const destDirName = topDir === 'image' ? 'img' : topDir;
-      return `game_preview/image/${destDirName}/${entryPath.slice(topDir.length + 1)}`;
-    },
+    (entryPath) => mapGameZipEntryToProjectPath(entryPath, 'game_preview'),
   );
 
   // 复制用户上传资源与 base64 图片
