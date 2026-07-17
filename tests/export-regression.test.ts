@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildExportRegressionArtifacts } from '../src/utils/exportProject';
+import {
+  buildExportRegressionArtifacts,
+  mapGameZipEntryToProjectPath,
+} from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
 import {
   evaluationCourseFixture,
@@ -308,6 +311,67 @@ test('预习导出保持独立资源前缀、预习页面类型和视频差异',
       classType: 'yxdh',
     },
     '[预习] 视频页面配置',
+  );
+});
+
+test('正式与预习导出复用同一套场景节点和特殊组件规则', () => {
+  const course = normalCourseFixture();
+  course.previewStages = [structuredClone(course.stages[0])];
+
+  const normal = buildExportRegressionArtifacts(course);
+  const preview = buildPreviewExportRegressionArtifacts(course);
+  const normalScene = normal.scenes[0].scene;
+  const previewScene = preview.scenes[0].scene;
+  const normalizeNamespace = (scene: Record<string, unknown>) => JSON.parse(
+    JSON.stringify(scene)
+      .replaceAll('game_lt', 'game_preview')
+      .replaceAll('GameLT1_1', 'Game1'),
+  ) as Record<string, unknown>;
+
+  assert.deepEqual(
+    previewScene,
+    normalizeNamespace(normalScene),
+    '[共享场景] 除工程命名空间和场景名外，节点、变量、包装和特殊组件结构应一致',
+  );
+});
+
+test('预习场景不会注入未收集的正课口才反馈资源', () => {
+  const course = previewCourseFixture();
+  const page = course.previewStages?.[0]?.subPages[0];
+  assert.ok(page);
+  page.elements[0].actions = [{
+    id: 'preview-ch-feedback',
+    event: 'onClickInitConfirmCH',
+    actionType: 'none',
+  }];
+
+  const artifacts = buildPreviewExportRegressionArtifacts(course);
+  const feedbackNodes = sceneNodes(artifacts.scenes[0].scene).filter((node) =>
+    node.props?.var === 'Spine_kcFeedbackYes' || node.props?.var === 'Spine_kcFeedbackNo'
+  );
+
+  assert.equal(feedbackNodes.length, 0, '[预习] 不应生成正课专用口才反馈节点');
+  assert.equal(
+    Object.values(artifacts.resources).some((resource) => resource.includes('/animation/zx_')),
+    false,
+    '[预习] 不应收集正课专用口才反馈资源',
+  );
+});
+
+test('共享 game.zip 映射保持内置资源引用路径与解压落点一致', () => {
+  assert.deepEqual(
+    {
+      animation: mapGameZipEntryToProjectPath('animation/zx_yes/zx_yes.sk', 'game_preview'),
+      sound: mapGameZipEntryToProjectPath('sound/right.mp3', 'game_preview'),
+      image: mapGameZipEntryToProjectPath('image/btn_qd2.png', 'game_preview'),
+      groupedImage: mapGameZipEntryToProjectPath('jpL11/jp_3.png', 'game_preview'),
+    },
+    {
+      animation: 'game_preview/animation/zx_yes/zx_yes.sk',
+      sound: 'game_preview/sound/right.mp3',
+      image: 'game_preview/image/img/btn_qd2.png',
+      groupedImage: 'game_preview/image/jpL11/jp_3.png',
+    },
   );
 });
 
