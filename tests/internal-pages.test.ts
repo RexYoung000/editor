@@ -6,6 +6,7 @@ import {
   cloneSubPageWithNewIds,
   collectInternalPageIssues,
   createInternalPagesSubPage,
+  findCanvasElementPage,
   getElementPages,
   isInternalPagesSubPage,
   visitCourseElementPages,
@@ -51,6 +52,46 @@ test('创建内部页面模板时只给新模板写入能力字段', () => {
   assert.deepEqual(page.internalPageGroups, []);
   assert.equal(isInternalPagesSubPage(page), true);
   assert.equal(isInternalPagesSubPage({ id: 'legacy', name: '旧页面', elements: [] }), false);
+});
+
+test('弹窗编辑画布按底板、遮罩、弹窗内容合成，并保持合成层不可交互', () => {
+  const subPage = createInternalPagesSubPage('sub-canvas', '小关卡');
+  subPage.elements = [element('main-background', [{ id: 'main-action', event: 'onClick', actionType: 'toggleVisible' }])];
+  subPage.internalPages = [{
+    id: 'dialog-canvas',
+    name: '提示弹窗',
+    kind: 'dialog',
+    elements: [element('dialog-content')],
+    dialogSettings: { maskColor: '#123456', maskOpacity: 0.4, closeOnMask: false },
+  }];
+
+  const canvasPage = findCanvasElementPage(internalCourse(subPage), subPage.id, 'dialog-canvas');
+  assert.deepEqual(canvasPage?.elements.map((item) => item.id), [
+    '__dialog-base__main-background',
+    '__dialog-mask__dialog-canvas',
+    'dialog-content',
+  ]);
+  const base = canvasPage?.elements[0];
+  const mask = canvasPage?.elements[1];
+  assert.equal(base?.locked, true);
+  assert.deepEqual(base?.actions, []);
+  assert.equal(base?.props.__editorCanvasHitThrough, true);
+  assert.equal(mask?.type, 'DialogEditorMask');
+  assert.equal(mask?.width, 1920);
+  assert.equal(mask?.height, 1080);
+  assert.equal(mask?.opacity, 0.4);
+  assert.equal(mask?.props.__editorCanvasFillColor, '#123456');
+  assert.equal(mask?.props.__editorCanvasHitThrough, true);
+  assert.deepEqual(getElementPages(subPage)[1].elements.map((item) => item.id), ['dialog-content']);
+});
+
+test('弹窗编辑画布在旧数据缺少遮罩设置时使用黑色 55% 默认值', () => {
+  const subPage = createInternalPagesSubPage('sub-default-mask', '小关卡');
+  subPage.internalPages = [{ id: 'dialog-default', name: '默认弹窗', kind: 'dialog', elements: [] }];
+  const canvasPage = findCanvasElementPage(internalCourse(subPage), subPage.id, 'dialog-default');
+  const mask = canvasPage?.elements.find((item) => item.id === '__dialog-mask__dialog-default');
+  assert.equal(mask?.opacity, 0.55);
+  assert.equal(mask?.props.__editorCanvasFillColor, '#000000');
 });
 
 test('复制完整小关卡会重建页面、元素、动作及分组 ID，并维持内部关系', () => {
@@ -157,6 +198,10 @@ test('共享编译器把内部页编译为持久根节点，并保留空白页�
   assert.equal(compiled.internalPages?.length, 2);
   assert.equal(compiled.internalPages?.every((page) => page.elements.length === 0), true);
   const mask = compiled.elements.find((item) => item.id.startsWith('__ipmask_'));
+  assert.equal(mask?.width, 1920);
+  assert.equal(mask?.height, 1080);
+  assert.equal(typeof mask?.props.skin, 'string');
+  assert.equal(mask?.props.sizeGrid, undefined);
   assert.equal(mask?.props.mouseEnabled, true);
   assert.equal(mask?.props.mouseThrough, false);
   assert.equal(compiled.elements.find((item) => item.props.__internalPageId === subPage.id && item.props.__internalPageRootVar)?.props.visible, true);

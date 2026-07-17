@@ -1,23 +1,11 @@
 import type { Action, Course, Element, InternalPage, InternalPageGroup, InternalPageKind, Stage, SubPage } from '../types';
 import { findSubPage } from './findSubPage';
+import { EDITOR_CANVAS_FILL_COLOR_PROP, EDITOR_CANVAS_HIT_THROUGH_PROP } from './canvasComposite';
 
 export const INTERNAL_PAGES_TEMPLATE_ID = 'internal-pages-v1' as const;
 export const INTERNAL_PAGES_MIN_VERSION = '1.1.0';
 export const INTERNAL_PAGE_LIMIT = 12;
 export const INTERNAL_ELEMENT_LIMIT = 300;
-const BLACK_PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
-
-function colorPixel(color: string | undefined): string {
-  if (!color || color.toLowerCase() === '#000000' || typeof document === 'undefined') return BLACK_PIXEL;
-  const canvas = document.createElement('canvas');
-  canvas.width = 1;
-  canvas.height = 1;
-  const context = canvas.getContext('2d');
-  if (!context) return BLACK_PIXEL;
-  context.fillStyle = color;
-  context.fillRect(0, 0, 1, 1);
-  return canvas.toDataURL('image/png');
-}
 
 export type ElementPageRef = {
   id: string;
@@ -107,13 +95,18 @@ export function findCanvasElementPage(
     locked: true,
     actions: [],
     opacity: element.opacity,
-    props: { ...element.props, mouseEnabled: false, mouseThrough: true },
+    props: {
+      ...element.props,
+      mouseEnabled: false,
+      mouseThrough: true,
+      [EDITOR_CANVAS_HIT_THROUGH_PROP]: true,
+    },
   } as Element));
   const settings = active.internalPage?.dialogSettings;
   const mask: Element = {
     id: `__dialog-mask__${active.id}`,
-    type: 'NewImage',
-    layaType: 'Image',
+    type: 'DialogEditorMask',
+    layaType: 'Sprite',
     name: '__dialog_mask',
     x: 0,
     y: 0,
@@ -123,7 +116,12 @@ export function findCanvasElementPage(
     opacity: settings?.maskOpacity ?? 0.55,
     locked: true,
     actions: [],
-    props: { skin: colorPixel(settings?.maskColor), sizeGrid: '1,1,1,1', mouseEnabled: false, mouseThrough: true },
+    props: {
+      [EDITOR_CANVAS_FILL_COLOR_PROP]: settings?.maskColor ?? '#000000',
+      [EDITOR_CANVAS_HIT_THROUGH_PROP]: true,
+      mouseEnabled: false,
+      mouseThrough: true,
+    },
   };
   return { ...active, elements: [...base, mask, ...active.elements] };
 }

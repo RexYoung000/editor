@@ -76,7 +76,7 @@ export function compileInternalSubPage(subPage: SubPage): SubPage {
         actions: maskAction,
         props: {
           skin: colorPixel(page.dialogSettings?.maskColor),
-          sizeGrid: '1,1,1,1',
+          // 1x1 纯色图直接按节点尺寸缩放；九宫格会让中心区域无效，导致运行时不绘制。
           // 无论是否允许点击遮罩关闭，都要拦截底板点击，避免弹窗期间触发主界面动作。
           mouseEnabled: true,
           mouseThrough: false,
