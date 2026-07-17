@@ -67,8 +67,10 @@ function assertResource(
 }
 
 test('正常课导出保护场景节点、变量动作与图片音频 Spine 内置资源', () => {
+  const course = normalCourseFixture();
+  course.stages[0].subPages[0].elements[0].props._editorLabel = '老师可读图层名称';
   const artifacts = buildExportRegressionArtifacts(
-    normalCourseFixture(),
+    course,
     regressionImageSizes('game_lt'),
   );
 
@@ -99,6 +101,11 @@ test('正常课导出保护场景节点、变量动作与图片音频 Spine 内�
 
   assert.equal(artifacts.scenes.length, 1, '[正常课] 视频关卡不生成 scene');
   const [scene] = artifacts.scenes;
+  assert.equal(
+    sceneNodes(scene.scene).some((node) => '_editorLabel' in (node.props ?? {})),
+    false,
+    '[正常课] 编辑器图层名称不得进入运行场景',
+  );
   assert.equal(scene.name, 'GameLT1_1');
   assert.deepEqual(
     (scene.scene.props as Record<string, unknown>),

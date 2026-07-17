@@ -1,15 +1,25 @@
 import { useState, type ReactElement } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
-import { showToast } from '../utils/toast';
 import { Trash2, Eye, EyeOff, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import { findActiveElementPage } from '../utils/internalPages';
-import type { Element } from '../types';
 import { isContainerElementType } from '../utils/elementContainers';
+import {
+  getExplicitLayerLabel,
+  getLayerDisplayName,
+  getVisualSiblings,
+  visualDropToStorageIndex,
+  withLayerLabel,
+} from '../utils/layerPresentation';
 
 type DropTarget =
-  | { kind: 'reorder'; parentId: string | undefined; index: number }
+  | {
+    kind: 'reorder';
+    parentId: string | undefined;
+    visualIndex: number;
+    storageIndex: number;
+  }
   | { kind: 'into-container'; containerId: string };
 
 export default function ElementList() {
@@ -28,6 +38,8 @@ export default function ElementList() {
 
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
+  const [layerDraft, setLayerDraft] = useState('');
 
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
   const elements = currentPage?.elements ?? [];
@@ -45,6 +57,16 @@ export default function ElementList() {
   };
 
   const getChildren = (parentId: string | undefined) => elements.filter(e => e.parentId === parentId);
+  const getVisualChildren = (parentId: string | undefined) => getVisualSiblings(elements, parentId);
+
+  const commitLayerName = (el: typeof elements[0], value: string) => {
+    const normalized = value.trim();
+    setEditingLayerId(null);
+    setLayerDraft('');
+    if (normalized === getExplicitLayerLabel(el)) return;
+    updateElement(el.id, { props: withLayerLabel(el.props, normalized) });
+    useEditorStore.getState().saveHistory();
+  };
 
   const handleDragStart = (e: React.DragEvent, el: typeof elements[0]) => {
     if (el.locked) { e.preventDefault(); return; }
@@ -76,9 +98,15 @@ export default function ElementList() {
       setDropTarget({ kind: 'into-container', containerId: el.id });
     } else {
       const siblings = getChildren(parentId);
-      const siblingIndex = siblings.findIndex(s => s.id === el.id);
-      const insertIndex = y < rect.height / 2 ? siblingIndex : siblingIndex + 1;
-      setDropTarget({ kind: 'reorder', parentId, index: insertIndex });
+      const visualSiblings = getVisualChildren(parentId);
+      const siblingIndex = visualSiblings.findIndex(s => s.id === el.id);
+      const visualIndex = y < rect.height / 2 ? siblingIndex : siblingIndex + 1;
+      setDropTarget({
+        kind: 'reorder',
+        parentId,
+        visualIndex,
+        storageIndex: visualDropToStorageIndex(siblings, draggedId, visualIndex),
+      });
     }
   };
 
@@ -86,9 +114,15 @@ export default function ElementList() {
     e.preventDefault();
     if (!draggedId) return;
     const draggedEl = elements.find(e => e.id === draggedId);
-    if (!draggedEl || !draggedEl.parentId) return;
+    if (!draggedEl) return;
     const topLevelElements = getChildren(undefined);
-    setDropTarget({ kind: 'reorder', parentId: undefined, index: topLevelElements.length });
+    const visualIndex = topLevelElements.length;
+    setDropTarget({
+      kind: 'reorder',
+      parentId: undefined,
+      visualIndex,
+      storageIndex: visualDropToStorageIndex(topLevelElements, draggedId, visualIndex),
+    });
   };
 
   const handleDropRow = (e: React.DragEvent) => {
@@ -116,9 +150,12 @@ export default function ElementList() {
         const targetParent = dropTarget.parentId ? elements.find(el => el.id === dropTarget.parentId) : undefined;
         if (draggedEl.type === 'DropObj' && targetParent?.type !== 'DragDropBox') { setDraggedId(null); setDropTarget(null); return; }
         if (draggedEl.type === 'DragObj' && targetParent?.type !== 'DragDragBox') { setDraggedId(null); setDropTarget(null); return; }
-        setElementParent(draggedId, dropTarget.parentId || undefined);
+        setElementParent(draggedId, dropTarget.parentId || undefined, false);
+        reorderElement(draggedId, dropTarget.storageIndex, false);
+        useEditorStore.getState().saveHistory();
+      } else {
+        reorderElement(draggedId, dropTarget.storageIndex);
       }
-      reorderElement(draggedId, dropTarget.index);
     }
     setDraggedId(null);
     setDropTarget(null);
@@ -134,36 +171,41 @@ export default function ElementList() {
       setDraggedId(null); setDropTarget(null); return;
     }
     if (draggedEl.parentId) {
-      setElementParent(draggedId, undefined);
-    }
-    if (dropTarget.kind === 'reorder') {
-      reorderElement(draggedId, dropTarget.index);
+      setElementParent(draggedId, undefined, false);
+      if (dropTarget.kind === 'reorder') {
+        reorderElement(draggedId, dropTarget.storageIndex, false);
+      }
+      useEditorStore.getState().saveHistory();
+    } else if (dropTarget.kind === 'reorder') {
+      reorderElement(draggedId, dropTarget.storageIndex);
     }
     setDraggedId(null);
     setDropTarget(null);
   };
 
-  const topLevel = getChildren(undefined);
+  const topLevel = getVisualChildren(undefined);
 
-  const renderDropIndicator = (parentId: string | undefined, index: number) => {
-    if (dropTarget?.kind === 'reorder' && dropTarget.parentId === parentId && dropTarget.index === index) {
+  const renderDropIndicator = (parentId: string | undefined, visualIndex: number) => {
+    if (dropTarget?.kind === 'reorder' && dropTarget.parentId === parentId && dropTarget.visualIndex === visualIndex) {
       return <div className="h-0.5 bg-blue-500 rounded mx-2" />;
     }
     return null;
   };
 
-  const renderEl = (el: typeof elements[0], depth: number): ReactElement => {
+  const renderEl = (el: typeof elements[0], depth: number, visualIndex: number): ReactElement => {
     const meta = elementMeta[el.type];
     const isSelected = selectedElementIds.includes(el.id);
     const editorHidden = (el.props as Record<string, unknown>)?._editorHidden === true;
     const isDragging = draggedId === el.id;
     const isContainerTarget = dropTarget?.kind === 'into-container' && dropTarget.containerId === el.id;
-    const children = getChildren(el.id);
+    const children = getVisualChildren(el.id);
     const parentId = el.parentId;
+    const layerName = getLayerDisplayName(el, meta?.label);
+    const isEditingLayer = editingLayerId === el.id;
 
     return (
       <div key={el.id}>
-        {renderDropIndicator(parentId, getChildren(parentId).findIndex(s => s.id === el.id))}
+        {renderDropIndicator(parentId, visualIndex)}
         <div
           className={`flex items-center gap-1 py-1 text-xs transition-colors ${
             isDragging ? 'opacity-40' :
@@ -186,45 +228,51 @@ export default function ElementList() {
           >
             {editorHidden ? <EyeOff size={11} /> : <Eye size={11} />}
           </button>
-          <button
+          <div
+            role="button"
+            tabIndex={0}
             onClick={(e) => { selectElement(el.id, e.shiftKey || e.ctrlKey || e.metaKey); }}
             className="flex items-center gap-2 flex-1 min-w-0 text-left"
+            title={`${layerName} · ${el.name || el.type} · ${meta?.label || el.type}`}
           >
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: isSelected ? '#3b82f6' : '#475569' }} />
-            <span className="truncate flex-1" onDoubleClick={(e) => {
-              e.stopPropagation();
-              const span = e.currentTarget;
-              const input = document.createElement('input');
-              input.value = el.name || '';
-              input.className = 'text-xs bg-slate-600 text-white rounded px-1 w-full outline-none';
-              span.textContent = '';
-              span.appendChild(input);
-              input.focus();
-              input.select();
-              const finish = () => {
-                const raw = input.value.trim();
-                const name = raw.replace(/[^a-zA-Z0-9_-]/g, '') || el.name;
-                span.textContent = name || meta?.label || el.type;
-                if (name && name !== el.name) {
-                  if (elements.some(e => e.id !== el.id && e.name === name)) {
-                    showToast(t('duplicateName'), 'error');
-                    span.textContent = el.name || meta?.label || el.type;
-                    return;
+            {isEditingLayer ? (
+              <input
+                autoFocus
+                draggable={false}
+                value={layerDraft}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => setLayerDraft(event.target.value)}
+                onBlur={() => commitLayerName(el, layerDraft)}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                  if (event.key === 'Escape') {
+                    setEditingLayerId(null);
+                    setLayerDraft('');
                   }
-                  updateElement(el.id, { name } as Partial<Element>);
-                  useEditorStore.getState().saveHistory();
-                }
-              };
-              input.onblur = finish;
-              input.onkeydown = (ke) => { if (ke.key === 'Enter') input.blur(); if (ke.key === 'Escape') { input.value = el.name || ''; input.blur(); } };
-            }}>{el.name || meta?.label || el.type}</span>
+                }}
+                className="text-xs bg-slate-600 text-white rounded px-1 flex-1 min-w-0 outline-none"
+              />
+            ) : (
+              <span
+                className="truncate flex-1"
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  setEditingLayerId(el.id);
+                  setLayerDraft(getExplicitLayerLabel(el) || layerName);
+                }}
+              >
+                {layerName}
+              </span>
+            )}
             <span className="text-slate-500 text-[10px] shrink-0">{meta?.label || el.type}</span>
-          </button>
+          </div>
           {isSelected && !el.locked && (
             <button onClick={() => { deleteElement(el.id); clearSelection(); }} className="p-0.5 hover:bg-red-900 rounded text-red-400" title={t('deleteElement')}><Trash2 size={11} /></button>
           )}
         </div>
-        {children.map(child => renderEl(child, depth + 1))}
+        {children.map((child, index) => renderEl(child, depth + 1, index))}
         {renderDropIndicator(el.id, children.length)}
       </div>
     );
@@ -246,8 +294,7 @@ export default function ElementList() {
           </div>
         ) : (
           <div className="py-1">
-            {renderDropIndicator(undefined, 0)}
-            {topLevel.map(el => renderEl(el, 0))}
+            {topLevel.map((el, index) => renderEl(el, 0, index))}
             {renderDropIndicator(undefined, topLevel.length)}
           </div>
         )}

@@ -26,6 +26,8 @@ function App() {
   const pasteElements = useEditorStore((state) => state.pasteElements);
   const duplicateElements = useEditorStore((state) => state.duplicateElements);
   const selectAll = useEditorStore((state) => state.selectAll);
+  const selectedElementIds = useEditorStore((state) => state.selectedElementIds);
+  const moveElementLayer = useEditorStore((state) => state.moveElementLayer);
   const groupElements = useEditorStore((state) => state.groupElements);
   const ungroupElements = useEditorStore((state) => state.ungroupElements);
   const [phase, setPhase] = useState<'landing' | 'editor'>('landing');
@@ -104,6 +106,12 @@ function App() {
         e.preventDefault(); duplicateElements();
       } else if (mod && e.key === 'a' && !isInput) {
         e.preventDefault(); selectAll();
+      } else if (mod && (e.code === 'BracketRight' || e.code === 'BracketLeft') && !isInput && selectedElementIds.length === 1) {
+        e.preventDefault();
+        const direction = e.code === 'BracketRight'
+          ? (e.shiftKey ? 'top' : 'up')
+          : (e.shiftKey ? 'bottom' : 'down');
+        moveElementLayer(selectedElementIds[0], direction);
       } else if (mod && e.key === 's') {
         e.preventDefault();
         if (currentCourse) {
@@ -131,7 +139,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [undo, redo, copyElements, pasteElements, duplicateElements, selectAll, groupElements, ungroupElements, currentCourse, currentStageId, currentSubPageId, focusSubPageId, enterFocusWorkspace, phase]);
+  }, [undo, redo, copyElements, pasteElements, duplicateElements, selectAll, selectedElementIds, moveElementLayer, groupElements, ungroupElements, currentCourse, currentStageId, currentSubPageId, focusSubPageId, enterFocusWorkspace, phase]);
 
   // 点 Laya host 外的 UI 区域（Toolbar / 面板等）取消选中。
   // Laya host 内的点击（无论画布内外）由 selection.ts 的 hit-test 统一处理：

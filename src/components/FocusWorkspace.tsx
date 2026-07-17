@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   Copy,
   GripVertical,
-  MoreHorizontal,
   MoveRight,
   Plus,
   Search,
@@ -56,6 +55,7 @@ export default function FocusWorkspace() {
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [createKind, setCreateKind] = useState<InternalPageKind | null>(null);
   const [createName, setCreateName] = useState('');
   const [deletePage, setDeletePage] = useState<InternalPage | null>(null);
@@ -64,6 +64,7 @@ export default function FocusWorkspace() {
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null);
   const [lastDrop, setLastDrop] = useState<{ visualIndex: number; targetIndex: number; after: boolean } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const createMenuRef = useRef<HTMLDivElement>(null);
   const targetScrollRef = useRef<HTMLDivElement>(null);
   const edgeRef = useRef<{ direction: -1 | 0 | 1; since: number }>({ direction: 0, since: 0 });
   const targetEdgeRef = useRef<{ direction: -1 | 0 | 1; since: number }>({ direction: 0, since: 0 });
@@ -89,6 +90,22 @@ export default function FocusWorkspace() {
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current); };
   }, []);
+
+  useEffect(() => {
+    if (!createMenuOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!createMenuRef.current?.contains(event.target as Node)) setCreateMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCreateMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [createMenuOpen]);
 
   if (!subPage || !isInternalPagesSubPage(subPage) || !stage) return null;
 
@@ -123,6 +140,7 @@ export default function FocusWorkspace() {
     let index = 1;
     let name = `${base} ${index}`;
     while (internalPages.some((page) => page.name === name)) name = `${base} ${++index}`;
+    setCreateMenuOpen(false);
     setCreateName(name);
     setCreateKind(kind);
   };
@@ -259,8 +277,29 @@ export default function FocusWorkspace() {
           <div className="text-xs text-slate-500 truncate">{stage.name}</div>
           <div className="text-sm font-medium truncate">{subPage.name}</div>
         </div>
-        <button onClick={() => startCreate('content')} className="p-1.5 hover:bg-slate-700 rounded text-blue-300" title="新增内容页"><Plus size={16} /></button>
-        <button onClick={() => startCreate('dialog')} className="p-1.5 hover:bg-slate-700 rounded text-violet-300" title="新增弹窗"><MoreHorizontal size={16} /></button>
+        <div ref={createMenuRef} className="relative">
+          <button
+            onClick={() => setCreateMenuOpen((open) => !open)}
+            className={`p-1.5 rounded text-blue-300 ${createMenuOpen ? 'bg-slate-700' : 'hover:bg-slate-700'}`}
+            title="新增页面"
+            aria-haspopup="menu"
+            aria-expanded={createMenuOpen}
+          >
+            <Plus size={16} />
+          </button>
+          {createMenuOpen && (
+            <div role="menu" className="absolute right-0 top-full mt-2 w-40 overflow-hidden rounded-lg border border-slate-600 bg-slate-800 shadow-2xl z-50 p-1">
+              <button role="menuitem" onClick={() => startCreate('content')} className="w-full rounded px-3 py-2 text-left hover:bg-slate-700">
+                <div className="text-xs text-slate-100">新增内容页</div>
+                <div className="mt-0.5 text-[10px] text-slate-500">同级页面内容</div>
+              </button>
+              <button role="menuitem" onClick={() => startCreate('dialog')} className="w-full rounded px-3 py-2 text-left hover:bg-slate-700">
+                <div className="text-xs text-slate-100">新增弹窗</div>
+                <div className="mt-0.5 text-[10px] text-slate-500">覆盖当前主界面</div>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {showSearch && (

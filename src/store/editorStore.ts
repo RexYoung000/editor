@@ -20,6 +20,7 @@ import { getUniqueElementName, normalizeElementNames, createDefaultElement, elem
 import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
 import { getElementParentContainment, getFitContainerToChildrenUpdates } from '../utils/canvasGeometry';
 import { isContainerElementType } from '../utils/elementContainers';
+import { getLayerDisplayName, getNextLayerCopyName, withLayerLabel } from '../utils/layerPresentation';
 import {
   cloneInternalPageWithinSubPage,
   cloneSubPageWithNewIds,
@@ -126,8 +127,9 @@ interface EditorState {
   moveElementIntoParent: (id: string) => ContainerGeometryActionResult;
   fitContainerToChildren: (id: string) => ContainerGeometryActionResult;
   deleteElement: (id: string) => void;
-  reorderElement: (id: string, newIndex: number) => void;
-  setElementParent: (id: string, newParentId: string | undefined) => void;
+  reorderElement: (id: string, newIndex: number, saveToHistory?: boolean) => void;
+  moveElementLayer: (id: string, direction: 'up' | 'down' | 'top' | 'bottom') => void;
+  setElementParent: (id: string, newParentId: string | undefined, saveToHistory?: boolean) => void;
   selectElement: (id: string, multi?: boolean) => void;
   selectElements: (ids: string[]) => void;
   selectAll: () => void;
@@ -1410,7 +1412,8 @@ export const useEditorStore = create<EditorState>()(
         get().saveHistory();
       }),
 
-    reorderElement: (id, newIndex) =>
+    reorderElement: (id, newIndex, saveToHistory = true) => {
+      let changed = false;
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
@@ -1436,10 +1439,30 @@ export const useEditorStore = create<EditorState>()(
           }
         }
         page.elements = newElements;
-        get().saveHistory();
-      }),
+        changed = true;
+      });
+      if (changed && saveToHistory) get().saveHistory();
+    },
 
-    setElementParent: (id, newParentId) =>
+    moveElementLayer: (id, direction) => {
+      const page = findCurrentSubPage(get());
+      const element = page?.elements.find((item) => item.id === id);
+      if (!page || !element || element.locked) return;
+      const siblings = page.elements.filter((item) => item.parentId === element.parentId);
+      const currentIndex = siblings.findIndex((item) => item.id === id);
+      if (currentIndex < 0) return;
+      const targetIndex = direction === 'top'
+        ? siblings.length - 1
+        : direction === 'bottom'
+          ? 0
+          : direction === 'up'
+            ? Math.min(siblings.length - 1, currentIndex + 1)
+            : Math.max(0, currentIndex - 1);
+      get().reorderElement(id, targetIndex);
+    },
+
+    setElementParent: (id, newParentId, saveToHistory = true) => {
+      let changed = false;
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
@@ -1502,8 +1525,10 @@ export const useEditorStore = create<EditorState>()(
           page.elements.splice(insertIdx, 0, removed);
         }
 
-        get().saveHistory();
-      }),
+        changed = true;
+      });
+      if (changed && saveToHistory) get().saveHistory();
+    },
 
     selectElement: (id, multi = false) =>
       set((state) => {
@@ -1594,6 +1619,9 @@ export const useEditorStore = create<EditorState>()(
           }
         });
         const newIds: string[] = [];
+        const reservedLayerNames = new Set(
+          page.elements.map((element) => getLayerDisplayName(element, elementMeta[element.type]?.label)),
+        );
 
         // MatchingItem / DragObj / DropObj 走"扫描已用序号 + 最大+1"规则；
         // 其他类型沿用 getUniqueElementName（按父节点局部去重，含 _2/_3 后缀）。
@@ -1652,6 +1680,11 @@ export const useEditorStore = create<EditorState>()(
             const baseVarWithoutNumber = baseVar.replace(/_\d+$/, '');
             newEl.props.var = getUniqueElementName(baseVarWithoutNumber, reservedVars);
           }
+
+          const sourceLayerName = getLayerDisplayName(el, elementMeta[el.type]?.label);
+          const copiedLayerName = getNextLayerCopyName(sourceLayerName, reservedLayerNames);
+          newEl.props = withLayerLabel(newEl.props ?? {}, copiedLayerName);
+          reservedLayerNames.add(copiedLayerName);
 
           // 原位复制：不偏移位置
           page.elements.push(newEl);

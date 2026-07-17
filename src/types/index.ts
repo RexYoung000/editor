@@ -36,7 +36,7 @@ export interface Element {
   locked?: boolean;
   parentId?: string;
   actions?: Action[];
-  /** 编辑器可见性：true 时在画布上隐藏（不影响导出），存储在 props._editorHidden */
+  /** 编辑器专用字段保存在 props：_editorHidden 控制画布显隐，_editorLabel 保存老师可读图层名称；均不参与导出 */
   props: Record<string, unknown>;
   // legacy — 旧数据兼容，新组件不使用
   content?: string; fontSize?: number; fontWeight?: string; color?: string;
