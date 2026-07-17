@@ -9,6 +9,7 @@ import type JSZipModule from 'jszip'
 import { LIBRARY_QUICK_TAGS, matchesLibraryQuickTag } from './src/utils/libraryQuickTags'
 import type { LibraryQuickTagId } from './src/utils/libraryQuickTags'
 import { detectLibrarySeries, matchesLibrarySearchQuery } from './src/utils/librarySearch'
+import { getCourseRouteCandidates } from './src/utils/previewCourseRoute'
 
 // 本地定义 lessonSuffix 函数（避免引入跨模块构建依赖）
 function lessonSuffix(kind?: string): string {
@@ -415,28 +416,30 @@ function forgePlugin(): Plugin {
       // GameLoader 在 preview-server/index.html 下运行，资源请求用相对路径（如 lessons/Math/V8/...），
       // 这里从 URL 中提取 *_LessonZK 或 *_LessonHW 段，再查找实际文件位置。
       function serveCourseFile(urlPath: string, res: ServerResponse, next: Connect.NextFunction) {
-        const lessonMatch = urlPath.match(/([^/]+_Lesson(?:ZK|HW|SSEVALUATION|FXK))/);
-        if (!lessonMatch) { next(); return; }
-        const projName = lessonMatch[1];
-        const suffixMatch = projName.match(/_Lesson(ZK|HW|SSEVALUATION|FXK)$/);
-        const courseId = suffixMatch
-          ? projName.slice(0, -(suffixMatch[0].length)) : null;
-
-        const afterProj = urlPath.slice(urlPath.indexOf(projName) + projName.length);
-
+        const route = getCourseRouteCandidates(urlPath);
+        if (!route) { next(); return; }
         let baseDir: string | null = null;
-        if (courseId && courseOutputDirs.has(courseId)) {
-          baseDir = courseOutputDirs.get(courseId)!;
-        } else {
-          const fallbackDir = path.resolve(__dirname, 'preview-server/lessons', projName);
-          if (fs.existsSync(fallbackDir)) baseDir = fallbackDir;
+        for (const registryKey of route.registryKeys) {
+          const registeredDir = courseOutputDirs.get(registryKey);
+          if (registeredDir) {
+            baseDir = registeredDir;
+            break;
+          }
+        }
+        if (!baseDir) {
+          for (const fallbackProjectName of route.fallbackProjectNames) {
+            const fallbackDir = path.resolve(__dirname, 'preview-server/lessons', fallbackProjectName);
+            if (fs.existsSync(fallbackDir)) {
+              baseDir = fallbackDir;
+              break;
+            }
+          }
         }
 
         if (!baseDir) { next(); return; }
 
-        const relativePath = afterProj.startsWith('/') ? afterProj.slice(1) : afterProj;
-        if (!relativePath) { next(); return; }
-        const filePath = path.join(baseDir, relativePath);
+        if (!route.relativePath) { next(); return; }
+        const filePath = path.join(baseDir, route.relativePath);
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
           const ext = path.extname(filePath);
           const mimeTypes: Record<string, string> = {
