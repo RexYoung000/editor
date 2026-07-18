@@ -5,7 +5,7 @@ import PageList from './components/PageList';
 import Canvas from './components/Canvas';
 import PropertyPanel from './components/PropertyPanel';
 import ElementToolbar from './components/ElementToolbar';
-import ElementList from './components/ElementList';
+import EditorWorkspaceLayout from './components/EditorWorkspaceLayout';
 import StartPage from './components/StartPage';
 import { writeBackToLocalFile, getCourseFilePath, getCourseDirPath, cleanupUnreferencedImages, collectImageReferences } from './utils/electronFs';
 import { I18nProvider } from './i18n';
@@ -181,47 +181,34 @@ function App() {
       ) : (
         <div className="h-screen flex flex-col bg-slate-900 text-white">
           <Toolbar isDirty={isDirty} onBack={() => setPhase('landing')} />
-          <div className="flex-1 flex overflow-hidden">
-            <div
-              className={`relative bg-slate-800 border-r border-slate-700 flex flex-col shrink-0 ${focusSubPageId ? 'overflow-visible z-30' : 'overflow-hidden'}`}
-              style={{ width: focusSubPageId ? focusWidth : 240 }}
-            >
-              {focusSubPageId ? (
-                <>
-                  <FocusWorkspace />
-                  <div
-                    className="absolute top-0 -right-1 w-2 h-full cursor-col-resize z-[60]"
-                    onDoubleClick={() => { setFocusWidth(320); localStorage.setItem('forge_focus_workspace_width', '320'); }}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      const startX = event.clientX;
-                      const startWidth = focusWidth;
-                      const move = (moveEvent: MouseEvent) => setFocusWidth(Math.min(440, Math.max(280, startWidth + moveEvent.clientX - startX)));
-                      const up = (upEvent: MouseEvent) => {
-                        const next = Math.min(440, Math.max(280, startWidth + upEvent.clientX - startX));
-                        setFocusWidth(next);
-                        localStorage.setItem('forge_focus_workspace_width', String(next));
-                        window.removeEventListener('mousemove', move);
-                        window.removeEventListener('mouseup', up);
-                      };
-                      window.addEventListener('mousemove', move);
-                      window.addEventListener('mouseup', up);
-                    }}
-                  />
-                </>
-              ) : (
-                <>
-                  <div className="flex-[0_1_60%] flex flex-col overflow-hidden min-h-0"><PageList /></div>
-                  <div className="flex-[1_0_40%] flex flex-col overflow-hidden min-h-0 border-t border-slate-700"><ElementList /></div>
-                </>
-              )}
-            </div>
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <ElementToolbar />
-              <Canvas />
-            </div>
-            <PropertyPanel />
-          </div>
+          <EditorWorkspaceLayout
+            sidebar={focusSubPageId ? <FocusWorkspace /> : <PageList />}
+            sidebarWidth={focusSubPageId ? focusWidth : 240}
+            sidebarOverflowVisible={Boolean(focusSubPageId)}
+            sidebarResizeHandle={focusSubPageId ? (
+              <div
+                className="absolute top-0 -right-1 w-2 h-full cursor-col-resize z-[60]"
+                onDoubleClick={() => { setFocusWidth(320); localStorage.setItem('forge_focus_workspace_width', '320'); }}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  const startX = event.clientX;
+                  const startWidth = focusWidth;
+                  const move = (moveEvent: MouseEvent) => setFocusWidth(Math.min(440, Math.max(280, startWidth + moveEvent.clientX - startX)));
+                  const up = (upEvent: MouseEvent) => {
+                    const next = Math.min(440, Math.max(280, startWidth + upEvent.clientX - startX));
+                    setFocusWidth(next);
+                    localStorage.setItem('forge_focus_workspace_width', String(next));
+                    window.removeEventListener('mousemove', move);
+                    window.removeEventListener('mouseup', up);
+                  };
+                  window.addEventListener('mousemove', move);
+                  window.addEventListener('mouseup', up);
+                }}
+              />
+            ) : null}
+            canvas={<><ElementToolbar /><Canvas /></>}
+            propertyPanel={<PropertyPanel />}
+          />
         </div>
       )}
     </I18nProvider>
