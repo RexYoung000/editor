@@ -24,7 +24,6 @@ import {
   type InternalPageMoveImpact,
 } from '../utils/internalPages';
 import type { InternalPage, InternalPageGroup, InternalPageKind, SubPage } from '../types';
-import ElementList from './ElementList';
 import ConfirmDialog from './ConfirmDialog';
 import { showToast } from '../utils/toast';
 
@@ -38,7 +37,6 @@ type MoveRequest = { pageId: string; targetSubPageId: string; targetIndex: numbe
 type DeleteGroupRequest = { group: InternalPageGroup; deletePages: boolean };
 
 const UNGROUPED_KEY = '__ungrouped__';
-const LAYER_PANEL_KEY = 'forge:focus-workspace:layer-panel';
 
 function stageForSubPage(course: ReturnType<typeof useEditorStore.getState>['currentCourse'], subPageId: string | null) {
   if (!course || !subPageId) return null;
@@ -81,18 +79,6 @@ function readCollapsedGroups(key: string, validGroupIds: Set<string>): string[] 
     return stored.filter((id) => validGroupIds.has(id));
   } catch {
     return [];
-  }
-}
-
-function readLayerPanelState(): { open: boolean; height: number } {
-  try {
-    const value = JSON.parse(localStorage.getItem(LAYER_PANEL_KEY) ?? 'null') as { open?: boolean; height?: number } | null;
-    return {
-      open: value?.open ?? true,
-      height: Math.max(140, Math.min(420, value?.height ?? 224)),
-    };
-  } catch {
-    return { open: true, height: 224 };
   }
 }
 
@@ -151,9 +137,6 @@ export default function FocusWorkspace() {
   const [movePageId, setMovePageId] = useState<string | null>(null);
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null);
   const [collapsedBySubPage, setCollapsedBySubPage] = useState<Record<string, string[]>>({});
-  const [initialLayerPanel] = useState(() => readLayerPanelState());
-  const [layerPanelOpen, setLayerPanelOpen] = useState(initialLayerPanel.open);
-  const [layerPanelHeight, setLayerPanelHeight] = useState(initialLayerPanel.height);
   const [pendingScrollPageId, setPendingScrollPageId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -186,10 +169,6 @@ export default function FocusWorkspace() {
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current); };
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem(LAYER_PANEL_KEY, JSON.stringify({ open: layerPanelOpen, height: layerPanelHeight }));
-  }, [layerPanelOpen, layerPanelHeight]);
 
   useEffect(() => {
     if (!pendingScrollPageId) return;
@@ -283,7 +262,6 @@ export default function FocusWorkspace() {
   const showSearch = internalPages.length >= 6;
   const normalizedQuery = query.trim().toLowerCase();
   const sortingDisabled = normalizedQuery.length > 0 || filter !== 'all';
-  const selectedPage = pages.find((page) => page.id === currentInternalPageId) ?? mainPage;
 
   const pageGroupId = (page: InternalPage) => page.pageGroupId && validGroupIds.has(page.pageGroupId) ? page.pageGroupId : undefined;
   const matchesBaseFilter = (page: InternalPage) => {
@@ -677,19 +655,6 @@ export default function FocusWorkspace() {
 
   const ungroupedPages = internalPages.filter((page) => pageGroupId(page) === undefined && matchesPage(page));
 
-  const startResizeLayerPanel = (event: React.PointerEvent) => {
-    event.preventDefault();
-    const startY = event.clientY;
-    const startHeight = layerPanelHeight;
-    const move = (moveEvent: PointerEvent) => setLayerPanelHeight(Math.max(140, Math.min(420, startHeight + startY - moveEvent.clientY)));
-    const end = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-  };
-
   return (
     <div className="relative z-30 h-full flex flex-col bg-slate-900" data-keep-selection>
       <div className="h-12 px-2 border-b border-slate-700 flex items-center gap-2 shrink-0">
@@ -768,12 +733,6 @@ export default function FocusWorkspace() {
         })()}
         {pageDropSlot(undefined, ungroupedPages.filter((page) => drag?.type !== 'page' || drag.pageId !== page.id).length, 'last')}
         {renderQuickAdd()}
-      </div>
-
-      <div className="shrink-0 border-t border-slate-700 bg-slate-900">
-        {layerPanelOpen && <div onPointerDown={startResizeLayerPanel} className="h-1 cursor-row-resize bg-slate-800 hover:bg-blue-500/60" title="拖动调整图层面板高度" />}
-        <button onClick={() => setLayerPanelOpen((open) => !open)} className="h-9 w-full px-3 flex items-center justify-between text-xs text-slate-300 hover:bg-slate-800"><span>图层 ({selectedPage?.elements.length ?? 0})</span>{layerPanelOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
-        {layerPanelOpen && <div style={{ height: layerPanelHeight }} className="border-t border-slate-800 overflow-y-auto bg-slate-900/80"><ElementList showHeader={false} /></div>}
       </div>
 
       {movePageId && (

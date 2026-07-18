@@ -1,4 +1,6 @@
-# 左侧面板重构 — 属性面板与元素列表同时可见 实现计划
+# 左侧面板重构 — 属性面板与元素列表同时可见 实现计划（历史记录）
+
+> 状态：本计划记录最初把元素列表从属性面板拆出的实施过程，已经完成；其中固定 45/55 上下布局已由 Issue #52 的自由浮动与弱磁吸方案取代，不再作为当前实现依据。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
