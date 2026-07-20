@@ -501,7 +501,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
 
   return (
     <div
-      className={`flex-1 flex flex-col min-h-0 ${workbenchReadonly ? 'pointer-events-none opacity-60' : ''}`}
+      className={`h-full flex-1 flex flex-col min-h-0 ${workbenchReadonly ? 'pointer-events-none opacity-60' : ''}`}
       data-keep-selection
       aria-disabled={workbenchReadonly}
       inert={workbenchReadonly ? true : undefined}
