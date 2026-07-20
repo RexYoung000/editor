@@ -54,6 +54,8 @@ export interface SubPage {
   elements: Element[];
   /** frozen = 不允许添加新组件 */
   frozen?: boolean;
+  /** 仅用于编辑器整理的图层组元数据，不参与运行编译和导出。 */
+  editorLayerGroups?: EditorLayerGroup[];
   /** 仅新“内部页面关卡”模板写入；缺省表示历史单页小关卡。 */
   editorModel?: 'internal-pages';
   templateId?: 'internal-pages-v1';
@@ -62,6 +64,15 @@ export interface SubPage {
   internalPages?: InternalPage[];
   /** 仅用于编辑器整理的单层页面分组；不参与课件运行与导出。 */
   internalPageGroups?: InternalPageGroup[];
+}
+
+export interface EditorLayerGroup {
+  id: string;
+  name: string;
+  /** 组成员所属的真实运行父级；undefined 表示页面顶层。 */
+  runtimeParentId?: string;
+  /** 编辑器图层组的父组；不改变元素 parentId。 */
+  parentGroupId?: string;
 }
 
 export type InternalPageKind = 'content' | 'dialog';
@@ -82,6 +93,8 @@ export interface InternalPage {
   name: string;
   kind: InternalPageKind;
   elements: Element[];
+  /** 仅用于编辑器整理的图层组元数据，不参与运行编译和导出。 */
+  editorLayerGroups?: EditorLayerGroup[];
   dialogSettings?: DialogSettings;
   /** 编辑器页面分组 ID；缺省或失效时显示在“未分组”。 */
   pageGroupId?: string;

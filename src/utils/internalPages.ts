@@ -1,4 +1,4 @@
-import type { Action, Course, Element, InternalPage, InternalPageGroup, InternalPageKind, Stage, SubPage } from '../types';
+import type { Action, Course, EditorLayerGroup, Element, InternalPage, InternalPageGroup, InternalPageKind, Stage, SubPage } from '../types';
 import { findSubPage } from './findSubPage';
 import { EDITOR_CANVAS_FILL_COLOR_PROP, EDITOR_CANVAS_HIT_THROUGH_PROP } from './canvasComposite';
 
@@ -12,6 +12,7 @@ export type ElementPageRef = {
   name: string;
   kind: 'main' | InternalPageKind;
   elements: Element[];
+  editorLayerGroups?: EditorLayerGroup[];
   internalPage?: InternalPage;
 };
 
@@ -62,10 +63,10 @@ export function validInternalPageGroupId(subPage: SubPage, requested: string | n
 }
 
 export function getElementPages(subPage: SubPage): ElementPageRef[] {
-  const pages: ElementPageRef[] = [{ id: subPage.id, name: '主界面', kind: 'main', elements: subPage.elements }];
+  const pages: ElementPageRef[] = [{ id: subPage.id, name: '主界面', kind: 'main', elements: subPage.elements, editorLayerGroups: subPage.editorLayerGroups }];
   if (isInternalPagesSubPage(subPage)) {
     for (const page of subPage.internalPages) {
-      pages.push({ id: page.id, name: page.name, kind: page.kind, elements: page.elements, internalPage: page });
+      pages.push({ id: page.id, name: page.name, kind: page.kind, elements: page.elements, editorLayerGroups: page.editorLayerGroups, internalPage: page });
     }
   }
   return pages;
@@ -160,12 +161,14 @@ function remapElements(
   makeId: (prefix: string) => string,
   groupIdMap = new Map<string, string>(),
   branchIdMap = new Map<string, string>(),
+  layerGroupIdMap = new Map<string, string>(),
 ): Element[] {
   const cloned: Element[] = JSON.parse(JSON.stringify(elements));
   for (const el of cloned) if (!idMap.has(el.id)) idMap.set(el.id, makeId('el'));
   for (const el of cloned) {
     el.id = idMap.get(el.id)!;
     if (el.parentId && idMap.has(el.parentId)) el.parentId = idMap.get(el.parentId);
+    if (el.groupId && layerGroupIdMap.has(el.groupId)) el.groupId = layerGroupIdMap.get(el.groupId);
     for (const action of el.actions ?? []) {
       action.id = makeId('action');
       if (action.groupId) {
@@ -200,9 +203,20 @@ export function cloneSubPageWithNewIds(source: SubPage, makeId: (prefix: string)
   const newSubId = makeId('subpage');
   const elementIdMap = new Map<string, string>();
   const groupIdMap = new Map<string, string>();
+  const layerGroupIdMap = new Map<string, string>();
   const branchIdMap = new Map<string, string>();
   const pageGroupIdMap = new Map<string, string>();
   const pageIdMap = new Map<string, string>([[source.id, newSubId]]);
+  for (const group of source.editorLayerGroups ?? []) {
+    layerGroupIdMap.set(group.id, makeId('layer-group'));
+  }
+  for (const page of getElementPages(source)) {
+    for (const element of page.elements) {
+      if (element.groupId && !layerGroupIdMap.has(element.groupId)) {
+        layerGroupIdMap.set(element.groupId, makeId('layer-group'));
+      }
+    }
+  }
   const internalPageGroups = isInternalPagesSubPage(source)
     ? getInternalPageGroups(source).map((group) => {
         const id = makeId('page-group');
@@ -217,15 +231,21 @@ export function cloneSubPageWithNewIds(source: SubPage, makeId: (prefix: string)
     ? source.internalPages.map((page) => {
         const id = makeId('internal-page');
         pageIdMap.set(page.id, id);
-        return {
+      return {
           ...JSON.parse(JSON.stringify(page)),
           id,
           pageGroupId: page.pageGroupId ? pageGroupIdMap.get(page.pageGroupId) : undefined,
-          elements: remapElements(page.elements, elementIdMap, makeId, groupIdMap, branchIdMap),
+          elements: remapElements(page.elements, elementIdMap, makeId, groupIdMap, branchIdMap, layerGroupIdMap),
+          editorLayerGroups: page.editorLayerGroups?.map((group) => ({
+            ...JSON.parse(JSON.stringify(group)),
+            id: layerGroupIdMap.get(group.id) ?? group.id,
+            runtimeParentId: group.runtimeParentId ? elementIdMap.get(group.runtimeParentId) : undefined,
+            parentGroupId: group.parentGroupId ? layerGroupIdMap.get(group.parentGroupId) : undefined,
+          })),
         } as InternalPage;
       })
     : undefined;
-  const elements = remapElements(source.elements, elementIdMap, makeId, groupIdMap, branchIdMap);
+  const elements = remapElements(source.elements, elementIdMap, makeId, groupIdMap, branchIdMap, layerGroupIdMap);
   remapPageActions(elements, pageIdMap);
   for (const page of internalPages ?? []) remapPageActions(page.elements, pageIdMap);
   return {
@@ -234,6 +254,16 @@ export function cloneSubPageWithNewIds(source: SubPage, makeId: (prefix: string)
     elements,
     ...(internalPages ? { internalPages } : {}),
     ...(internalPageGroups ? { internalPageGroups } : {}),
+    ...(source.editorLayerGroups
+      ? {
+        editorLayerGroups: source.editorLayerGroups.map((group) => ({
+          ...JSON.parse(JSON.stringify(group)),
+          id: layerGroupIdMap.get(group.id) ?? group.id,
+          runtimeParentId: group.runtimeParentId ? elementIdMap.get(group.runtimeParentId) : undefined,
+          parentGroupId: group.parentGroupId ? layerGroupIdMap.get(group.parentGroupId) : undefined,
+        })),
+      }
+      : {}),
   };
 }
 
@@ -242,14 +272,33 @@ export function cloneInternalPageWithinSubPage(
   makeId: (prefix: string) => string,
 ): InternalPage {
   const newId = makeId('internal-page');
-  const elements = remapElements(source.elements, new Map(), makeId);
+  const elementIdMap = new Map<string, string>();
+  const layerGroupIdMap = new Map<string, string>();
+  for (const element of source.elements) {
+    elementIdMap.set(element.id, makeId('el'));
+    if (element.groupId && !layerGroupIdMap.has(element.groupId)) layerGroupIdMap.set(element.groupId, makeId('layer-group'));
+  }
+  for (const group of source.editorLayerGroups ?? []) {
+    if (!layerGroupIdMap.has(group.id)) layerGroupIdMap.set(group.id, makeId('layer-group'));
+  }
+  const elements = remapElements(source.elements, elementIdMap, makeId, new Map(), new Map(), layerGroupIdMap);
   for (const el of elements) {
     for (const action of el.actions ?? []) {
       if (action.pageTargetId === source.id) action.pageTargetId = newId;
       if (action.afterClose?.pageTargetId === source.id) action.afterClose.pageTargetId = newId;
     }
   }
-  return { ...JSON.parse(JSON.stringify(source)), id: newId, elements };
+  return {
+    ...JSON.parse(JSON.stringify(source)),
+    id: newId,
+    elements,
+    editorLayerGroups: source.editorLayerGroups?.map((group) => ({
+      ...JSON.parse(JSON.stringify(group)),
+      id: layerGroupIdMap.get(group.id) ?? group.id,
+      runtimeParentId: group.runtimeParentId ? elementIdMap.get(group.runtimeParentId) : undefined,
+      parentGroupId: group.parentGroupId ? layerGroupIdMap.get(group.parentGroupId) : undefined,
+    })),
+  };
 }
 
 export type InternalPageIssue = {

@@ -1,7 +1,7 @@
-import { useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
-import { Trash2, Eye, EyeOff, Lock, Unlock, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, FolderMinus, FolderInput, ArrowUp, ArrowDown, ChevronRight, ChevronDown, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import { findActiveElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
@@ -13,6 +13,8 @@ import {
   withLayerLabel,
 } from '../utils/layerPresentation';
 import { createElementMap, getElementLayerState } from '../utils/layerState';
+import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
+import { showToast } from '../utils/toast';
 
 type DropTarget =
   | {
@@ -21,7 +23,8 @@ type DropTarget =
     visualIndex: number;
     storageIndex: number;
   }
-  | { kind: 'into-container'; containerId: string };
+  | { kind: 'into-container'; containerId: string }
+  | { kind: 'into-group'; groupId: string };
 
 export default function ElementList({ showHeader = true }: { showHeader?: boolean } = {}) {
   const { t } = useI18n();
@@ -35,11 +38,18 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   ));
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement = useEditorStore((s) => s.selectElement);
+  const selectElements = useEditorStore((s) => s.selectElements);
   const updateElement = useEditorStore((s) => s.updateElement);
   const setElementEditorHidden = useEditorStore((s) => s.setElementEditorHidden);
   const setElementsEditorHidden = useEditorStore((s) => s.setElementsEditorHidden);
   const setElementLocked = useEditorStore((s) => s.setElementLocked);
   const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
+  const addEditorLayerGroup = useEditorStore((s) => s.addEditorLayerGroup);
+  const renameEditorLayerGroup = useEditorStore((s) => s.renameEditorLayerGroup);
+  const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
+  const setEditorLayerGroupMembers = useEditorStore((s) => s.setEditorLayerGroupMembers);
+  const setEditorLayerGroupParent = useEditorStore((s) => s.setEditorLayerGroupParent);
+  const reorderEditorLayerGroup = useEditorStore((s) => s.reorderEditorLayerGroup);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const reorderElement = useEditorStore((s) => s.reorderElement);
   const setElementParent = useEditorStore((s) => s.setElementParent);
@@ -47,14 +57,46 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const alignElements = useEditorStore((s) => s.alignElements);
 
   const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [layerDraft, setLayerDraft] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [groupDraft, setGroupDraft] = useState('');
+  const skipNextGroupPreferenceSave = useRef(false);
 
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
   const elements = currentPage?.elements ?? [];
   const elementMap = createElementMap(elements);
+  const layerGroups = currentPage ? resolveEditorLayerGroups(currentPage) : [];
   const pageFrozen = Boolean(currentPage && 'frozen' in currentPage && currentPage.frozen);
+  const groupPreferenceKey = currentCourse && currentPage
+    ? `forge.layer-groups.${currentCourse.id}.${currentPage.id}`
+    : null;
+
+  useEffect(() => {
+    skipNextGroupPreferenceSave.current = true;
+    if (!groupPreferenceKey) {
+      setExpandedGroups(new Set()); // eslint-disable-line react-hooks/set-state-in-effect
+      return;
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(groupPreferenceKey) ?? '[]');
+      setExpandedGroups(new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string') : []));
+    } catch {
+      setExpandedGroups(new Set());
+    }
+  }, [groupPreferenceKey]);
+
+  useEffect(() => {
+    if (!groupPreferenceKey) return;
+    if (skipNextGroupPreferenceSave.current) {
+      skipNextGroupPreferenceSave.current = false;
+      return;
+    }
+    localStorage.setItem(groupPreferenceKey, JSON.stringify([...expandedGroups]));
+  }, [expandedGroups, groupPreferenceKey]);
 
   if (!currentPage) return null;
 
@@ -80,9 +122,35 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     useEditorStore.getState().saveHistory();
   };
 
+  const commitGroupName = (group: ResolvedEditorLayerGroup, value: string) => {
+    const normalized = value.trim();
+    setEditingGroupId(null);
+    setGroupDraft('');
+    if (!normalized || normalized === group.name) return;
+    if (!renameEditorLayerGroup(group.id, normalized)) showToast('图层组名称不能为空或重复', 'error');
+  };
+
+  const createGroupFromSelection = () => {
+    if (selectedElementIds.length < 2) {
+      showToast('请先选择至少两个同一运行父级下的图层', 'info');
+      return;
+    }
+    const usedNames = new Set(layerGroups.map((group) => group.name));
+    let name = '图层组';
+    let suffix = 2;
+    while (usedNames.has(name)) name = `图层组 ${suffix++}`;
+    const groupId = addEditorLayerGroup(name, selectedElementIds);
+    if (!groupId) {
+      showToast('图层组成员必须属于同一运行父级，且名称不能重复', 'error');
+      return;
+    }
+    setExpandedGroups((previous) => new Set(previous).add(groupId));
+  };
+
   const handleDragStart = (e: React.DragEvent, el: typeof elements[0]) => {
     if (getElementLayerState(el, elementMap).effectiveLocked || pageFrozen) { e.preventDefault(); return; }
     setDraggedId(el.id);
+    setDraggedGroupId(null);
     setDropTarget(null);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', el.id);
@@ -175,6 +243,12 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
 
   const handleDropTopLevel = (e: React.DragEvent) => {
     e.preventDefault();
+    if (draggedGroupId) {
+      if (!setEditorLayerGroupParent(draggedGroupId, undefined)) showToast('图层组已经位于顶层', 'info');
+      setDraggedGroupId(null);
+      setDropTarget(null);
+      return;
+    }
     if (!draggedId || !dropTarget) return;
     const draggedEl = elements.find(el => el.id === draggedId);
     if (!draggedEl) return;
@@ -190,6 +264,27 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       useEditorStore.getState().saveHistory();
     } else if (dropTarget.kind === 'reorder') {
       reorderElement(draggedId, dropTarget.storageIndex);
+    }
+    setDraggedId(null);
+    setDropTarget(null);
+  };
+
+  const handleDropGroup = (event: React.DragEvent, group: ResolvedEditorLayerGroup) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (draggedGroupId) {
+      if (draggedGroupId !== group.id && !group.legacy && !setEditorLayerGroupParent(draggedGroupId, group.id)) {
+        showToast('图层组必须保持同一运行父级，且不能嵌套到自己的后代', 'error');
+      }
+      setDraggedGroupId(null);
+      setDropTarget(null);
+      return;
+    }
+    if (!draggedId || group.crossRuntimeParent) return;
+    if (!setEditorLayerGroupMembers(group.id, [draggedId])) {
+      showToast('图层组只接收同一运行父级下的成员', 'error');
+    } else {
+      setExpandedGroups((previous) => new Set(previous).add(group.id));
     }
     setDraggedId(null);
     setDropTarget(null);
@@ -214,7 +309,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     const effectiveLocked = layerState.effectiveLocked;
     const isDragging = draggedId === el.id;
     const isContainerTarget = dropTarget?.kind === 'into-container' && dropTarget.containerId === el.id;
-    const children = getVisualChildren(el.id);
+    const children = getVisualChildren(el.id).filter((child) => !child.groupId);
     const parentId = el.parentId;
     const layerName = getLayerDisplayName(el, meta?.label);
     const isEditingLayer = editingLayerId === el.id;
@@ -306,6 +401,145 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     );
   };
 
+  const renderGroup = (group: ResolvedEditorLayerGroup, depth: number): ReactElement => {
+    const expanded = expandedGroups.has(group.id);
+    const members = elements
+      .filter((element) => group.memberIds.includes(element.id))
+      .reverse();
+    const childGroups = layerGroups.filter((candidate) => candidate.parentGroupId === group.id);
+    const isEditing = editingGroupId === group.id;
+    const groupIndex = layerGroups.findIndex((candidate) => candidate.id === group.id);
+    return (
+      <div key={`layer-group-${group.id}`}>
+        <div
+          className={`flex items-center gap-1 py-1 text-xs ${
+            dropTarget?.kind === 'into-group' && dropTarget.groupId === group.id
+              ? 'ring-2 ring-emerald-500 bg-emerald-950/30'
+              : group.crossRuntimeParent
+                ? 'text-amber-300 bg-amber-950/20'
+                : 'text-slate-300 hover:bg-slate-700'
+          }`}
+          style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px' }}
+          title={group.crossRuntimeParent ? '旧版跨运行父级编组：保持原有编组行为，重新编组后可转换为新图层组' : `${group.name} · ${members.length} 个成员`}
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (draggedId && !group.crossRuntimeParent) setDropTarget({ kind: 'into-group', groupId: group.id });
+          }}
+          onDrop={(event) => handleDropGroup(event, group)}
+          draggable={!pageFrozen && !group.legacy}
+          onDragStart={(event) => {
+            event.stopPropagation();
+            setDraggedGroupId(group.id);
+            setDropTarget(null);
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', `layer-group:${group.id}`);
+          }}
+          onDragEnd={() => { setDraggedGroupId(null); setDropTarget(null); }}
+        >
+          <button
+            className="p-0.5 shrink-0 text-slate-500 hover:text-slate-200"
+            onClick={() => setExpandedGroups((previous) => {
+              const next = new Set(previous);
+              if (next.has(group.id)) next.delete(group.id); else next.add(group.id);
+              return next;
+            })}
+            aria-label={expanded ? '收起图层组' : '展开图层组'}
+          >
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </button>
+          {expanded ? <FolderOpen size={13} className="shrink-0 text-blue-300" /> : <Folder size={13} className="shrink-0 text-blue-300" />}
+          {isEditing ? (
+            <input
+              autoFocus
+              value={groupDraft}
+              onChange={(event) => setGroupDraft(event.target.value)}
+              onBlur={() => commitGroupName(group, groupDraft)}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Enter') event.currentTarget.blur();
+                if (event.key === 'Escape') { setEditingGroupId(null); setGroupDraft(''); }
+              }}
+              className="flex-1 min-w-0 bg-slate-600 text-white rounded px-1 outline-none"
+            />
+          ) : (
+            <span
+              className="truncate flex-1"
+              onClick={() => selectElements(group.memberIds)}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                if (pageFrozen || group.crossRuntimeParent) return;
+                setEditingGroupId(group.id);
+                setGroupDraft(group.name);
+              }}
+            >
+              {group.name}
+            </span>
+          )}
+          <span className="text-[10px] text-slate-500 shrink-0">{members.length}</span>
+          <button
+            onClick={() => reorderEditorLayerGroup(groupIndex, groupIndex - 1)}
+            disabled={pageFrozen || groupIndex <= 0}
+            className="p-0.5 rounded text-slate-500 hover:text-slate-200 disabled:opacity-30"
+            title="上移图层组"
+            aria-label="上移图层组"
+          >
+            <ArrowUp size={11} />
+          </button>
+          <button
+            onClick={() => reorderEditorLayerGroup(groupIndex, groupIndex + 1)}
+            disabled={pageFrozen || groupIndex < 0 || groupIndex >= layerGroups.length - 1}
+            className="p-0.5 rounded text-slate-500 hover:text-slate-200 disabled:opacity-30"
+            title="下移图层组"
+            aria-label="下移图层组"
+          >
+            <ArrowDown size={11} />
+          </button>
+          <button
+            onClick={() => {
+              if (pageFrozen) return;
+              if (!setEditorLayerGroupMembers(group.id, selectedElementIds)) showToast('选中的图层必须属于同一运行父级', 'error');
+              else setExpandedGroups((previous) => new Set(previous).add(group.id));
+            }}
+            disabled={pageFrozen || group.crossRuntimeParent}
+            className="p-0.5 rounded text-slate-500 hover:text-slate-200 disabled:opacity-30"
+            title="将选中图层移入此组"
+            aria-label="将选中图层移入此组"
+          >
+            <FolderInput size={12} />
+          </button>
+          <button
+            onClick={() => deleteEditorLayerGroup(group.id, false)}
+            disabled={pageFrozen}
+            className="p-0.5 rounded text-slate-500 hover:text-amber-300 disabled:opacity-30"
+            title="解散图层组并保留内容"
+            aria-label="解散图层组并保留内容"
+          >
+            <FolderMinus size={12} />
+          </button>
+          <button
+            onClick={() => deleteEditorLayerGroup(group.id, true)}
+            disabled={pageFrozen}
+            className="p-0.5 rounded text-slate-500 hover:text-red-300 disabled:opacity-30"
+            title="删除图层组及其内容"
+            aria-label="删除图层组及其内容"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+        {expanded && (
+          <div>
+            {childGroups.map((child) => renderGroup(child, depth + 1))}
+            {members.map((member, index) => renderEl(member, depth + 1, index))}
+            {members.length === 0 && childGroups.length === 0 && (
+              <div className="py-1 text-[10px] text-slate-600" style={{ paddingLeft: `${24 + depth * 16}px` }}>空图层组</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div
       className={`flex-1 flex flex-col min-h-0 ${workbenchReadonly ? 'pointer-events-none opacity-60' : ''}`}
@@ -316,8 +550,17 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       onDrop={handleDropTopLevel}
     >
       {showHeader && (
-        <div className="h-9 flex items-center px-3 text-xs font-medium text-slate-400">
-          {t('elementList')} ({elements.length})
+        <div className="h-9 flex items-center gap-2 px-3 text-xs font-medium text-slate-400">
+          <span className="flex-1">{t('elementList')} ({elements.length})</span>
+          <button
+            onClick={createGroupFromSelection}
+            disabled={pageFrozen || selectedElementIds.length < 2}
+            className="p-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 disabled:opacity-30"
+            title="用选中图层创建图层组"
+            aria-label="用选中图层创建图层组"
+          >
+            <FolderPlus size={13} />
+          </button>
         </div>
       )}
       <div className="flex-1 overflow-y-auto">
@@ -327,7 +570,8 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
           </div>
         ) : (
           <div className="py-1">
-            {topLevel.map((el, index) => renderEl(el, 0, index))}
+            {layerGroups.filter((group) => !group.parentGroupId).map((group) => renderGroup(group, 0))}
+            {topLevel.filter((el) => !el.groupId).map((el, index) => renderEl(el, 0, index))}
             {renderDropIndicator(undefined, topLevel.length)}
           </div>
         )}
