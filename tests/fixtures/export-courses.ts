@@ -167,7 +167,7 @@ export function normalCourseFixture(): Course {
             y: 260,
             width: 120,
             height: 60,
-            props: { answer: '8' },
+            props: { _judgeAnswer: '8' },
           }),
         ]),
       ]),

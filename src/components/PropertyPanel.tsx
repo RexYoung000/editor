@@ -514,7 +514,7 @@ export default function PropertyPanel() {
       }
       const newProps: Record<string, unknown> = { ...el.props, [key]: value };
       // 输入框：可输入位数 = 正确答案位数 + 1
-      if (el.type === 'KlInputImage' && key === 'answer') {
+      if (el.type === 'KlInputImage' && key === '_judgeAnswer') {
         newProps.place = String(value ?? '').length + 1;
       }
       updateElement(el.id, { props: newProps } as Partial<Element>);
@@ -1237,6 +1237,12 @@ export default function PropertyPanel() {
                   pages={currentStage?.subPages ?? []}
                   allElements={currentPage?.elements ?? []}
                   onChange={handleActionsChange}
+                  onTargetPropsChange={(targetId, key, value) => {
+                    const target = elements.find((item) => item.id === targetId);
+                    if (!target || getElementLayerState(target, elementMap).effectiveLocked) return;
+                    updateElement(targetId, { props: { ...target.props, [key]: value } });
+                  }}
+                  onTargetPropsCommit={saveHistory}
                 />
               )}
 

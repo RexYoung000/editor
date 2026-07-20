@@ -1,4 +1,4 @@
-import type { Course, SubPage, Element } from '../types';
+import type { Action, Course, SubPage, Element } from '../types';
 import { elementMeta, type ExportChild } from '../elements/elementMeta';
 import { getKeyboardPreset } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath, lookupBuiltinBySrcPath, assetSrc, assetExport } from '../elements/builtinAssets';
@@ -16,6 +16,7 @@ import {
   compileInternalPagesCourse,
   internalPageActionBody,
 } from './internalPageCompiler';
+import { getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
 
 // ─── Text 烘焙 ───
 
@@ -307,6 +308,7 @@ function nextId() { return ++_compId; }
  *  规则：
  *  - 有 actions 的元素（作为事件源）
  *  - 被 action.targetId 引用的元素（作为动作目标）
+ *  - 被 action.judgeTargetId 引用的元素（作为 SDK 判定目标）
  *  - 特殊硬编码组件：DragViewBox
  *  - 翻页组件：PageTurnBox 关联的 ContainerBox / PageTurnLeftBtn / PageTurnRightBtn
  *  - onAutoClick 所在 SelectableObj 的父 ChoiceBox */
@@ -321,6 +323,7 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
       needsVar.add(el.id);
       for (const action of el.actions) {
         if (action.targetId) needsVar.add(action.targetId);
+        if (action.judgeTargetId) needsVar.add(action.judgeTargetId);
       }
     }
   }
@@ -1132,6 +1135,94 @@ function buildDvbInitCode(
   return out;
 }
 
+type ActionBodyBuilder = (
+  action: Action,
+  elementRef: string,
+  page: SubPage,
+  sourceElement?: Element,
+) => string;
+
+/**
+ * 把触发元素上的通用 SDK 判定关系转换为点击监听。
+ * 判定只读取目标组件已有 SDK 状态，结果动作仍使用 action.targetId。
+ */
+export function buildSdkJudgeClickInitCode(
+  page: SubPage,
+  getVar: (element: Element) => string,
+  buildActionBody: ActionBodyBuilder,
+  writeHomeworkResult = false,
+): string {
+  let code = '';
+
+  for (const source of page.elements) {
+    const judgeActions = (source.actions ?? []).filter((action) => action.event === SDK_JUDGE_EVENT);
+    if (judgeActions.length === 0) continue;
+
+    const groups = new Map<string, Action[]>();
+    for (const action of judgeActions) {
+      const key = action.groupId ?? `__legacy:${action.judgeTargetId ?? ''}`;
+      const group = groups.get(key) ?? [];
+      group.push(action);
+      groups.set(key, group);
+    }
+
+    for (const actions of groups.values()) {
+      const judgeTargetId = actions[0]?.judgeTargetId;
+      const target = judgeTargetId
+        ? page.elements.find((element) => element.id === judgeTargetId)
+        : undefined;
+      const capability = getSdkJudgeCapability(target);
+      if (!target || !capability) continue;
+
+      const sourceRef = `this.${getVar(source)}`;
+      const targetRef = `this.${getVar(target)}`;
+      const branchBodies: Record<'right' | 'wrong' | 'null', string[]> = {
+        right: [],
+        wrong: [],
+        null: [],
+      };
+      for (const action of actions) {
+        const condition = action.branchCondition ?? 'right';
+        if (!capability.conditions.includes(condition)) continue;
+        const body = buildActionBody(action, sourceRef, page, source);
+        if (body) branchBodies[condition].push(body);
+      }
+
+      const resultBody = (condition: 'right' | 'wrong' | 'null') => {
+        const parts = [...branchBodies[condition]];
+        if (writeHomeworkResult) {
+          const value = condition === 'right' ? 'true' : condition === 'wrong' ? 'false' : 'null';
+          parts.unshift(`this.result = ${value};`);
+        }
+        return parts.join(' ');
+      };
+
+      const rightCheck = capability.kind === 'inputImage'
+        ? `!${targetRef}.valueOrSkinIsNull && ${targetRef}.fontClipValue === ${JSON.stringify(String(target.props._judgeAnswer ?? ''))}`
+        : capability.kind === 'input'
+        ? `${targetRef}.isRight()`
+        : capability.kind === 'drag'
+          ? `${targetRef}.dragsOnRightDrops()`
+          : `${targetRef}.${capability.kind === 'matching' ? 'allRight' : 'isRight'}`;
+      const nullCheck = capability.kind === 'inputImage'
+        ? `${targetRef}.valueOrSkinIsNull`
+        : capability.kind === 'input' || capability.kind === 'matching'
+        ? `${targetRef}.isNull()`
+        : capability.kind === 'choice'
+          ? `${targetRef}.isNull`
+          : null;
+
+      code += `        if (${sourceRef}) ${sourceRef}.on(Laya.Event.CLICK, this, function() {\n`;
+      code += `            if (${rightCheck}) { ${resultBody('right')} }\n`;
+      if (nullCheck) code += `            else if (${nullCheck}) { ${resultBody('null')} }\n`;
+      code += `            else { ${resultBody('wrong')} }\n`;
+      code += `        });\n`;
+    }
+  }
+
+  return code;
+}
+
 function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<string, string>, varAssignment: Map<string, string>, uiNamespace = 'game_lt'): string {
   /** 根据元素 ID 获取分配的 var 名（用于 this.xxx 引用） */
   const getVar = (el: Element): string => {
@@ -1177,6 +1268,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
 
   // ─── DragViewBox 统一处理（每个 DVB 一对 EVENT_SUCCESS/EVENT_FAILD，合并 dropSkin + onDragJudge）───
   initCode += buildDvbInitCode(page, getVar, buildActionBody as never, uiNamespace);
+  initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
 
   // 用户绑定的动作（切换显隐、播放音效等）
   const eventMap: Record<string, string> = { onClick: 'click', onClickSound: 'click', onLoad: 'display', onChange: 'change' };
@@ -1238,6 +1330,9 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
         }
         continue;
       }
+
+      // 通用 SDK 判定已由 buildSdkJudgeClickInitCode 按 groupId 和结果分支统一生成。
+      if (rawEvent === SDK_JUDGE_EVENT) continue;
 
       // onClickInitConfirm / onClickInitConfirmWithLock：直接在 initView 注入 GameUtils.initConfirm / initChoiceBoxConfirm，不绑定事件
       if (rawEvent === 'onClickInitConfirm' || rawEvent === 'onClickInitConfirmWithLock') {
@@ -1549,6 +1644,7 @@ function generateHomeworkSceneTs(
   let checkResultCode = '';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
+  initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
 
   // ChoiceBox 自动判定：clickHanler 绑到 checkResult；result 在 checkResult 内根据 isRight/isNull 写值
   for (const el of page.elements) {

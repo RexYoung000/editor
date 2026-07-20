@@ -236,7 +236,7 @@ function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${(_idSeq++).toString(36)}`;
 }
 
-/** 深拷贝元素数组并为每个元素重新分配 ID，同时把 parentId 和 actions[].targetId 内的旧 ID 引用改写为新 ID。
+/** 深拷贝元素数组并为每个元素重新分配 ID，同时改写元素间引用。
  *  用于 duplicateSubPage / addSubPageFromTemplate 等需要克隆整页元素的场景，避免出现重复 React key。 */
 function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[] {
   const cloned: Element[] = JSON.parse(JSON.stringify(elements));
@@ -250,8 +250,9 @@ function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[
       el.parentId = idMap.get(el.parentId);
     }
     if (Array.isArray(el.actions)) {
-      for (const a of el.actions as Array<{ targetId?: string }>) {
+      for (const a of el.actions as Array<{ targetId?: string; judgeTargetId?: string }>) {
         if (a.targetId && idMap.has(a.targetId)) a.targetId = idMap.get(a.targetId);
+        if (a.judgeTargetId && idMap.has(a.judgeTargetId)) a.judgeTargetId = idMap.get(a.judgeTargetId);
       }
     }
   }
@@ -2046,12 +2047,13 @@ export const useEditorStore = create<EditorState>()(
           const newEl = JSON.parse(JSON.stringify(el));
           newEl.id = idMap.get(el.id)!;
           if (newEl.groupId && groupIdMap.has(newEl.groupId)) newEl.groupId = groupIdMap.get(newEl.groupId);
-          // 先重映射 parentId 和 actions.targetId，让后续 name 生成能扫到正确父节点下的兄弟
+          // 先重映射父级和动作引用，让后续 name 生成能扫到正确父节点下的兄弟
           if (newEl.parentId && idMap.has(newEl.parentId)) newEl.parentId = idMap.get(newEl.parentId);
           if (newEl.actions) {
-            newEl.actions.forEach((a: { id: string; targetId?: string; groupId?: string; branchId?: string }) => {
+            newEl.actions.forEach((a: { id: string; targetId?: string; judgeTargetId?: string; groupId?: string; branchId?: string }) => {
               a.id = genId('action');
               if (a.targetId && idMap.has(a.targetId)) a.targetId = idMap.get(a.targetId);
+              if (a.judgeTargetId && idMap.has(a.judgeTargetId)) a.judgeTargetId = idMap.get(a.judgeTargetId);
               if (a.groupId && actionGroupIdMap.has(a.groupId)) a.groupId = actionGroupIdMap.get(a.groupId);
               if (a.branchId && branchIdMap.has(a.branchId)) a.branchId = branchIdMap.get(a.branchId);
             });

@@ -117,6 +117,18 @@
 
 ## 输入类
 
+### KlInputImage
+
+继承：`KlImage`（单个可键盘输入的图片输入格）
+
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `fontClipValue` | String | 当前输入内容 |
+| `valueOrSkinIsNull` | Boolean | 当前内容是否为空 |
+| `place` | Number | 可输入位数 |
+
+`KlInputImage` 没有 `isRight()`、`isNull()` 或 SDK `answer` 属性。forge 允许独立输入格作为判定目标：正确答案保存在编辑器专用 `_judgeAnswer`，导出时比较 `fontClipValue`，并用 `valueOrSkinIsNull` 区分未完成；`_judgeAnswer` 不写入运行时 scene。
+
 ### KlTextInput
 
 继承：`TextInput → ISyncComp`

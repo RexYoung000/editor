@@ -82,6 +82,7 @@ pnpm build
 - [开发环境](./docs/development.md)：安装、启动、远程模式和常见问题。
 - [命令清单](./docs/commands.md)：项目脚本说明。
 - [系统架构](./docs/architecture.md)：当前真实架构和关键边界。
+- [事件与动作系统](./docs/action-system.md)：触发元素、判定目标、结果分支和 SDK 判定边界。
 - [测试与验收](./docs/testing.md)：自动检查和人工验收要求。
 - [版本管理](./docs/versioning.md)：SemVer、Tag 和发布流程。
 - [正式发板与内部部署](./docs/internal-deployment.md)：Windows 安装包、GitHub Release、公司台式机、老师端更新和回退流程。

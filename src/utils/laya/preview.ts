@@ -3,6 +3,7 @@ import { laya, clearAllObjects, setPreviewMode } from './core';
 import { createLayaComponent, applyKlProps } from './components';
 import { registerObject } from './core';
 import { objects } from './core';
+import { getSdkJudgeCapability, SDK_JUDGE_EVENT, type JudgeCondition } from '../sdkJudge';
 
 let _previewPages: Page[] = [];
 let _previewPageIdx = 0;
@@ -69,6 +70,35 @@ function _executePreviewAction(action: Action, selfId: string): void {
   }
 }
 
+function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | null {
+  const target = action.judgeTargetId
+    ? page.elements.find((element) => element.id === action.judgeTargetId)
+    : undefined;
+  const capability = getSdkJudgeCapability(target);
+  const targetObject = target ? objects().get(target.id) : undefined;
+  if (!target || !capability || !targetObject) return null;
+
+  const isRight = capability.kind === 'inputImage'
+    ? !targetObject.valueOrSkinIsNull
+      && String(targetObject.fontClipValue ?? '') === String(target.props._judgeAnswer ?? '')
+    : capability.kind === 'input'
+    ? Boolean(targetObject.isRight?.())
+    : capability.kind === 'drag'
+      ? Boolean(targetObject.dragsOnRightDrops?.())
+      : capability.kind === 'matching'
+        ? Boolean(targetObject.allRight)
+        : Boolean(targetObject.isRight);
+  if (isRight) return 'right';
+  if (!capability.conditions.includes('null')) return 'wrong';
+
+  const isNull = capability.kind === 'inputImage'
+    ? Boolean(targetObject.valueOrSkinIsNull)
+    : capability.kind === 'choice'
+    ? Boolean(targetObject.isNull)
+    : Boolean(targetObject.isNull?.());
+  return isNull ? 'null' : 'wrong';
+}
+
 function _renderPreviewPage(idx: number): void {
   clearAllObjects();
   const page = _previewPages[idx];
@@ -78,14 +108,37 @@ function _renderPreviewPage(idx: number): void {
     if (!obj) return;
     registerObject(el.id, obj);
     // 绑定所有事件
-    const eventMap: Record<string, string> = { onClick: 'click', onChange: 'change', onDrop: 'drop' };
+    const eventMap: Record<string, string> = {
+      onClick: 'click',
+      onChange: 'change',
+      onDrop: 'drop',
+      [SDK_JUDGE_EVENT]: 'click',
+    };
     if (el.actions) {
       const events = new Set(el.actions.map(a => a.event));
       events.forEach(evt => {
         const layaEvt = eventMap[evt] ?? evt;
         if (layaEvt === 'click' || layaEvt === 'change' || layaEvt === 'drop') {
           obj.on(layaEvt, null, () => {
-            el.actions?.filter(a => a.event === evt).forEach(a => _executePreviewAction(a, el.id));
+            const eventActions = el.actions?.filter((action) => action.event === evt) ?? [];
+            if (evt !== SDK_JUDGE_EVENT) {
+              eventActions.forEach((action) => _executePreviewAction(action, el.id));
+              return;
+            }
+            const groups = new Map<string, Action[]>();
+            eventActions.forEach((action) => {
+              const key = action.groupId ?? `__legacy:${action.judgeTargetId ?? ''}`;
+              const group = groups.get(key) ?? [];
+              group.push(action);
+              groups.set(key, group);
+            });
+            groups.forEach((group) => {
+              const condition = _getSdkJudgeCondition(page, group[0]);
+              if (!condition) return;
+              group
+                .filter((action) => (action.branchCondition ?? 'right') === condition)
+                .forEach((action) => _executePreviewAction(action, el.id));
+            });
           });
         }
       });

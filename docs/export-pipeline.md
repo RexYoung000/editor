@@ -163,6 +163,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 |---|---|---|
 | `onClick` | `click` | 直接绑定 |
 | `onClickSound` | `click` | body 前自动 `playSound("<viewDir>/sound/btn_click.wav")` |
+| `onClickSdkJudge` | `click` | 通过 `judgeTargetId` 按目标类型调用现有 SDK 判定，只执行匹配的结果分支；`targetId` 仍表示分支动作目标 |
 | `onLoad` | `display` | 元素显示时触发 |
 | `onChange` | `change` | |
 | `onAllRight` | `EVENT_SUCCESS` | body 包 `if (elRef.dragsOnRightDrops()) { ... }` |
@@ -230,8 +231,9 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 4. **`.scene` 构建**：直接复用 `buildScene`，把 `viewDir` 设为 `game_preview`，并关闭正课专用的口才反馈动画注入；其余节点、变量、包装和特殊组件规则与正式工程保持一致
 5. **`.ts` 模板** `generatePreviewSceneTs`：
    - **有** `GameUtils.initConfirm`、PageTurnBox 翻页、DragObj `EVENT_SUCCESS/FAILD`
+   - **有** `onClickSdkJudge` 通用点击判定，复用与正式工程一致的目标能力和结果分支生成器
    - **无** `btn_ok + choiceBox` 对错音效绑定（preview 通常不出题判对错）
-   - **无** 用户 Action 绑定逻辑（preview 关卡是导览/演示性质，不挂用户行为）
+   - 普通用户 Action 仍保持预习现有边界；内部页面动作和通用点击判定按明确入口生成
 6. **`finalConfig.json`** `buildPreviewConfigJson`：
    - 顶层 `mode: 'preview'`，`feedback: 'spirit'`，无 `noVideoMystery`
    - 视频关卡 `classType: 'yx'`

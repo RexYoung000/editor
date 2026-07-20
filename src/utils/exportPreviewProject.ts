@@ -7,6 +7,7 @@ import { getApiBaseUrl } from './apiConfig';
 import { collectImageSizes, isLargeImage } from './imageSize';
 import {
   buildScene,
+  buildSdkJudgeClickInitCode,
   collectGameZipFiles,
   collectResources,
   extractZipFromServer,
@@ -56,11 +57,15 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     if (action.actionType === 'playSound') return `this.playSound(${JSON.stringify(resourceMap.get(String(action.value)) ?? action.value)});`;
     if (action.actionType === 'playRightSound') return 'this.playSound("game_preview/sound/right.mp3");';
     if (action.actionType === 'playWrongSound') return 'this.playSound("game_preview/sound/wrong.mp3");';
+    if (action.actionType === 'showAnswerRight') return 'this.showAnswerFace(1);';
+    if (action.actionType === 'showAnswerRightLock') return 'this.showAnswerFace(1); this._lockBox.visible = true;';
+    if (action.actionType === 'showAnswerWrong') return 'this.showAnswerFace(2);';
     if (action.actionType === 'animate') return `var t = ${targetRef}; if (t && t.play) t.play(${JSON.stringify(action.value ?? 'shan')});`;
     return '';
   };
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
+  initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
   // onClickInitConfirm / onClickInitConfirmWithLock 事件：在 initView 注入 GameUtils.initConfirm
   for (const el of page.elements) {
     if (!el.actions?.length) continue;
