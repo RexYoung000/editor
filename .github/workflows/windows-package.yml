@@ -36,7 +36,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: 构建 Windows 安装包
-        run: pnpm exec electron-builder --win --x64
+        run: pnpm exec electron-builder --win --x64 --publish never
 
       - name: 输出安装包校验值
         shell: pwsh
