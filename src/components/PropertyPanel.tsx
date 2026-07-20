@@ -11,7 +11,7 @@ import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import PageTurnPageList from './PageTurnPageList';
 import { KEYBOARD_PRESETS } from '../elements/keyboardPresets';
-import { ArrowDown, ArrowUp, CornerDownLeft, FolderMinus, FolderOpen, Maximize2, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock } from 'lucide-react';
 import type { Action, Element } from '../types';
 import { useI18n } from '../i18n/context';
 import { getObject, syncProps } from '../utils/layaBridge';
@@ -38,6 +38,11 @@ interface EditorLayerGroupPropertiesProps {
   onReorder: (fromIndex: number, toIndex: number) => void;
   onDissolve: (groupId: string) => void;
   onDelete: (groupId: string) => void;
+  memberIds: string[];
+  allMembersHidden: boolean;
+  allMembersLocked: boolean;
+  onSetMembersHidden: (hidden: boolean) => void;
+  onSetMembersLocked: (locked: boolean) => void;
 }
 
 function EditorLayerGroupProperties({
@@ -50,6 +55,11 @@ function EditorLayerGroupProperties({
   onReorder,
   onDissolve,
   onDelete,
+  memberIds,
+  allMembersHidden,
+  allMembersLocked,
+  onSetMembersHidden,
+  onSetMembersLocked,
 }: EditorLayerGroupPropertiesProps) {
   const [draft, setDraft] = useState(group.name);
 
@@ -89,6 +99,31 @@ function EditorLayerGroupProperties({
         <div className="flex justify-between gap-2"><span>成员</span><span className="text-slate-200">{group.memberIds.length} 个</span></div>
         <div className="flex justify-between gap-2"><span>运行父级</span><span className="text-slate-200 truncate">{runtimeParentLabel}</span></div>
         {group.memberIds.length === 0 && <div className="text-[10px] text-slate-500">可直接从图层面板拖入元素进行整理。</div>}
+      </div>
+      <div className="border-t border-slate-700 pt-2">
+        <div className="text-xs text-slate-500 mb-1.5">组状态</div>
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            disabled={disabled || memberIds.length === 0}
+            onClick={() => onSetMembersHidden(!allMembersHidden)}
+            className="flex items-center justify-center gap-1 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-40"
+            title={allMembersHidden ? '显示组内成员' : '隐藏组内成员'}
+          >
+            {allMembersHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+            {allMembersHidden ? '显示成员' : '隐藏成员'}
+          </button>
+          <button
+            type="button"
+            disabled={disabled || memberIds.length === 0}
+            onClick={() => onSetMembersLocked(!allMembersLocked)}
+            className="flex items-center justify-center gap-1 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-40"
+            title={allMembersLocked ? '解锁组内成员' : '锁定组内成员'}
+          >
+            {allMembersLocked ? <Unlock size={12} /> : <Lock size={12} />}
+            {allMembersLocked ? '解锁成员' : '锁定成员'}
+          </button>
+        </div>
       </div>
       <div className="border-t border-slate-700 pt-2">
         <div className="text-xs text-slate-500 mb-1.5">图层组操作</div>
@@ -143,6 +178,8 @@ export default function PropertyPanel() {
   const moveElementIntoParent = useEditorStore((s) => s.moveElementIntoParent);
   const fitContainerToChildren = useEditorStore((s) => s.fitContainerToChildren);
   const clearSelection = useEditorStore((s) => s.clearSelection);
+  const setElementsEditorHidden = useEditorStore((s) => s.setElementsEditorHidden);
+  const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
   const selectEditorLayerGroup = useEditorStore((s) => s.selectEditorLayerGroup);
   const renameEditorLayerGroup = useEditorStore((s) => s.renameEditorLayerGroup);
   const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
@@ -209,6 +246,26 @@ export default function PropertyPanel() {
     ? resolvedLayerGroups.findIndex((group) => group.id === selectedEditorLayerGroup.id)
     : -1;
   const selectedElements = elements.filter((e) => selectedElementIds.includes(e.id));
+  const selectedEditorLayerGroupMemberIds = (() => {
+    if (!selectedEditorLayerGroup) return [];
+    const ids = new Set<string>();
+    const pending = [selectedEditorLayerGroup.id];
+    while (pending.length > 0) {
+      const groupId = pending.shift()!;
+      const group = resolvedLayerGroups.find((candidate) => candidate.id === groupId);
+      if (!group) continue;
+      group.memberIds.forEach((id) => ids.add(id));
+      resolvedLayerGroups
+        .filter((candidate) => candidate.parentGroupId === groupId)
+        .forEach((child) => pending.push(child.id));
+    }
+    return [...ids];
+  })();
+  const selectedEditorLayerGroupMembers = elements.filter((element) => selectedEditorLayerGroupMemberIds.includes(element.id));
+  const allGroupMembersHidden = selectedEditorLayerGroupMembers.length > 0
+    && selectedEditorLayerGroupMembers.every((element) => getElementLayerState(element, elementMap).effectiveHidden);
+  const allGroupMembersLocked = selectedEditorLayerGroupMembers.length > 0
+    && selectedEditorLayerGroupMembers.every((element) => getElementLayerState(element, elementMap).effectiveLocked);
   const single = selectedElements.length === 1 ? selectedElements[0] : null;
   const singleLayerState = single ? getElementLayerState(single, elementMap) : null;
   const lockedSource = singleLayerState?.lockedById ? elementMap.get(singleLayerState.lockedById) : single;
@@ -628,6 +685,11 @@ export default function PropertyPanel() {
             onReorder={reorderEditorLayerGroup}
             onDissolve={handleDissolveLayerGroup}
             onDelete={handleDeleteLayerGroup}
+            memberIds={selectedEditorLayerGroupMemberIds}
+            allMembersHidden={allGroupMembersHidden}
+            allMembersLocked={allGroupMembersLocked}
+            onSetMembersHidden={(hidden) => setElementsEditorHidden(selectedEditorLayerGroupMemberIds, hidden)}
+            onSetMembersLocked={(locked) => setElementsLocked(selectedEditorLayerGroupMemberIds, locked)}
           />
         ) : !hasSelection ? (
           isInternalPagesSubPage(currentSubPage) ? (

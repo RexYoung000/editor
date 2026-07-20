@@ -299,6 +299,39 @@ test('显式图层组只在组选中时响应解散快捷键，清空后可以�
   assert.equal(pageState.elements.find((item) => item.id === 'outside')?.groupId, undefined);
 });
 
+test('组级显隐和锁定操作复用成员状态字段并各自只写一条历史', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  useEditorStore.getState().setCurrentCourse({
+    id: 'layer-group-state-course',
+    stages: [{
+      id: 'stage',
+      name: '关卡 1',
+      subPages: [{
+        id: 'page',
+        name: '页面',
+        elements: [element('first', undefined, 'group'), element('second', undefined, 'group')],
+        editorLayerGroups: [{ id: 'group', name: '素材' }],
+      }],
+    }],
+  });
+  const initialHistoryLength = useEditorStore.getState().history.length;
+  useEditorStore.getState().setElementsEditorHidden(['first', 'second'], true);
+  useEditorStore.getState().setElementsLocked(['first', 'second'], true);
+  let state = useEditorStore.getState();
+  let pageState = state.currentCourse!.stages[0].subPages[0];
+  assert.equal(state.history.length, initialHistoryLength + 2);
+  assert.equal(pageState.elements.every((item) => (item.props as Record<string, unknown>)._editorHidden === true), true);
+  assert.equal(pageState.elements.every((item) => item.locked === true), true);
+
+  useEditorStore.getState().setElementsEditorHidden(['first', 'second'], false);
+  useEditorStore.getState().setElementsLocked(['first', 'second'], false);
+  state = useEditorStore.getState();
+  pageState = state.currentCourse!.stages[0].subPages[0];
+  assert.equal(state.history.length, initialHistoryLength + 4);
+  assert.equal(pageState.elements.some((item) => (item.props as Record<string, unknown>)._editorHidden === true), false);
+  assert.equal(pageState.elements.some((item) => item.locked === true), false);
+});
+
 test('取消图层组成员的拖动复制不会遗留空副本组', async () => {
   const { useEditorStore } = await import('../src/store/editorStore');
   useEditorStore.getState().setCurrentCourse({

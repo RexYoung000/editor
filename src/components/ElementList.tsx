@@ -336,6 +336,10 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
           onDragEnd={handleDragEnd}
           onDragOver={(e) => handleDragOverRow(e, el)}
           onDrop={handleDropRow}
+          onClick={(event) => {
+            if ((event.target as HTMLElement).closest('button, input')) return;
+            selectElement(el.id, event.shiftKey || event.ctrlKey || event.metaKey);
+          }}
         >
           <button
             onClick={(event) => { event.stopPropagation(); setElementEditorHidden(el.id, !editorHidden); }}
@@ -357,7 +361,10 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
           <div
             role="button"
             tabIndex={0}
-            onClick={(e) => { selectElement(el.id, e.shiftKey || e.ctrlKey || e.metaKey); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              selectElement(el.id, e.shiftKey || e.ctrlKey || e.metaKey);
+            }}
             className="flex items-center gap-2 flex-1 min-w-0 text-left"
             title={`${layerName} · ${el.name || el.type} · ${meta?.label || el.type}`}
           >
