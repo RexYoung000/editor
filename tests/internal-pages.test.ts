@@ -115,7 +115,7 @@ test('复制完整小关卡会重建页面、元素、动作及分组 ID，并�
     name: '内容页',
     kind: 'content',
     pageGroupId: 'page-group-old',
-    elements: [element('content-el', [{ id: 'action-content', event: 'onClick', actionType: 'toggleVisible', targetId: 'main-el', groupId: 'group-old', branchId: 'branch-old' }])],
+    elements: [element('content-el', [{ id: 'action-content', event: 'onClick', actionType: 'toggleVisible', targetId: 'main-el', judgeTargetId: 'main-el', judgeTargetNameSnapshot: 'main-el', groupId: 'group-old', branchId: 'branch-old' }])],
   };
   source.elements = [element('main-el', [{ id: 'action-main', event: 'onClick', actionType: 'navigateInternalPage', pageTargetId: content.id, pageTargetNameSnapshot: content.name, groupId: 'group-old' }])];
   source.internalPages = [content];
@@ -129,6 +129,7 @@ test('复制完整小关卡会重建页面、元素、动作及分组 ID，并�
   assert.notEqual(cloned.elements[0].actions?.[0].id, source.elements[0].actions?.[0].id);
   assert.equal(cloned.elements[0].actions?.[0].pageTargetId, cloned.internalPages?.[0].id);
   assert.equal(cloned.internalPages?.[0].elements[0].actions?.[0].targetId, cloned.elements[0].id);
+  assert.equal(cloned.internalPages?.[0].elements[0].actions?.[0].judgeTargetId, cloned.elements[0].id);
   assert.notEqual(cloned.elements[0].actions?.[0].groupId, 'group-old');
   assert.equal(cloned.elements[0].actions?.[0].groupId, cloned.internalPages?.[0].elements[0].actions?.[0].groupId);
   assert.notEqual(cloned.internalPages?.[0].elements[0].actions?.[0].branchId, 'branch-old');

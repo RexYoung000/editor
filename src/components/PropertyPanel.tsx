@@ -1237,6 +1237,12 @@ export default function PropertyPanel() {
                   pages={currentStage?.subPages ?? []}
                   allElements={currentPage?.elements ?? []}
                   onChange={handleActionsChange}
+                  onTargetPropsChange={(targetId, key, value) => {
+                    const target = elements.find((item) => item.id === targetId);
+                    if (!target || getElementLayerState(target, elementMap).effectiveLocked) return;
+                    updateElement(targetId, { props: { ...target.props, [key]: value } });
+                  }}
+                  onTargetPropsCommit={saveHistory}
                 />
               )}
 

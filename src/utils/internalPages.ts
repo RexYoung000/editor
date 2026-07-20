@@ -180,6 +180,7 @@ function remapElements(
         action.branchId = branchIdMap.get(action.branchId);
       }
       if (action.targetId && idMap.has(action.targetId)) action.targetId = idMap.get(action.targetId);
+      if (action.judgeTargetId && idMap.has(action.judgeTargetId)) action.judgeTargetId = idMap.get(action.judgeTargetId);
     }
   }
   return cloned;

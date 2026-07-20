@@ -1,4 +1,4 @@
-import { Plus, Trash2, Upload, X } from 'lucide-react';
+import { Crosshair, Link2, Plus, Trash2, Upload, X } from 'lucide-react';
 import type { Action, Element, Page } from '../types';
 import { elementMeta } from '../elements/elementMeta';
 import { useI18n } from '../i18n/context';
@@ -6,25 +6,55 @@ import { getCourseDirPath } from '../utils/electronFs';
 import { useEditorStore } from '../store/editorStore';
 import { getElementPages, isInternalPagesSubPage, isPageAction } from '../utils/internalPages';
 import { findSubPage } from '../utils/findSubPage';
+import { createElementMap, isElementLocked } from '../utils/layerState';
+import {
+  getSdkJudgeCapability,
+  getSdkJudgeConditionLabel,
+  isSdkJudgeTarget,
+  SDK_JUDGE_EVENT,
+  type JudgeCondition,
+} from '../utils/sdkJudge';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
+
+const ELEMENT_TARGET_ACTIONS = new Set([
+  'toggleVisible',
+  'setVisible',
+  'setProperty',
+  'animate',
+  'pageTurnPrevOnce',
+  'pageTurnNextOnce',
+  'pageTurnPrevLoop',
+  'pageTurnNextLoop',
+  'pageTurnGoTo',
+]);
 
 interface Props {
   element: Element;
   pages: Page[];
   allElements: Element[];
   onChange: (actions: Action[]) => void;
+  onTargetPropsChange?: (targetId: string, key: string, value: unknown) => void;
+  onTargetPropsCommit?: () => void;
 }
 
-export default function ActionEditor({ element, pages, allElements, onChange }: Props) {
+export default function ActionEditor({
+  element,
+  pages,
+  allElements,
+  onChange,
+  onTargetPropsChange,
+  onTargetPropsCommit,
+}: Props) {
   const { t } = useI18n();
   const actions = element.actions ?? [];
 
   const course = useEditorStore((s) => s.currentCourse);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
   const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
+  const selectElement = useEditorStore((s) => s.selectElement);
   const internalSubPage = findSubPage(course, currentSubPageId);
   const internalPageRefs = isInternalPagesSubPage(internalSubPage) ? getElementPages(internalSubPage) : [];
   const editingDialog = internalPageRefs.find((page) => page.id === currentInternalPageId)?.kind === 'dialog';
@@ -39,6 +69,15 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
   const isMatchingGame = element.layaType === 'MatchingGame';
   const isNewBrushSprite = element.type === 'NewBrushSprite';
   const hideAddButton = element.type === 'DropObj' || element.type === 'DragObj';
+  const elementMap = createElementMap(allElements);
+  const sdkJudgeTargets = allElements.filter(isSdkJudgeTarget);
+  const hasSdkJudgeEvent = actions.some((action) => action.event === SDK_JUDGE_EVENT);
+  const inboundJudgeSources = allElements.filter((source) =>
+    source.id !== element.id
+    && (source.actions ?? []).some((action) =>
+      action.event === SDK_JUDGE_EVENT && action.judgeTargetId === element.id,
+    ),
+  );
 
   // 当前元素是否为 ChoiceBox 内的 SelectableObj（layaType=SelectableObj 且父级 layaType=ChoiceBox）
   const parentEl = element.parentId ? allElements.find((e) => e.id === element.parentId) : undefined;
@@ -75,15 +114,18 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
     ...(showAutoClickOption ? [
       { value: 'onAutoClick', label: '自动执行一次点击' },
     ] : []),
+    ...((sdkJudgeTargets.length > 0 || hasSdkJudgeEvent) ? [
+      { value: SDK_JUDGE_EVENT, label: '点击 + SDK 判断（可配置结果）' },
+    ] : []),
     ...(isConfirmButton && hasChoiceOrInput && !isHwOrEval ? [
-      { value: 'onClickInitConfirm', label: '点击+SDK通用判断' },
-      { value: 'onClickInitConfirmWithLock', label: '点击+SDK通用判断+锁屏' },
+      { value: 'onClickInitConfirm', label: '点击 + SDK 默认反馈（兼容）' },
+      { value: 'onClickInitConfirmWithLock', label: '点击 + SDK 默认反馈 + 锁屏（兼容）' },
       { value: 'onClickInitConfirmCH', label: '点击+口才文字动画通用判断(不经SDK)' },
       { value: 'onClickInitConfirmCHWithLock', label: '点击+口才文字动画通用判断(不经SDK)+锁屏' },
     ] : []),
     ...(isConfirmButton && hasGameTarget ? [
-      { value: 'onClickInitGameConfirm', label: '点击+SDK通用判断(无错误提示框)' },
-      { value: 'onClickInitGameConfirmWithLock', label: '点击+SDK通用判断(无错误提示框)+锁屏' },
+      { value: 'onClickInitGameConfirm', label: '点击 + 游戏默认反馈（兼容）' },
+      { value: 'onClickInitGameConfirmWithLock', label: '点击 + 游戏默认反馈 + 锁屏（兼容）' },
       ...(!isHwOrEval ? [
         { value: 'onClickInitGameConfirmCH', label: '点击+口才文字动画通用判断(不经SDK)' },
         { value: 'onClickInitGameConfirmCHWithLock', label: '点击+口才文字动画通用判断(不经SDK)+锁屏' },
@@ -152,28 +194,49 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
 
   const remove = (i: number) => onChange(actions.filter((_, idx) => idx !== i));
 
-  function newAction(event: string = 'onClick', targetId?: string, groupId?: string): Action {
+  function newAction(
+    event: string = 'onClick',
+    targetId?: string,
+    groupId?: string,
+    judgeTarget?: Element,
+  ): Action {
     return {
       id: generateId(),
       event,
       targetId,
       actionType: 'toggleVisible',
       groupId: groupId ?? generateId(),
+      judgeTargetId: judgeTarget?.id,
+      judgeTargetNameSnapshot: judgeTarget?.name,
     };
   }
 
   // 优先按 groupId 分组；老数据没 groupId 时按 (event, targetId) 兜底
-  type Group = { event: string; targetId: string | undefined; indices: number[]; key: string };
+  type Group = {
+    event: string;
+    targetId: string | undefined;
+    judgeTargetId: string | undefined;
+    judgeTargetNameSnapshot: string | undefined;
+    indices: number[];
+    key: string;
+  };
   const groups: Group[] = [];
   {
     const seen = new Map<string, number>();
     actions.forEach((a, i) => {
-      const key = a.groupId ?? `__legacy:${a.event}|${a.targetId ?? ''}`;
+      const key = a.groupId ?? `__legacy:${a.event}|${a.targetId ?? ''}|${a.judgeTargetId ?? ''}`;
       let g = seen.get(key);
       if (g === undefined) {
         g = groups.length;
         seen.set(key, g);
-        groups.push({ event: a.event, targetId: a.targetId, indices: [], key });
+        groups.push({
+          event: a.event,
+          targetId: a.targetId,
+          judgeTargetId: a.judgeTargetId,
+          judgeTargetNameSnapshot: a.judgeTargetNameSnapshot,
+          indices: [],
+          key,
+        });
       }
       groups[g].indices.push(i);
     });
@@ -189,15 +252,18 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
     const lastIdx = group.indices[group.indices.length - 1];
     const groupId = actions[lastIdx]?.groupId ?? group.key;
     const next = [...actions];
-    next.splice(lastIdx + 1, 0, newAction(group.event, group.targetId, groupId));
+    const judgeTarget = group.judgeTargetId
+      ? allElements.find((item) => item.id === group.judgeTargetId)
+      : undefined;
+    next.splice(lastIdx + 1, 0, newAction(group.event, group.targetId, groupId, judgeTarget));
     onChange(next);
   };
 
   // ─── onDragJudge 子事件相关 ───
 
   /** 按 branchId 二次分组：返回 [{branchId, condition, indices}] */
-  function getBranches(group: Group): Array<{ branchId: string; condition: 'right' | 'wrong' | 'null'; indices: number[] }> {
-    const map = new Map<string, { branchId: string; condition: 'right' | 'wrong' | 'null'; indices: number[] }>();
+  function getBranches(group: Group): Array<{ branchId: string; condition: JudgeCondition; indices: number[] }> {
+    const map = new Map<string, { branchId: string; condition: JudgeCondition; indices: number[] }>();
     for (const i of group.indices) {
       const a = actions[i];
       const bid = a.branchId ?? '_default';
@@ -212,20 +278,42 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
   }
 
   /** 创建一条子事件 action（actionType='none'） */
-  function newJudgeAction(event: string, groupId: string, branchId: string, condition: 'right' | 'wrong' | 'null'): Action {
+  function newJudgeAction(
+    event: string,
+    groupId: string,
+    branchId: string,
+    condition: JudgeCondition,
+    judgeTarget?: Element,
+    actionType = 'none',
+  ): Action {
     return {
       id: generateId(),
       event,
       targetId: undefined,
-      actionType: 'none',
+      actionType,
       groupId,
       branchId,
       branchCondition: condition,
+      judgeTargetId: judgeTarget?.id,
+      judgeTargetNameSnapshot: judgeTarget?.name,
     };
   }
 
+  function newSdkJudgeActions(groupId: string, judgeTarget?: Element): Action[] {
+    const capability = getSdkJudgeCapability(judgeTarget);
+    if (!capability) return [];
+    return capability.conditions.map((condition) => newJudgeAction(
+      SDK_JUDGE_EVENT,
+      groupId,
+      generateId(),
+      condition,
+      judgeTarget,
+      condition === 'right' ? 'showAnswerRight' : condition === 'wrong' ? 'showAnswerWrong' : 'none',
+    ));
+  }
+
   /** 切换某子事件的 condition（同 branchId 的所有 actions 都更新） */
-  const updateBranchCondition = (group: Group, branchId: string, cond: 'right' | 'wrong' | 'null') =>
+  const updateBranchCondition = (group: Group, branchId: string, cond: JudgeCondition) =>
     onChange(actions.map((a, idx) =>
       group.indices.includes(idx) && (a.branchId ?? '_default') === branchId
         ? { ...a, branchCondition: cond }
@@ -238,7 +326,10 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
     const groupId = actions[lastIdx]?.groupId ?? group.key;
     const newBranchId = generateId();
     const next = [...actions];
-    next.splice(lastIdx + 1, 0, newJudgeAction(group.event, groupId, newBranchId, 'right'));
+    const judgeTarget = group.judgeTargetId
+      ? allElements.find((item) => item.id === group.judgeTargetId)
+      : undefined;
+    next.splice(lastIdx + 1, 0, newJudgeAction(group.event, groupId, newBranchId, 'right', judgeTarget));
     onChange(next);
   };
 
@@ -254,8 +345,36 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
     const lastIdx = branchIndices[branchIndices.length - 1];
     const groupId = actions[lastIdx]?.groupId ?? group.key;
     const cond = actions[lastIdx]?.branchCondition ?? 'right';
+    const judgeTarget = group.judgeTargetId
+      ? allElements.find((item) => item.id === group.judgeTargetId)
+      : undefined;
     const next = [...actions];
-    next.splice(lastIdx + 1, 0, newJudgeAction(group.event, groupId, branchId, cond));
+    next.splice(lastIdx + 1, 0, newJudgeAction(group.event, groupId, branchId, cond, judgeTarget));
+    onChange(next);
+  };
+
+  const updateSdkJudgeTarget = (group: Group, judgeTarget?: Element) => {
+    const next = actions.map((action, index) => group.indices.includes(index)
+      ? {
+          ...action,
+          judgeTargetId: judgeTarget?.id,
+          judgeTargetNameSnapshot: judgeTarget?.name,
+        }
+      : action,
+    );
+    const capability = getSdkJudgeCapability(judgeTarget);
+    const hasNullBranch = group.indices.some((index) => actions[index].branchCondition === 'null');
+    if (capability?.conditions.includes('null') && !hasNullBranch) {
+      const lastIdx = group.indices[group.indices.length - 1];
+      const groupId = actions[lastIdx]?.groupId ?? group.key;
+      next.splice(lastIdx + 1, 0, newJudgeAction(
+        SDK_JUDGE_EVENT,
+        groupId,
+        generateId(),
+        'null',
+        judgeTarget,
+      ));
+    }
     onChange(next);
   };
 
@@ -273,6 +392,27 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
         )}
       </div>
 
+      {inboundJudgeSources.length > 0 && (
+        <div className="mb-2 border border-blue-800/50 bg-blue-950/30 p-1.5 text-[10px] text-slate-300">
+          <div className="mb-1 flex items-center gap-1 text-blue-300">
+            <Link2 size={11} />
+            <span>被 {inboundJudgeSources.length} 个触发元素判定</span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {inboundJudgeSources.map((source) => (
+              <button
+                key={source.id}
+                type="button"
+                onClick={() => selectElement(source.id, false)}
+                className="border border-slate-600 bg-slate-800 px-1.5 py-0.5 text-slate-300 hover:bg-slate-700"
+              >
+                {source.name ?? source.id}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {actions.length === 0 && (
         <div className="text-xs text-slate-600 text-center py-1.5">{t('noActions')}</div>
       )}
@@ -285,6 +425,21 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
               value={group.event}
               onChange={(e) => {
                 const nextEvent = e.target.value;
+                // 点击 SDK 判定：事件属于当前触发元素，判定目标独立于结果动作目标。
+                if (nextEvent === SDK_JUDGE_EVENT && group.event !== SDK_JUDGE_EVENT) {
+                  const groupId = actions[group.indices[0]]?.groupId ?? group.key;
+                  const currentTarget = group.judgeTargetId
+                    ? allElements.find((item) => item.id === group.judgeTargetId)
+                    : undefined;
+                  const judgeTarget = isSdkJudgeTarget(currentTarget) ? currentTarget : sdkJudgeTargets[0];
+                  const newActions = newSdkJudgeActions(groupId, judgeTarget);
+                  if (newActions.length === 0) return;
+                  const minIdx = Math.min(...group.indices);
+                  const next = actions.filter((_, idx) => !group.indices.includes(idx));
+                  next.splice(minIdx, 0, ...newActions);
+                  onChange(next);
+                  return;
+                }
                 // 切到 onDragJudge：清空旧动作，自动填充 right + wrong 两个默认子事件
                 if (nextEvent === 'onDragJudge' && group.event !== 'onDragJudge') {
                   const groupId = actions[group.indices[0]]?.groupId ?? group.key;
@@ -366,6 +521,88 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
               </div>
             </div>
           )}
+          {group.event === SDK_JUDGE_EVENT && (() => {
+            const judgeTarget = group.judgeTargetId
+              ? allElements.find((item) => item.id === group.judgeTargetId)
+              : undefined;
+            const capability = getSdkJudgeCapability(judgeTarget);
+            const targetMissing = Boolean(group.judgeTargetId && !capability);
+            const targetLocked = judgeTarget ? isElementLocked(judgeTarget, elementMap) : false;
+            return (
+              <div className="mb-2 space-y-1.5">
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 w-12 shrink-0">判定目标</span>
+                  <select
+                    value={group.judgeTargetId ?? ''}
+                    onChange={(event) => updateSdkJudgeTarget(
+                      group,
+                      allElements.find((item) => item.id === event.target.value),
+                    )}
+                    className={`flex-1 min-w-0 border rounded px-1 py-0.5 ${
+                      targetMissing
+                        ? 'bg-red-950/50 border-red-700 text-red-200'
+                        : 'bg-slate-700 border-slate-600 text-slate-200'
+                    }`}
+                  >
+                    {!group.judgeTargetId && <option value="">请选择可判定组件</option>}
+                    {targetMissing && (
+                      <option value={group.judgeTargetId}>
+                        目标已失效：{group.judgeTargetNameSnapshot ?? group.judgeTargetId}
+                      </option>
+                    )}
+                    {sdkJudgeTargets.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name ?? item.id} ({elementMeta[item.type]?.label ?? item.type})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {targetMissing && (
+                  <div className="pl-12 text-[10px] text-red-300">
+                    判定目标已删除或不再支持 SDK 判定，请重新选择。
+                  </div>
+                )}
+                {judgeTarget && capability && (
+                  <div className="border border-slate-700 bg-slate-800/70 p-1.5">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-slate-400">判定配置保存在目标组件</span>
+                      <button
+                        type="button"
+                        onClick={() => selectElement(judgeTarget.id, false)}
+                        className="flex items-center gap-1 text-[10px] text-blue-300 hover:text-blue-200"
+                      >
+                        <Crosshair size={11} /> 编辑目标
+                      </button>
+                    </div>
+                    {capability.answerKey ? (
+                      <label className="flex items-center gap-1 text-[10px] text-slate-400">
+                        <span className="w-14 shrink-0">{capability.answerLabel}</span>
+                        <input
+                          type="text"
+                          value={String(judgeTarget.props[capability.answerKey] ?? '')}
+                          disabled={targetLocked || !onTargetPropsChange}
+                          onChange={(event) => onTargetPropsChange?.(
+                            judgeTarget.id,
+                            capability.answerKey!,
+                            event.target.value,
+                          )}
+                          onBlur={onTargetPropsCommit}
+                          className="min-w-0 flex-1 border border-slate-600 bg-slate-700 px-1 py-0.5 text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </label>
+                    ) : (
+                      <div className="text-[10px] text-slate-500">
+                        {capability.kind === 'drag'
+                          ? '正确关系由拖拽对象与放置区域配置。'
+                          : '正确关系由连线项配置。'}
+                      </div>
+                    )}
+                    {targetLocked && <div className="mt-1 text-[10px] text-amber-400">目标已锁定，答案只能查看。</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {group.event === 'onClickInitBrush' && (
             <div className="flex items-center gap-1 mb-1">
               <span className="text-slate-500 w-7 shrink-0">{t('target')}</span>
@@ -381,7 +618,7 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
               </select>
             </div>
           )}
-          {group.event !== 'onAutoPlay' && group.event !== 'onAutoClick' && group.event !== 'onDragJudge' && group.event !== 'onChoiceJudge' && group.event !== 'onInputJudge' && group.event !== 'onMatchingJudge' && group.event !== 'onClickInitBrush' && group.event !== 'onInitBrush' && (() => {
+          {group.event !== SDK_JUDGE_EVENT && group.event !== 'onAutoPlay' && group.event !== 'onAutoClick' && group.event !== 'onDragJudge' && group.event !== 'onChoiceJudge' && group.event !== 'onInputJudge' && group.event !== 'onMatchingJudge' && group.event !== 'onClickInitBrush' && group.event !== 'onInitBrush' && (() => {
             const isInitConfirm = group.event === 'onClickInitConfirm' || group.event === 'onClickInitConfirmWithLock';
             const isInitGameConfirm = group.event === 'onClickInitGameConfirm' || group.event === 'onClickInitGameConfirmWithLock'
               || group.event === 'onClickInitGameConfirmCH' || group.event === 'onClickInitGameConfirmCHWithLock';
@@ -481,6 +718,24 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
                       </button>
                     )}
                   </div>
+
+                  {group.event === SDK_JUDGE_EVENT && ELEMENT_TARGET_ACTIONS.has(action.actionType) && (
+                    <div className="mb-1 flex items-center gap-1">
+                      <span className="w-12 shrink-0 text-slate-500">动作目标</span>
+                      <select
+                        value={action.targetId ?? ''}
+                        onChange={(event) => update(i, { targetId: event.target.value || undefined })}
+                        className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-700 px-1 py-0.5 text-slate-200"
+                      >
+                        <option value="">当前触发元素（{element.name ?? element.id}）</option>
+                        {allElements.filter((item) => item.id !== element.id).map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name ?? item.id} ({elementMeta[item.type]?.label ?? item.type})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* setProperty: 属性从目标组件的 properties 列表选择 */}
                   {action.actionType === 'setProperty' && (() => {
@@ -698,11 +953,12 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
               );
             };
 
-            // onDragJudge / onChoiceJudge / onInputJudge / onMatchingJudge：按 branchId 二次分组渲染子事件嵌套
-            if (group.event === 'onDragJudge' || group.event === 'onChoiceJudge' || group.event === 'onInputJudge' || group.event === 'onMatchingJudge') {
-              const branches = getBranches(group);
+            // 判定事件：按 branchId 二次分组渲染结果分支。
+            if (group.event === SDK_JUDGE_EVENT || group.event === 'onDragJudge' || group.event === 'onChoiceJudge' || group.event === 'onInputJudge' || group.event === 'onMatchingJudge') {
+              const isSdkJudge = group.event === SDK_JUDGE_EVENT;
+              let branches = getBranches(group);
               // 根据事件类型决定 condition 选项
-              const conditionOpts = group.event === 'onDragJudge'
+              let conditionOpts = group.event === 'onDragJudge'
                 ? [{ value: 'right', label: '全对' }, { value: 'wrong', label: '不全对' }]
                 : group.event === 'onChoiceJudge'
                 ? [{ value: 'right', label: '全对' }, { value: 'wrong', label: '没有全对' }, { value: 'null', label: '还没有选择' }]
@@ -710,32 +966,67 @@ export default function ActionEditor({ element, pages, allElements, onChange }: 
                 ? [{ value: 'right', label: '全对' }, { value: 'wrong', label: '没有全对' }, { value: 'null', label: '还没有连线' }]
                 : [{ value: 'right', label: '全对' }, { value: 'wrong', label: '没有全对' }, { value: 'null', label: '还没有填写' }];
 
+              if (group.event === SDK_JUDGE_EVENT) {
+                const judgeTarget = group.judgeTargetId
+                  ? allElements.find((item) => item.id === group.judgeTargetId)
+                  : undefined;
+                const capability = getSdkJudgeCapability(judgeTarget);
+                const supportedConditions = capability?.conditions
+                  ?? [...new Set(branches.map((branch) => branch.condition))];
+                branches = branches.filter((branch) => supportedConditions.includes(branch.condition));
+                conditionOpts = supportedConditions.map((condition) => ({
+                  value: condition,
+                  label: capability
+                    ? getSdkJudgeConditionLabel(capability, condition)
+                    : condition === 'right' ? '全对' : condition === 'wrong' ? '没有全对' : '还没有操作',
+                }));
+              }
+
               return branches.map((branch, bi) => (
                 <div key={branch.branchId} className="mt-2 p-2 bg-slate-800/40 rounded border border-slate-700/40">
                   <div className="flex items-center gap-1 mb-1">
-                    <span className="text-slate-400 shrink-0">子事件{bi + 1}</span>
-                    <select
-                      value={branch.condition}
-                      onChange={(e) => updateBranchCondition(group, branch.branchId, e.target.value as 'right' | 'wrong' | 'null')}
-                      className="flex-1 min-w-0 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
-                    >
-                      {conditionOpts.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                    </select>
-                    <button
-                      onClick={() => addBranch(group)}
-                      className="p-0.5 hover:bg-slate-600 rounded text-slate-400 hover:text-white"
-                      title="添加子事件"
-                    >
-                      <Plus size={11} />
-                    </button>
-                    {bi > 0 && (
-                      <button
-                        onClick={() => removeBranch(group, branch.branchId)}
-                        className="p-0.5 hover:bg-red-900/50 rounded text-slate-500 hover:text-red-400"
-                        title="删除子事件"
-                      >
-                        <X size={11} />
-                      </button>
+                    {isSdkJudge ? (
+                      <>
+                        <span className={`w-12 shrink-0 font-medium ${
+                          branch.condition === 'right'
+                            ? 'text-emerald-400'
+                            : branch.condition === 'wrong'
+                              ? 'text-red-400'
+                              : 'text-amber-300'
+                        }`}>
+                          {branch.condition === 'right' ? '正确' : branch.condition === 'wrong' ? '错误' : '未完成'}
+                        </span>
+                        <div className="min-w-0 flex-1 rounded bg-slate-800 px-1 py-0.5 text-slate-400">
+                          {conditionOpts.find((option) => option.value === branch.condition)?.label}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-slate-400 shrink-0">子事件{bi + 1}</span>
+                        <select
+                          value={branch.condition}
+                          onChange={(e) => updateBranchCondition(group, branch.branchId, e.target.value as JudgeCondition)}
+                          className="flex-1 min-w-0 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
+                        >
+                          {conditionOpts.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                        </select>
+                        <button
+                          onClick={() => addBranch(group)}
+                          className="p-0.5 hover:bg-slate-600 rounded text-slate-400 hover:text-white"
+                          title="添加子事件"
+                        >
+                          <Plus size={11} />
+                        </button>
+                        {bi > 0 && (
+                          <button
+                            onClick={() => removeBranch(group, branch.branchId)}
+                            className="p-0.5 hover:bg-red-900/50 rounded text-slate-500 hover:text-red-400"
+                            title="删除子事件"
+                          >
+                            <X size={11} />
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                   {branch.indices.map((i, ai) => renderActionRow(i, {

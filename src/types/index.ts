@@ -10,6 +10,10 @@ export interface Action {
   groupId?: string;              // ActionEditor: 同一 event+target 共享多个动作时分组用
   branchId?: string;             // 子事件分组：同 branchId 的 actions 同属一个子事件块
   branchCondition?: 'right' | 'wrong' | 'null'; // 子事件的判定条件（全对/不全对/还没操作）
+  /** SDK 判定目标。与动作 targetId 分开，结果分支仍可操作其他元素。 */
+  judgeTargetId?: string;
+  /** 判定目标删除后用于显示失效关系，不参与运行时引用。 */
+  judgeTargetNameSnapshot?: string;
   /** 内部页面动作目标。与元素 targetId 分开，避免页面和元素 ID 混用。 */
   pageTargetId?: string;
   /** 删除或移动目标后保留原名称，用于断链提示。 */

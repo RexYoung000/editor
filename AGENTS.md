@@ -66,6 +66,7 @@ pnpm build
 - 全局状态以 `src/store/editorStore.ts` 的 Zustand store 为唯一来源，不增加 Redux 或新的全局 Context。
 - 新组件字段进入 `Element.props`，并统一在 `src/elements/elementMeta.ts` 声明；不向 legacy 类型字段继续加属性，也不建立第二套组件元数据。
 - 编辑模式、预览模式、sdk_baiya 组件占位、属性应用顺序和特殊组件规则见 [docs/sdk-baiya-components.md](docs/sdk-baiya-components.md)；系统状态边界见 [docs/architecture.md](docs/architecture.md)。
+- 改事件、动作、判定目标、结果分支或关系校验前阅读 [docs/action-system.md](docs/action-system.md)，保持“事件属于触发元素、答案属于判定目标”的边界。
 
 ### 内置资源
 
