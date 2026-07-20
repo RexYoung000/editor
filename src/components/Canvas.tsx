@@ -528,6 +528,7 @@ export default function Canvas() {
       if (workbenchReadonly) return;
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (useEditorStore.getState().selectedEditorLayerGroupId) return;
         // locked 元素不允许删除
         if (currentPage) {
           selectedElementIds.forEach((id) => {

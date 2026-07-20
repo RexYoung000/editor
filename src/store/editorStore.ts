@@ -143,7 +143,7 @@ interface EditorState {
   addEditorLayerGroup: (name: string, elementIds?: string[]) => string | null;
   renameEditorLayerGroup: (groupId: string, name: string) => boolean;
   deleteEditorLayerGroup: (groupId: string, deleteContents?: boolean) => void;
-  setEditorLayerGroupMembers: (groupId: string | undefined, elementIds: string[]) => boolean;
+  setEditorLayerGroupMembers: (groupId: string | undefined, elementIds: string[], saveToHistory?: boolean) => boolean;
   setEditorLayerGroupParent: (groupId: string, parentGroupId: string | undefined) => boolean;
   reorderEditorLayerGroup: (fromIndex: number, toIndex: number) => void;
   moveElementIntoParent: (id: string) => ContainerGeometryActionResult;
@@ -216,6 +216,12 @@ function findCurrentSubPage(state: EditorState): SubPage | InternalPage | null {
   const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
   if (!subPage) return null;
   return getElementPage(subPage, state.currentInternalPageId).internalPage ?? subPage;
+}
+
+function releaseEmptyEditorLayerGroup(page: SubPage | InternalPage, groupId: string | undefined): void {
+  if (!groupId || page.elements.some((element) => element.groupId === groupId)) return;
+  const group = page.editorLayerGroups?.find((item) => item.id === groupId);
+  if (group) delete group.runtimeParentId;
 }
 
 function findStageOfSubPage(course: Course | null, subPageId: string | null): Stage | null {
@@ -1444,7 +1450,13 @@ export const useEditorStore = create<EditorState>()(
           element.props = { ...element.props, ...updates.props };
         }
         const { props: _p, ...rest } = updates;
+        const previousGroupId = element.groupId;
         Object.assign(element, rest);
+        if ('parentId' in rest && element.groupId) {
+          const editorGroup = page.editorLayerGroups?.find((group) => group.id === element.groupId);
+          if (editorGroup && editorGroup.runtimeParentId !== element.parentId) delete element.groupId;
+        }
+        releaseEmptyEditorLayerGroup(page, previousGroupId);
         if (updates.name && elementMeta[element.type]?.varFromName) {
           const otherVars = page.elements.filter(e => e.id !== id).map(e => (e.props?.var as string) || '');
           element.props.var = getUniqueElementName(updates.name, otherVars);
@@ -1593,7 +1605,7 @@ export const useEditorStore = create<EditorState>()(
       if (changed) get().saveHistory();
     },
 
-    setEditorLayerGroupMembers: (groupId, elementIds) => {
+    setEditorLayerGroupMembers: (groupId, elementIds, saveToHistory = true) => {
       let changed = false;
       set((state) => {
         const page = findCurrentSubPage(state);
@@ -1608,15 +1620,21 @@ export const useEditorStore = create<EditorState>()(
           }
         }
         const selected = new Set(elementIds);
+        const previousGroupIds = new Set(page.elements
+          .filter((element) => selected.has(element.id))
+          .map((element) => element.groupId)
+          .filter((id): id is string => Boolean(id)));
         page.elements.forEach((element) => {
           if (!selected.has(element.id)) return;
           if (element.groupId !== groupId) {
-            element.groupId = groupId;
+            if (groupId) element.groupId = groupId;
+            else delete element.groupId;
             changed = true;
           }
         });
+        previousGroupIds.forEach((previousGroupId) => releaseEmptyEditorLayerGroup(page, previousGroupId));
       });
-      if (changed) get().saveHistory();
+      if (changed && saveToHistory) get().saveHistory();
       return changed;
     },
 
@@ -1741,7 +1759,8 @@ export const useEditorStore = create<EditorState>()(
           if (parent && parent.type === 'NewBrushSprite') return;
         }
         const toDelete = new Set([id]);
-        if (el?.groupId) {
+        const explicitGroupIds = new Set(page.editorLayerGroups?.map((group) => group.id) ?? []);
+        if (el?.groupId && !explicitGroupIds.has(el.groupId)) {
           page.elements.forEach((e) => { if (e.groupId === el.groupId) toDelete.add(e.id); });
         }
         let changed = true;
@@ -1755,6 +1774,7 @@ export const useEditorStore = create<EditorState>()(
           });
         }
         page.elements = page.elements.filter((e) => !toDelete.has(e.id));
+        releaseEmptyEditorLayerGroup(page, el?.groupId);
         state.selectedElementIds = state.selectedElementIds.filter((eid) => !toDelete.has(eid));
         get().saveHistory();
       }),
@@ -1841,7 +1861,13 @@ export const useEditorStore = create<EditorState>()(
         const newOff = getAncestorOffset(newParentId);
         element.x += oldOff.ax - newOff.ax;
         element.y += oldOff.ay - newOff.ay;
+        const previousGroupId = element.groupId;
         element.parentId = newParentId || undefined;
+        if (element.groupId) {
+          const editorGroup = page.editorLayerGroups?.find((group) => group.id === element.groupId);
+          if (editorGroup && editorGroup.runtimeParentId !== element.parentId) delete element.groupId;
+        }
+        releaseEmptyEditorLayerGroup(page, previousGroupId);
 
         // [新增] 调整数组位置：子元素排在父容器所有现有子元素之后
         if (newParentId) {
@@ -1883,23 +1909,24 @@ export const useEditorStore = create<EditorState>()(
         const el = page?.elements.find((e) => e.id === id);
         state.selectedEditorLayerGroupId = null;
 
+        const explicitGroupIds = new Set(page?.editorLayerGroups?.map((group) => group.id) ?? []);
+        const targetIds = el?.groupId && page && !explicitGroupIds.has(el.groupId)
+          ? page.elements.filter((element) => element.groupId === el.groupId).map((element) => element.id)
+          : [id];
+
         if (multi) {
           // frozen 页面不允许取消锁定元素的选中
           if (page && 'frozen' in page && page.frozen && page.elements.some(e => e.locked && state.selectedElementIds.includes(e.id))) {
-            if (state.selectedElementIds.includes(id) && el?.locked) return;
+            if (targetIds.some((targetId) => state.selectedElementIds.includes(targetId) && page.elements.find((item) => item.id === targetId)?.locked)) return;
           }
-          if (state.selectedElementIds.includes(id)) {
-            state.selectedElementIds = state.selectedElementIds.filter((eid) => eid !== id);
+          const targetSet = new Set(targetIds);
+          if (targetIds.every((targetId) => state.selectedElementIds.includes(targetId))) {
+            state.selectedElementIds = state.selectedElementIds.filter((eid) => !targetSet.has(eid));
           } else {
-            state.selectedElementIds.push(id);
+            state.selectedElementIds = [...new Set([...state.selectedElementIds, ...targetIds])];
           }
         } else {
-          if (el?.groupId && page) {
-            const groupIds = page.elements.filter(e => e.groupId === el.groupId).map(e => e.id);
-            state.selectedElementIds = groupIds;
-          } else {
-            state.selectedElementIds = [id];
-          }
+          state.selectedElementIds = targetIds;
         }
       }),
 
@@ -2147,7 +2174,14 @@ export const useEditorStore = create<EditorState>()(
         const page = findCurrentSubPage(state);
         if (!page) return;
         const removing = new Set(ids);
+        const removingGroupIds = new Set(page.elements
+          .filter((element) => removing.has(element.id))
+          .map((element) => element.groupId)
+          .filter((id): id is string => Boolean(id)));
         page.elements = page.elements.filter((element) => !removing.has(element.id));
+        page.editorLayerGroups = getEditorLayerGroups(page).filter((group) => (
+          !removingGroupIds.has(group.id) || page.elements.some((element) => element.groupId === group.id)
+        ));
         state.selectedElementIds = state.selectedElementIds.filter((id) => !removing.has(id));
       }),
 
@@ -2258,8 +2292,11 @@ export const useEditorStore = create<EditorState>()(
         page.elements.forEach((element) => {
           if (element.groupId && isElementLocked(element, elementMap)) lockedGroupIds.add(element.groupId);
         });
+        const explicitGroupIds = new Set(getEditorLayerGroups(page).map((group) => group.id));
         page.elements.forEach((e) => {
-          if (state.selectedElementIds.includes(e.id) && e.groupId && !isElementLocked(e, elementMap) && !lockedGroupIds.has(e.groupId)) {
+          const selectedExplicitGroup = state.selectedEditorLayerGroupId === e.groupId && explicitGroupIds.has(e.groupId ?? '');
+          const selectedLegacyMember = state.selectedElementIds.includes(e.id) && !explicitGroupIds.has(e.groupId ?? '');
+          if ((selectedExplicitGroup || selectedLegacyMember) && e.groupId && !isElementLocked(e, elementMap) && !lockedGroupIds.has(e.groupId)) {
             groupIds.add(e.groupId);
           }
         });

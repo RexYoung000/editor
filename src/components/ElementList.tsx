@@ -20,6 +20,7 @@ type DropTarget =
   | {
     kind: 'reorder';
     parentId: string | undefined;
+    editorGroupId?: string;
     visualIndex: number;
     storageIndex: number;
   }
@@ -66,6 +67,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const elements = currentPage?.elements ?? [];
   const elementMap = createElementMap(elements);
   const layerGroups = currentPage ? resolveEditorLayerGroups(currentPage) : [];
+  const explicitLayerGroupIds = new Set(currentPage?.editorLayerGroups?.map((group) => group.id) ?? []);
   const pageFrozen = Boolean(currentPage && 'frozen' in currentPage && currentPage.frozen);
   const groupPreferenceKey = currentCourse && currentPage
     ? `forge.layer-groups.${currentCourse.id}.${currentPage.id}`
@@ -164,6 +166,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       setDropTarget({
         kind: 'reorder',
         parentId,
+        editorGroupId: el.groupId && explicitLayerGroupIds.has(el.groupId) ? el.groupId : undefined,
         visualIndex,
         storageIndex: visualDropToStorageIndex(siblings, draggedId, visualIndex),
       });
@@ -203,15 +206,30 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       // DropObj 只能放入 DragDropBox，DragObj 只能放入 DragDragBox
       if (draggedEl.type === 'DropObj' && targetEl?.type !== 'DragDropBox') { setDraggedId(null); setDropTarget(null); return; }
       if (draggedEl.type === 'DragObj' && targetEl?.type !== 'DragDragBox') { setDraggedId(null); setDropTarget(null); return; }
-      setElementParent(draggedId, dropTarget.containerId);
+      if (draggedEl.groupId && explicitLayerGroupIds.has(draggedEl.groupId)) {
+        setElementParent(draggedId, dropTarget.containerId, false);
+        setEditorLayerGroupMembers(undefined, [draggedId], false);
+        useEditorStore.getState().saveHistory();
+      } else {
+        setElementParent(draggedId, dropTarget.containerId);
+      }
     } else if (dropTarget.kind === 'reorder') {
-      if (draggedEl.parentId !== dropTarget.parentId) {
+      const targetGroupId = dropTarget.editorGroupId;
+      const currentGroupIsExplicit = Boolean(draggedEl.groupId && explicitLayerGroupIds.has(draggedEl.groupId));
+      const membershipWillChange = (currentGroupIsExplicit || Boolean(targetGroupId)) && draggedEl.groupId !== targetGroupId;
+      const targetGroup = targetGroupId ? layerGroups.find((group) => group.id === targetGroupId) : undefined;
+      if (targetGroupId && (!targetGroup || targetGroup.crossRuntimeParent || targetGroup.runtimeParentId !== dropTarget.parentId)) {
+        showToast('图层组只接收同一运行父级下的成员', 'error');
+        setDraggedId(null); setDropTarget(null); return;
+      }
+      if (draggedEl.parentId !== dropTarget.parentId || membershipWillChange) {
         // 跨容器 reorder 也需要约束检查
         const targetParent = dropTarget.parentId ? elements.find(el => el.id === dropTarget.parentId) : undefined;
         if (draggedEl.type === 'DropObj' && targetParent?.type !== 'DragDropBox') { setDraggedId(null); setDropTarget(null); return; }
         if (draggedEl.type === 'DragObj' && targetParent?.type !== 'DragDragBox') { setDraggedId(null); setDropTarget(null); return; }
-        setElementParent(draggedId, dropTarget.parentId || undefined, false);
+        if (draggedEl.parentId !== dropTarget.parentId) setElementParent(draggedId, dropTarget.parentId || undefined, false);
         reorderElement(draggedId, dropTarget.storageIndex, false);
+        if (membershipWillChange) setEditorLayerGroupMembers(targetGroupId, [draggedId], false);
         useEditorStore.getState().saveHistory();
       } else {
         reorderElement(draggedId, dropTarget.storageIndex);
@@ -236,11 +254,13 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     if (['DragDropBox', 'DragDragBox', 'DropObj', 'DragObj'].includes(draggedEl.type)) {
       setDraggedId(null); setDropTarget(null); return;
     }
-    if (draggedEl.parentId) {
-      setElementParent(draggedId, undefined, false);
+    const membershipWillChange = Boolean(draggedEl.groupId && explicitLayerGroupIds.has(draggedEl.groupId));
+    if (draggedEl.parentId || membershipWillChange) {
+      if (draggedEl.parentId) setElementParent(draggedId, undefined, false);
       if (dropTarget.kind === 'reorder') {
         reorderElement(draggedId, dropTarget.storageIndex, false);
       }
+      if (membershipWillChange) setEditorLayerGroupMembers(undefined, [draggedId], false);
       useEditorStore.getState().saveHistory();
     } else if (dropTarget.kind === 'reorder') {
       reorderElement(draggedId, dropTarget.storageIndex);
@@ -272,8 +292,11 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
 
   const topLevel = getVisualChildren(undefined);
 
-  const renderDropIndicator = (parentId: string | undefined, visualIndex: number) => {
-    if (dropTarget?.kind === 'reorder' && dropTarget.parentId === parentId && dropTarget.visualIndex === visualIndex) {
+  const renderDropIndicator = (parentId: string | undefined, visualIndex: number, editorGroupId?: string) => {
+    if (dropTarget?.kind === 'reorder'
+      && dropTarget.parentId === parentId
+      && dropTarget.editorGroupId === editorGroupId
+      && dropTarget.visualIndex === visualIndex) {
       return <div className="h-0.5 bg-blue-500 rounded mx-2" />;
     }
     return null;
@@ -291,12 +314,13 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     const isContainerTarget = dropTarget?.kind === 'into-container' && dropTarget.containerId === el.id;
     const children = getVisualChildren(el.id).filter((child) => !child.groupId);
     const parentId = el.parentId;
+    const editorGroupId = el.groupId && explicitLayerGroupIds.has(el.groupId) ? el.groupId : undefined;
     const layerName = getLayerDisplayName(el, meta?.label);
     const isEditingLayer = editingLayerId === el.id;
 
     return (
       <div key={el.id}>
-        {renderDropIndicator(parentId, visualIndex)}
+        {renderDropIndicator(parentId, visualIndex, editorGroupId)}
         <div
           className={`flex items-center gap-1 py-1 text-xs transition-colors ${
             isDragging ? 'opacity-40' :
@@ -371,7 +395,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             )}
             <span className="text-slate-500 text-[10px] shrink-0">{meta?.label || el.type}</span>
           </div>
-          {isSelected && !effectiveLocked && !pageFrozen && (
+          {isSelected && !selectedEditorLayerGroupId && !effectiveLocked && !pageFrozen && (
             <button onClick={() => { deleteElement(el.id); clearSelection(); }} className="p-0.5 hover:bg-red-900 rounded text-red-400" title={t('deleteElement')}><Trash2 size={11} /></button>
           )}
         </div>

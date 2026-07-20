@@ -173,6 +173,157 @@ test('图层组可以独立选中，并同步选择成员或保留空组选择',
   assert.equal(useEditorStore.getState().selectedEditorLayerGroupId, null);
 });
 
+test('显式图层组成员可单选，且一次点击即可切换到组外元素', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  useEditorStore.getState().setCurrentCourse({
+    id: 'layer-group-member-selection-course',
+    stages: [{
+      id: 'stage',
+      name: '关卡 1',
+      subPages: [{
+        id: 'page',
+        name: '页面',
+        elements: [element('first', undefined, 'group'), element('second', undefined, 'group'), element('outside')],
+        editorLayerGroups: [{ id: 'group', name: '素材' }],
+      }],
+    }],
+  });
+
+  useEditorStore.getState().selectEditorLayerGroup('group');
+  assert.deepEqual(useEditorStore.getState().selectedElementIds, ['first', 'second']);
+  useEditorStore.getState().selectElement('first');
+  assert.deepEqual(useEditorStore.getState().selectedElementIds, ['first']);
+  assert.equal(useEditorStore.getState().selectedEditorLayerGroupId, null);
+  useEditorStore.getState().selectElement('second', true);
+  assert.deepEqual(useEditorStore.getState().selectedElementIds, ['first', 'second']);
+  useEditorStore.getState().selectElement('outside');
+  assert.deepEqual(useEditorStore.getState().selectedElementIds, ['outside']);
+});
+
+test('删除显式图层组成员不影响同组成员，旧编组仍保持整组删除', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  useEditorStore.getState().setCurrentCourse({
+    id: 'layer-group-member-delete-course',
+    stages: [{
+      id: 'stage',
+      name: '关卡 1',
+      subPages: [{
+        id: 'page',
+        name: '页面',
+        elements: [element('first', undefined, 'group'), element('second', undefined, 'group')],
+        editorLayerGroups: [{ id: 'group', name: '素材' }],
+      }],
+    }],
+  });
+  useEditorStore.getState().deleteElement('first');
+  let pageState = useEditorStore.getState().currentCourse!.stages[0].subPages[0];
+  assert.deepEqual(pageState.elements.map((item) => item.id), ['second']);
+  assert.equal(pageState.editorLayerGroups?.[0].id, 'group');
+
+  useEditorStore.getState().setCurrentCourse({
+    id: 'legacy-group-delete-course',
+    stages: [{
+      id: 'stage',
+      name: '关卡 1',
+      subPages: [{
+        id: 'page',
+        name: '页面',
+        elements: [element('legacy-first', undefined, 'legacy'), element('legacy-second', undefined, 'legacy')],
+      }],
+    }],
+  });
+  useEditorStore.getState().deleteElement('legacy-first');
+  pageState = useEditorStore.getState().currentCourse!.stages[0].subPages[0];
+  assert.deepEqual(pageState.elements, []);
+});
+
+test('成员移出显式图层组可以与列表排序合并为一条历史', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  useEditorStore.getState().setCurrentCourse({
+    id: 'layer-group-member-exit-course',
+    stages: [{
+      id: 'stage',
+      name: '关卡 1',
+      subPages: [{
+        id: 'page',
+        name: '页面',
+        elements: [element('outside'), element('member', undefined, 'group')],
+        editorLayerGroups: [{ id: 'group', name: '素材' }],
+      }],
+    }],
+  });
+  const initialHistoryLength = useEditorStore.getState().history.length;
+  assert.equal(useEditorStore.getState().setEditorLayerGroupMembers(undefined, ['member'], false), true);
+  useEditorStore.getState().reorderElement('member', 0, false);
+  useEditorStore.getState().saveHistory();
+
+  const state = useEditorStore.getState();
+  const pageState = state.currentCourse!.stages[0].subPages[0];
+  assert.equal(state.history.length, initialHistoryLength + 1);
+  assert.equal(pageState.elements.find((item) => item.id === 'member')?.groupId, undefined);
+  state.undo();
+  assert.equal(useEditorStore.getState().currentCourse!.stages[0].subPages[0].elements.find((item) => item.id === 'member')?.groupId, 'group');
+});
+
+test('显式图层组只在组选中时响应解散快捷键，清空后可以接收其他运行父级', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  useEditorStore.getState().setCurrentCourse({
+    id: 'layer-group-dissolve-course',
+    stages: [{
+      id: 'stage',
+      name: '关卡 1',
+      subPages: [{
+        id: 'page',
+        name: '页面',
+        elements: [element('member', 'runtime-parent', 'group'), element('outside')],
+        editorLayerGroups: [{ id: 'group', name: '素材', runtimeParentId: 'runtime-parent' }],
+      }],
+    }],
+  });
+
+  useEditorStore.getState().selectElement('member');
+  useEditorStore.getState().ungroupElements();
+  let pageState = useEditorStore.getState().currentCourse!.stages[0].subPages[0];
+  assert.equal(pageState.editorLayerGroups?.[0].id, 'group');
+  assert.equal(pageState.elements.find((item) => item.id === 'member')?.groupId, 'group');
+
+  assert.equal(useEditorStore.getState().setEditorLayerGroupMembers(undefined, ['member']), true);
+  pageState = useEditorStore.getState().currentCourse!.stages[0].subPages[0];
+  assert.equal(pageState.editorLayerGroups?.[0].runtimeParentId, undefined);
+  assert.equal(useEditorStore.getState().setEditorLayerGroupMembers('group', ['outside']), true);
+
+  useEditorStore.getState().selectEditorLayerGroup('group');
+  useEditorStore.getState().ungroupElements();
+  pageState = useEditorStore.getState().currentCourse!.stages[0].subPages[0];
+  assert.deepEqual(pageState.editorLayerGroups, []);
+  assert.equal(pageState.elements.find((item) => item.id === 'outside')?.groupId, undefined);
+});
+
+test('取消图层组成员的拖动复制不会遗留空副本组', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  useEditorStore.getState().setCurrentCourse({
+    id: 'layer-group-drag-copy-cancel-course',
+    stages: [{
+      id: 'stage',
+      name: '关卡 1',
+      subPages: [{
+        id: 'page',
+        name: '页面',
+        elements: [element('member', undefined, 'group')],
+        editorLayerGroups: [{ id: 'group', name: '素材' }],
+      }],
+    }],
+  });
+
+  const duplicate = useEditorStore.getState().duplicateElementsForDrag(['member']);
+  assert.ok(duplicate);
+  let pageState = useEditorStore.getState().currentCourse!.stages[0].subPages[0];
+  assert.equal(pageState.editorLayerGroups?.length, 2);
+  useEditorStore.getState().removeElementsWithoutHistory(duplicate.allIds);
+  pageState = useEditorStore.getState().currentCourse!.stages[0].subPages[0];
+  assert.deepEqual(pageState.editorLayerGroups?.map((group) => group.id), ['group']);
+});
+
 test('快捷键编组写入一条历史，撤销后恢复未编组状态', async () => {
   const { useEditorStore } = await import('../src/store/editorStore');
   useEditorStore.getState().setCurrentCourse({

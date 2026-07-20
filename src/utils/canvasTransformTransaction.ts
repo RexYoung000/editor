@@ -115,9 +115,13 @@ function getElementWorldPivot(element: Element, elements: Element[]): CanvasPoin
   });
 }
 
-function createSnapshots(elements: Element[], selectedIds: string[]): TransformSnapshot[] {
+function createSnapshots(
+  elements: Element[],
+  selectedIds: string[],
+  editorLayerGroupIds: Iterable<string>,
+): TransformSnapshot[] {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
-  return getTransformRootIds(elements, selectedIds).flatMap((id) => {
+  return getTransformRootIds(elements, selectedIds, editorLayerGroupIds).flatMap((id) => {
     const element = elementMap.get(id);
     return element ? [{
       id,
@@ -134,15 +138,15 @@ function createSnapshots(elements: Element[], selectedIds: string[]): TransformS
 export function getSelectionFrame(
   elements: Element[],
   selectedIds: string[],
-  options: { includeLocked?: boolean } = {},
+  options: { includeLocked?: boolean; editorLayerGroupIds?: Iterable<string> } = {},
 ): SelectionFrame | null {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
   const rootIds = options.includeLocked
-    ? normalizeSelection(elements, selectedIds).filter((id) => {
+    ? normalizeSelection(elements, selectedIds, undefined, options.editorLayerGroupIds).filter((id) => {
       const element = elementMap.get(id);
       return element ? !isElementHidden(element, elementMap) : false;
     })
-    : getTransformRootIds(elements, selectedIds);
+    : getTransformRootIds(elements, selectedIds, options.editorLayerGroupIds);
   const roots = rootIds.flatMap((id) => {
     const element = elementMap.get(id);
     return element ? [element] : [];
@@ -165,9 +169,10 @@ export function createMoveTransaction(
   elements: Element[],
   selectedIds: string[],
   primaryId: string,
+  editorLayerGroupIds: Iterable<string> = [],
 ): MoveTransaction | null {
-  const roots = createSnapshots(elements, selectedIds);
-  const frame = getSelectionFrame(elements, selectedIds);
+  const roots = createSnapshots(elements, selectedIds, editorLayerGroupIds);
+  const frame = getSelectionFrame(elements, selectedIds, { editorLayerGroupIds });
   if (!frame || !roots.some((item) => item.id === primaryId)) return null;
   return {
     kind: 'move',
@@ -253,9 +258,10 @@ export function createResizeTransaction(
   elements: Element[],
   selectedIds: string[],
   handle: TransformHandle,
+  editorLayerGroupIds: Iterable<string> = [],
 ): ResizeTransaction | null {
-  const roots = createSnapshots(elements, selectedIds);
-  const frame = getSelectionFrame(elements, selectedIds);
+  const roots = createSnapshots(elements, selectedIds, editorLayerGroupIds);
+  const frame = getSelectionFrame(elements, selectedIds, { editorLayerGroupIds });
   if (!frame || roots.length === 0 || frame.width < 0.000001 || frame.height < 0.000001) return null;
   return {
     kind: 'resize',
@@ -347,9 +353,10 @@ export function createRotateTransaction(
   elements: Element[],
   selectedIds: string[],
   pointer: CanvasPoint,
+  editorLayerGroupIds: Iterable<string> = [],
 ): RotateTransaction | null {
-  const roots = createSnapshots(elements, selectedIds);
-  const frame = getSelectionFrame(elements, selectedIds);
+  const roots = createSnapshots(elements, selectedIds, editorLayerGroupIds);
+  const frame = getSelectionFrame(elements, selectedIds, { editorLayerGroupIds });
   if (!frame || roots.length === 0) return null;
   const center = getFrameCenter(frame);
   return {
