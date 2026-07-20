@@ -139,6 +139,7 @@ const KL_INPUT_IMAGE_CONFIG = {
   runtime: 'com.klzz.ui.custom.KeyBoard.KlInputImage',
   defaultProps: {
     anchorX: 0, anchorY: 0,
+    _judgeAnswer: '',
     place: 4,
     sheet: '0123456789°+-*/=().',
     fontClipSkin: assetExport('klInput.font'),
@@ -151,7 +152,7 @@ const KL_INPUT_IMAGE_CONFIG = {
     { type: 'Image', props: { skin: assetExport('klInput.wrong'),  sizeGrid: '10,10,10,10', name: 'wrong',   top: -2, right: -2, left: -2, bottom: -2, visible: false } },
   ],
   properties: [
-    { key: 'answer',        label: '正确答案',  type: 'text', group: '交互' },
+    { key: '_judgeAnswer',  label: '正确答案',  type: 'text', group: '交互' },
     { key: 'place',         label: '输入位数',  type: 'number', min: 1 },
     { key: 'sheet',         label: '可输入字符', type: 'text' },
     { key: 'fontClipSkin',  label: '字体图皮肤', type: 'file', group: '外观' },
@@ -300,7 +301,7 @@ export const elementMeta: Record<string, Meta> = {
       { key: 'leading', label: '行间距', type: 'number', min: 0, group: '文本' },
     ],
   },
-  KlInputImage: { layaType: 'KlInputImage', label: '输入框', category: 'commonComponents', defaultSize: { width: 120, height: 60 }, placeholderImage: assetSrc('klInput.placeholder'), defaultProps: { ...KL_INPUT_IMAGE_CONFIG.defaultProps }, runtime: KL_INPUT_IMAGE_CONFIG.runtime, exportChildren: KL_INPUT_IMAGE_CONFIG.exportChildren, properties: [...COMMON_STATE_PROPS, ...KL_INPUT_IMAGE_CONFIG.properties.filter(p => p.key !== 'keyBoradID' && p.key !== 'pattern' && p.key !== 'answer')] },
+  KlInputImage: { layaType: 'KlInputImage', label: '输入框', category: 'commonComponents', defaultSize: { width: 120, height: 60 }, placeholderImage: assetSrc('klInput.placeholder'), defaultProps: { ...KL_INPUT_IMAGE_CONFIG.defaultProps }, runtime: KL_INPUT_IMAGE_CONFIG.runtime, exportChildren: KL_INPUT_IMAGE_CONFIG.exportChildren, properties: [...COMMON_STATE_PROPS, ...KL_INPUT_IMAGE_CONFIG.properties.filter(p => p.key !== 'keyBoradID' && p.key !== 'pattern')] },
   KlBaseKeyboard: {
     layaType: 'KlBaseKeyboard',
     label: '键盘',

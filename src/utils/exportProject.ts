@@ -1197,12 +1197,16 @@ export function buildSdkJudgeClickInitCode(
         return parts.join(' ');
       };
 
-      const rightCheck = capability.kind === 'input'
+      const rightCheck = capability.kind === 'inputImage'
+        ? `!${targetRef}.valueOrSkinIsNull && ${targetRef}.fontClipValue === ${JSON.stringify(String(target.props._judgeAnswer ?? ''))}`
+        : capability.kind === 'input'
         ? `${targetRef}.isRight()`
         : capability.kind === 'drag'
           ? `${targetRef}.dragsOnRightDrops()`
           : `${targetRef}.${capability.kind === 'matching' ? 'allRight' : 'isRight'}`;
-      const nullCheck = capability.kind === 'input' || capability.kind === 'matching'
+      const nullCheck = capability.kind === 'inputImage'
+        ? `${targetRef}.valueOrSkinIsNull`
+        : capability.kind === 'input' || capability.kind === 'matching'
         ? `${targetRef}.isNull()`
         : capability.kind === 'choice'
           ? `${targetRef}.isNull`

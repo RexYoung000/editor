@@ -514,7 +514,7 @@ export default function PropertyPanel() {
       }
       const newProps: Record<string, unknown> = { ...el.props, [key]: value };
       // 输入框：可输入位数 = 正确答案位数 + 1
-      if (el.type === 'KlInputImage' && key === 'answer') {
+      if (el.type === 'KlInputImage' && key === '_judgeAnswer') {
         newProps.place = String(value ?? '').length + 1;
       }
       updateElement(el.id, { props: newProps } as Partial<Element>);

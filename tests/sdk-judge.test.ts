@@ -79,12 +79,15 @@ function activePage(course: Course, preview = false): SubPage {
 }
 
 test('SDK 判定目标矩阵只接受现有题型组件并返回真实结果能力', () => {
+  const inputImage = element('input-image', 'KlInputImage');
   const input = element('input', 'KlInputBox');
   const choice = element('choice', 'ChoiceBox');
   const drag = element('drag', 'DragViewBox');
   const matching = element('matching', 'MatchingGame');
   const image = element('image', 'Image');
 
+  assert.deepEqual(getSdkJudgeCapability(inputImage)?.conditions, ['right', 'wrong', 'null']);
+  assert.equal(getSdkJudgeCapability(inputImage)?.answerKey, '_judgeAnswer');
   assert.deepEqual(getSdkJudgeCapability(input)?.conditions, ['right', 'wrong', 'null']);
   assert.equal(getSdkJudgeCapability(input)?.answerKey, 'answer');
   assert.deepEqual(getSdkJudgeCapability(choice)?.conditions, ['right', 'wrong', 'null']);
@@ -92,6 +95,26 @@ test('SDK 判定目标矩阵只接受现有题型组件并返回真实结果能�
   assert.deepEqual(getSdkJudgeCapability(drag)?.conditions, ['right', 'wrong']);
   assert.deepEqual(getSdkJudgeCapability(matching)?.conditions, ['right', 'wrong', 'null']);
   assert.equal(isSdkJudgeTarget(image), false);
+});
+
+test('独立输入格使用编辑器答案生成正确、错误和未完成判定', () => {
+  const input = element('single-input', 'KlInputImage', { props: { _judgeAnswer: '8' } });
+  const trigger = element('single-trigger', 'Image', { actions: judgeActions(input) });
+  const page: SubPage = { id: 'page', name: '页面', elements: [trigger, input] };
+  const code = buildSdkJudgeClickInitCode(
+    page,
+    (item) => item.name ?? item.id,
+    (action) => `run_${action.branchCondition};`,
+    true,
+  );
+
+  assert.match(code, /!this\.single_input\.valueOrSkinIsNull/);
+  assert.match(code, /this\.single_input\.fontClipValue === "8"/);
+  assert.match(code, /else if \(this\.single_input\.valueOrSkinIsNull\)/);
+  assert.match(code, /this\.result = true/);
+  assert.match(code, /this\.result = false/);
+  assert.match(code, /this\.result = null/);
+  assert.doesNotMatch(code, /\.isRight\(\)/);
 });
 
 test('通用点击判定分离判定目标与结果动作目标', () => {
@@ -149,7 +172,7 @@ test('失效或不兼容的判定目标不会生成悬空运行代码', () => {
 
 test('正常课、作业和预习导出都生成通用点击判定', () => {
   const normal = normalCourseFixture();
-  const normalInput = element('normal-judge-input', 'KlInputBox', { props: { answer: '8' } });
+  const normalInput = element('normal-judge-input', 'KlInputImage', { props: { _judgeAnswer: '8' } });
   const normalFeedback = element('normal-judge-feedback', 'Image');
   const normalTrigger = element('normal-judge-trigger', 'Image', {
     actions: judgeActions(normalInput, normalFeedback),
@@ -158,13 +181,17 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   const normalArtifacts = buildExportRegressionArtifacts(normal, regressionImageSizes('game_lt'));
   const normalSource = normalArtifacts.scenes[0].source;
   assert.match(normalSource, /this\.normal_judge_trigger\.on\(Laya\.Event\.CLICK/);
-  assert.match(normalSource, /this\.normal_judge_input\.isRight\(\)/);
+  assert.match(normalSource, /!this\.normal_judge_input\.valueOrSkinIsNull/);
+  assert.match(normalSource, /this\.normal_judge_input\.fontClipValue === "8"/);
   assert.match(normalSource, /this\.normal_judge_feedback/);
+  assert.doesNotMatch(JSON.stringify(normalArtifacts.scenes[0].scene), /_judgeAnswer/);
 
   const homework = homeworkCourseFixture();
   const homeworkChoice = element('homework-choice', 'ChoiceBox', { props: { rightItemNames: 'B' } });
   const homeworkTrigger = element('homework-trigger', 'Image', { actions: judgeActions(homeworkChoice) });
-  activePage(homework).elements.push(homeworkTrigger, homeworkChoice);
+  const homeworkInput = element('homework-input', 'KlInputImage', { props: { _judgeAnswer: 'B' } });
+  const homeworkInputTrigger = element('homework-input-trigger', 'Image', { actions: judgeActions(homeworkInput) });
+  activePage(homework).elements.push(homeworkTrigger, homeworkChoice, homeworkInputTrigger, homeworkInput);
   const homeworkSource = buildExportRegressionArtifacts(
     homework,
     regressionImageSizes('game_hw'),
@@ -172,11 +199,19 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   assert.match(homeworkSource, /this\.homework_trigger\.on\(Laya\.Event\.CLICK/);
   assert.match(homeworkSource, /this\.homework_choice\.isNull/);
   assert.match(homeworkSource, /this\.result = null/);
+  assert.match(homeworkSource, /this\.homework_input\.fontClipValue === "B"/);
 
   const preview = previewCourseFixture();
   const previewMatching = element('preview-matching', 'MatchingGame');
   const previewTrigger = element('preview-trigger', 'Image', { actions: judgeActions(previewMatching) });
-  activePage(preview, true).elements.push(previewTrigger, previewMatching);
+  const previewInput = element('preview-input', 'KlInputImage', { props: { _judgeAnswer: 'A' } });
+  const previewInputTrigger = element('preview-input-trigger', 'Image', { actions: judgeActions(previewInput) });
+  activePage(preview, true).elements.push(
+    previewTrigger,
+    previewMatching,
+    previewInputTrigger,
+    previewInput,
+  );
   const previewSource = buildPreviewExportRegressionArtifacts(
     preview,
     regressionImageSizes('game_preview'),
@@ -184,4 +219,5 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   assert.match(previewSource, /this\.preview_trigger\.on\(Laya\.Event\.CLICK/);
   assert.match(previewSource, /this\.preview_matching\.allRight/);
   assert.match(previewSource, /this\.preview_matching\.isNull\(\)/);
+  assert.match(previewSource, /this\.preview_input\.fontClipValue === "A"/);
 });

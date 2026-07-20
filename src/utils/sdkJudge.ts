@@ -3,12 +3,12 @@ import type { Action, Element } from '../types';
 export const SDK_JUDGE_EVENT = 'onClickSdkJudge';
 
 export type JudgeCondition = NonNullable<Action['branchCondition']>;
-export type SdkJudgeTargetKind = 'input' | 'choice' | 'drag' | 'matching';
+export type SdkJudgeTargetKind = 'inputImage' | 'input' | 'choice' | 'drag' | 'matching';
 
 export interface SdkJudgeCapability {
   kind: SdkJudgeTargetKind;
   conditions: JudgeCondition[];
-  answerKey?: 'answer' | 'rightItemNames';
+  answerKey?: '_judgeAnswer' | 'answer' | 'rightItemNames';
   answerLabel?: string;
   emptyLabel?: string;
 }
@@ -18,6 +18,15 @@ const TWO_STATE: JudgeCondition[] = ['right', 'wrong'];
 
 export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCapability | null {
   if (!element) return null;
+  if (element.type === 'KlInputImage') {
+    return {
+      kind: 'inputImage',
+      conditions: THREE_STATE,
+      answerKey: '_judgeAnswer',
+      answerLabel: '正确答案',
+      emptyLabel: '还没有填写',
+    };
+  }
   if (element.type === 'KlInputBox') {
     return {
       kind: 'input',
@@ -57,6 +66,10 @@ export function getSdkJudgeConditionLabel(
   capability: SdkJudgeCapability,
   condition: JudgeCondition,
 ): string {
+  if (capability.kind === 'inputImage') {
+    if (condition === 'right') return '答案正确';
+    if (condition === 'wrong') return '答案错误';
+  }
   if (condition === 'right') return '全对';
   if (condition === 'wrong') return '没有全对';
   return capability.emptyLabel ?? '还没有操作';

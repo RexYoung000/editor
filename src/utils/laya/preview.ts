@@ -76,9 +76,12 @@ function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | nul
     : undefined;
   const capability = getSdkJudgeCapability(target);
   const targetObject = target ? objects().get(target.id) : undefined;
-  if (!capability || !targetObject) return null;
+  if (!target || !capability || !targetObject) return null;
 
-  const isRight = capability.kind === 'input'
+  const isRight = capability.kind === 'inputImage'
+    ? !targetObject.valueOrSkinIsNull
+      && String(targetObject.fontClipValue ?? '') === String(target.props._judgeAnswer ?? '')
+    : capability.kind === 'input'
     ? Boolean(targetObject.isRight?.())
     : capability.kind === 'drag'
       ? Boolean(targetObject.dragsOnRightDrops?.())
@@ -88,7 +91,9 @@ function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | nul
   if (isRight) return 'right';
   if (!capability.conditions.includes('null')) return 'wrong';
 
-  const isNull = capability.kind === 'choice'
+  const isNull = capability.kind === 'inputImage'
+    ? Boolean(targetObject.valueOrSkinIsNull)
+    : capability.kind === 'choice'
     ? Boolean(targetObject.isNull)
     : Boolean(targetObject.isNull?.());
   return isNull ? 'null' : 'wrong';
