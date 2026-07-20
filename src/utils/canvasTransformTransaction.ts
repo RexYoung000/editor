@@ -8,7 +8,7 @@ import {
   worldDeltaToElementParent,
   type CanvasPoint,
 } from './canvasGeometry';
-import { getTransformRootIds } from './canvasSelection';
+import { getTransformRootIds, normalizeSelection, isElementHidden } from './canvasSelection';
 
 export type TransformHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -131,9 +131,19 @@ function createSnapshots(elements: Element[], selectedIds: string[]): TransformS
   });
 }
 
-export function getSelectionFrame(elements: Element[], selectedIds: string[]): SelectionFrame | null {
+export function getSelectionFrame(
+  elements: Element[],
+  selectedIds: string[],
+  options: { includeLocked?: boolean } = {},
+): SelectionFrame | null {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
-  const roots = getTransformRootIds(elements, selectedIds).flatMap((id) => {
+  const rootIds = options.includeLocked
+    ? normalizeSelection(elements, selectedIds).filter((id) => {
+      const element = elementMap.get(id);
+      return element ? !isElementHidden(element, elementMap) : false;
+    })
+    : getTransformRootIds(elements, selectedIds);
+  const roots = rootIds.flatMap((id) => {
     const element = elementMap.get(id);
     return element ? [element] : [];
   });

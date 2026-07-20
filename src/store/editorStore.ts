@@ -21,6 +21,7 @@ import { getObject, removeObject, createLayaComponent, registerObject } from '..
 import { getElementParentContainment, getFitContainerToChildrenUpdates } from '../utils/canvasGeometry';
 import { isContainerElementType } from '../utils/elementContainers';
 import { getLayerDisplayName, getNextLayerCopyName, withLayerLabel } from '../utils/layerPresentation';
+import { isElementLocked } from '../utils/layerState';
 import {
   cloneInternalPageWithinSubPage,
   cloneSubPageWithNewIds,
@@ -132,6 +133,10 @@ interface EditorState {
 
   addElement: (element: Element) => void;
   updateElement: (id: string, updates: Partial<Element>) => void;
+  setElementEditorHidden: (id: string, hidden: boolean) => void;
+  setElementsEditorHidden: (ids: string[], hidden: boolean) => void;
+  setElementLocked: (id: string, locked: boolean) => void;
+  setElementsLocked: (ids: string[], locked: boolean) => void;
   moveElementIntoParent: (id: string) => ContainerGeometryActionResult;
   fitContainerToChildren: (id: string) => ContainerGeometryActionResult;
   deleteElement: (id: string) => void;
@@ -201,18 +206,6 @@ function findCurrentSubPage(state: EditorState): SubPage | InternalPage | null {
   const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
   if (!subPage) return null;
   return getElementPage(subPage, state.currentInternalPageId).internalPage ?? subPage;
-}
-
-function isLockedByHierarchy(element: Element, elements: Element[]): boolean {
-  const elementMap = new Map(elements.map((item) => [item.id, item]));
-  const visited = new Set<string>();
-  let current: Element | undefined = element;
-  while (current && !visited.has(current.id)) {
-    if (current.locked) return true;
-    visited.add(current.id);
-    current = current.parentId ? elementMap.get(current.parentId) : undefined;
-  }
-  return false;
 }
 
 function findStageOfSubPage(course: Course | null, subPageId: string | null): Stage | null {
@@ -1422,8 +1415,9 @@ export const useEditorStore = create<EditorState>()(
         if (!page) return;
         const element = page.elements.find((e) => e.id === id);
         if (!element) return;
-        // locked 元素只允许修改 props（如 videoUrl），不允许修改位置/尺寸
-        if (element.locked) {
+        // 锁定元素仍允许内部流程更新资源 props，但不允许改动内容结构或几何。
+        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
+        if (isElementLocked(element, elementMap)) {
           if (updates.props) {
             element.props = { ...element.props, ...updates.props };
           }
@@ -1440,6 +1434,49 @@ export const useEditorStore = create<EditorState>()(
         }
       }),
 
+    setElementEditorHidden: (id, hidden) => {
+      get().setElementsEditorHidden([id], hidden);
+    },
+
+    setElementsEditorHidden: (ids, hidden) => {
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page || ('frozen' in page && page.frozen)) return;
+        const selected = new Set(ids);
+        page.elements.forEach((element) => {
+          if (!selected.has(element.id)) return;
+          const current = (element.props as Record<string, unknown>)._editorHidden === true;
+          if (current === hidden) return;
+          const nextProps = { ...element.props };
+          if (hidden) nextProps._editorHidden = true;
+          else delete nextProps._editorHidden;
+          element.props = nextProps;
+          changed = true;
+        });
+      });
+      if (changed) get().saveHistory();
+    },
+
+    setElementLocked: (id, locked) => {
+      get().setElementsLocked([id], locked);
+    },
+
+    setElementsLocked: (ids, locked) => {
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page || ('frozen' in page && page.frozen)) return;
+        const selected = new Set(ids);
+        page.elements.forEach((element) => {
+          if (!selected.has(element.id) || element.locked === locked) return;
+          element.locked = locked;
+          changed = true;
+        });
+      });
+      if (changed) get().saveHistory();
+    },
+
     moveElementIntoParent: (id) => {
       let result: ContainerGeometryActionResult = { ok: false, error: '未找到子元素' };
       let changed = false;
@@ -1451,7 +1488,7 @@ export const useEditorStore = create<EditorState>()(
           result = { ok: false, error: '当前元素不在容器中' };
           return;
         }
-        if (isLockedByHierarchy(element, page.elements)) {
+        if (isElementLocked(element, new Map(page.elements.map((item) => [item.id, item])))) {
           result = { ok: false, error: '元素或父容器已锁定，无法移动' };
           return;
         }
@@ -1488,7 +1525,7 @@ export const useEditorStore = create<EditorState>()(
           result = { ok: false, error: '目标元素不是可扩展容器' };
           return;
         }
-        if (isLockedByHierarchy(container, page.elements)) {
+        if (isElementLocked(container, new Map(page.elements.map((item) => [item.id, item])))) {
           result = { ok: false, error: '父容器已锁定，无法扩展' };
           return;
         }
@@ -1521,7 +1558,7 @@ export const useEditorStore = create<EditorState>()(
         const page = findCurrentSubPage(state);
         if (!page) return;
         const el = page.elements.find((e) => e.id === id);
-        if (el?.locked) return;
+        if (el && isElementLocked(el, new Map(page.elements.map((item) => [item.id, item])))) return;
         if (el && (el.type === 'BrushDrawBtn' || el.type === 'BrushClearBtn')) {
           const parent = el.parentId ? page.elements.find((e) => e.id === el.parentId) : null;
           if (parent && parent.type === 'NewBrushSprite') return;
@@ -1551,7 +1588,7 @@ export const useEditorStore = create<EditorState>()(
         const page = findCurrentSubPage(state);
         if (!page) return;
         const element = page.elements.find((e) => e.id === id);
-        if (!element || element.locked) return;
+        if (!element || isElementLocked(element, new Map(page.elements.map((item) => [item.id, item])))) return;
         const parentId = element.parentId;
         // Collect siblings in their current flat-array order
         const siblings = page.elements.filter((e) => e.parentId === parentId);
@@ -1580,7 +1617,7 @@ export const useEditorStore = create<EditorState>()(
     moveElementLayer: (id, direction) => {
       const page = findCurrentSubPage(get());
       const element = page?.elements.find((item) => item.id === id);
-      if (!page || !element || element.locked) return;
+      if (!page || !element || isElementLocked(element, new Map(page.elements.map((item) => [item.id, item])))) return;
       const siblings = page.elements.filter((item) => item.parentId === element.parentId);
       const currentIndex = siblings.findIndex((item) => item.id === id);
       if (currentIndex < 0) return;
@@ -1600,7 +1637,7 @@ export const useEditorStore = create<EditorState>()(
         const page = findCurrentSubPage(state);
         if (!page) return;
         const element = page.elements.find((e) => e.id === id);
-        if (!element || element.locked) return;
+        if (!element || isElementLocked(element, new Map(page.elements.map((item) => [item.id, item])))) return;
         if (newParentId) {
           if (newParentId === id) return;
           let pid: string | undefined = newParentId;
@@ -1869,9 +1906,10 @@ export const useEditorStore = create<EditorState>()(
         const page = findCurrentSubPage(state);
         if (!page) return;
         const updateMap = new Map(updates.map((update) => [update.id, update]));
+        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
         for (const element of page.elements) {
           const update = updateMap.get(element.id);
-          if (!update) continue;
+          if (!update || isElementLocked(element, elementMap)) continue;
           element.x = update.x;
           element.y = update.y;
           element.width = update.width;
@@ -1893,7 +1931,8 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
-        const els = page.elements.filter((e) => state.selectedElementIds.includes(e.id));
+        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
+        const els = page.elements.filter((e) => state.selectedElementIds.includes(e.id) && !isElementLocked(e, elementMap));
         if (els.length < 2) return;
 
         switch (direction) {
@@ -1962,9 +2001,15 @@ export const useEditorStore = create<EditorState>()(
         if (state.selectedElementIds.length < 2) return;
         const page = findCurrentSubPage(state);
         if (!page) return;
+        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
+        const selectedIds = new Set(state.selectedElementIds.filter((id) => {
+          const element = elementMap.get(id);
+          return element && !isElementLocked(element, elementMap);
+        }));
+        if (selectedIds.size < 2) return;
         const gid = `group-${Date.now()}`;
         page.elements.forEach((e) => {
-          if (state.selectedElementIds.includes(e.id)) e.groupId = gid;
+          if (selectedIds.has(e.id)) e.groupId = gid;
         });
         get().saveHistory();
       }),
@@ -1973,12 +2018,19 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
+        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
         const groupIds = new Set<string>();
-        page.elements.forEach((e) => {
-          if (state.selectedElementIds.includes(e.id) && e.groupId) groupIds.add(e.groupId);
+        const lockedGroupIds = new Set<string>();
+        page.elements.forEach((element) => {
+          if (element.groupId && isElementLocked(element, elementMap)) lockedGroupIds.add(element.groupId);
         });
         page.elements.forEach((e) => {
-          if (e.groupId && groupIds.has(e.groupId)) e.groupId = undefined;
+          if (state.selectedElementIds.includes(e.id) && e.groupId && !isElementLocked(e, elementMap) && !lockedGroupIds.has(e.groupId)) {
+            groupIds.add(e.groupId);
+          }
+        });
+        page.elements.forEach((e) => {
+          if (e.groupId && groupIds.has(e.groupId) && !isElementLocked(e, elementMap)) e.groupId = undefined;
         });
         get().saveHistory();
       }),

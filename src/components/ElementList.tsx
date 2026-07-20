@@ -1,7 +1,7 @@
 import { useState, type ReactElement } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
-import { Trash2, Eye, EyeOff, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Lock, Unlock, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import { findActiveElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
@@ -12,6 +12,7 @@ import {
   visualDropToStorageIndex,
   withLayerLabel,
 } from '../utils/layerPresentation';
+import { createElementMap, getElementLayerState } from '../utils/layerState';
 
 type DropTarget =
   | {
@@ -35,6 +36,10 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement = useEditorStore((s) => s.selectElement);
   const updateElement = useEditorStore((s) => s.updateElement);
+  const setElementEditorHidden = useEditorStore((s) => s.setElementEditorHidden);
+  const setElementsEditorHidden = useEditorStore((s) => s.setElementsEditorHidden);
+  const setElementLocked = useEditorStore((s) => s.setElementLocked);
+  const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const reorderElement = useEditorStore((s) => s.reorderElement);
   const setElementParent = useEditorStore((s) => s.setElementParent);
@@ -48,6 +53,8 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
 
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
   const elements = currentPage?.elements ?? [];
+  const elementMap = createElementMap(elements);
+  const pageFrozen = Boolean(currentPage && 'frozen' in currentPage && currentPage.frozen);
 
   if (!currentPage) return null;
 
@@ -74,7 +81,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   };
 
   const handleDragStart = (e: React.DragEvent, el: typeof elements[0]) => {
-    if (el.locked) { e.preventDefault(); return; }
+    if (getElementLayerState(el, elementMap).effectiveLocked || pageFrozen) { e.preventDefault(); return; }
     setDraggedId(el.id);
     setDropTarget(null);
     e.dataTransfer.effectAllowed = 'move';
@@ -200,7 +207,11 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const renderEl = (el: typeof elements[0], depth: number, visualIndex: number): ReactElement => {
     const meta = elementMeta[el.type];
     const isSelected = selectedElementIds.includes(el.id);
-    const editorHidden = (el.props as Record<string, unknown>)?._editorHidden === true;
+    const layerState = getElementLayerState(el, elementMap);
+    const editorHidden = layerState.explicitHidden;
+    const inheritedHidden = Boolean(layerState.hiddenById);
+    const inheritedLocked = Boolean(layerState.lockedById);
+    const effectiveLocked = layerState.effectiveLocked;
     const isDragging = draggedId === el.id;
     const isContainerTarget = dropTarget?.kind === 'into-container' && dropTarget.containerId === el.id;
     const children = getVisualChildren(el.id);
@@ -216,22 +227,33 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             isDragging ? 'opacity-40' :
             isContainerTarget ? 'ring-2 ring-blue-500 rounded mx-1' :
             isSelected ? 'bg-blue-600/30 text-blue-300' :
-            editorHidden ? 'text-slate-500 opacity-50 hover:bg-slate-700' :
+            layerState.effectiveHidden ? 'text-slate-500 opacity-50 hover:bg-slate-700' :
+            inheritedLocked ? 'text-amber-200/80 hover:bg-slate-700' :
             'text-slate-300 hover:bg-slate-700'
           }`}
           style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px' }}
-          draggable={!el.locked}
+          draggable={!effectiveLocked && !pageFrozen}
           onDragStart={(e) => handleDragStart(e, el)}
           onDragEnd={handleDragEnd}
           onDragOver={(e) => handleDragOverRow(e, el)}
           onDrop={handleDropRow}
         >
           <button
-            onClick={() => updateElement(el.id, { props: { ...el.props, _editorHidden: !editorHidden } })}
-            className={`p-0.5 shrink-0 rounded ${editorHidden ? 'text-slate-600 hover:text-slate-400' : 'text-slate-400 hover:text-slate-200'}`}
-            title={editorHidden ? '显示' : '隐藏'}
+            onClick={(event) => { event.stopPropagation(); setElementEditorHidden(el.id, !editorHidden); }}
+            className={`p-0.5 shrink-0 rounded ${layerState.effectiveHidden ? (inheritedHidden ? 'text-amber-400 hover:text-amber-200' : 'text-slate-600 hover:text-slate-400') : 'text-slate-400 hover:text-slate-200'}`}
+            title={inheritedHidden ? `受父级隐藏：${getLayerDisplayName(elementMap.get(layerState.hiddenById!)!, elementMeta[elementMap.get(layerState.hiddenById!)!.type]?.label)}` : (editorHidden ? '显示此图层' : '隐藏此图层')}
+            aria-label={inheritedHidden ? '受父级隐藏' : (editorHidden ? '显示此图层' : '隐藏此图层')}
           >
-            {editorHidden ? <EyeOff size={11} /> : <Eye size={11} />}
+            {layerState.effectiveHidden ? <EyeOff size={11} /> : <Eye size={11} />}
+          </button>
+          <button
+            onClick={(event) => { event.stopPropagation(); setElementLocked(el.id, !el.locked); }}
+            className={`p-0.5 shrink-0 rounded ${effectiveLocked ? (inheritedLocked ? 'text-amber-400 hover:text-amber-200' : 'text-amber-300 hover:text-amber-100') : 'text-slate-500 hover:text-slate-200'}`}
+            title={inheritedLocked ? `受父级锁定：${getLayerDisplayName(elementMap.get(layerState.lockedById!)!, elementMeta[elementMap.get(layerState.lockedById!)!.type]?.label)}` : (el.locked ? '解锁此图层' : '锁定此图层')}
+            aria-label={inheritedLocked ? '受父级锁定' : (el.locked ? '解锁此图层' : '锁定此图层')}
+            disabled={pageFrozen}
+          >
+            {effectiveLocked ? <Lock size={11} /> : <Unlock size={11} />}
           </button>
           <div
             role="button"
@@ -264,6 +286,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
                 className="truncate flex-1"
                 onDoubleClick={(event) => {
                   event.stopPropagation();
+                  if (effectiveLocked) return;
                   setEditingLayerId(el.id);
                   setLayerDraft(getExplicitLayerLabel(el) || layerName);
                 }}
@@ -273,7 +296,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             )}
             <span className="text-slate-500 text-[10px] shrink-0">{meta?.label || el.type}</span>
           </div>
-          {isSelected && !el.locked && (
+          {isSelected && !effectiveLocked && !pageFrozen && (
             <button onClick={() => { deleteElement(el.id); clearSelection(); }} className="p-0.5 hover:bg-red-900 rounded text-red-400" title={t('deleteElement')}><Trash2 size={11} /></button>
           )}
         </div>
@@ -310,6 +333,12 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
         )}
         {selectedElementIds.length >= 2 && (
           <div className="px-2 py-1.5 border-t border-slate-700">
+            <div className="flex gap-1 mb-1">
+              <button onClick={() => setElementsEditorHidden(selectedElementIds, true)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="隐藏选中图层" aria-label="隐藏选中图层"><EyeOff size={12} /></button>
+              <button onClick={() => setElementsEditorHidden(selectedElementIds, false)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="显示选中图层" aria-label="显示选中图层"><Eye size={12} /></button>
+              <button onClick={() => setElementsLocked(selectedElementIds, true)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="锁定选中图层" aria-label="锁定选中图层"><Lock size={12} /></button>
+              <button onClick={() => setElementsLocked(selectedElementIds, false)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="解锁选中图层" aria-label="解锁选中图层"><Unlock size={12} /></button>
+            </div>
             <div className="text-[10px] text-slate-500 mb-1">{t('align')}</div>
             <div className="flex gap-1 mb-1">
               <button onClick={() => alignElements('left')} className="p-1 hover:bg-slate-700 rounded text-slate-400" title={t('alignLeft')}><AlignStartVertical size={12} /></button>

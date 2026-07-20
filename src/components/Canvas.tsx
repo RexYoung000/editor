@@ -6,7 +6,7 @@ import {
   clearAllObjects, createLayaComponent, registerObject, getObject, syncTransform,
   initWorldRoot, setWorldTransform, getWorldTransform,
 } from '../utils/layaBridge';
-import { applyKlProps, drawPlaceholder } from '../utils/laya/components';
+import { applyKlProps, applyEditorLayerVisibility, drawPlaceholder } from '../utils/laya/components';
 import { objects, canvasRoot, laya } from '../utils/laya/core';
 import CanvasOverlay from './CanvasOverlay';
 import { useI18n } from '../i18n/context';
@@ -17,6 +17,7 @@ import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
+import { isElementLocked } from '../utils/layerState';
 import { findCanvasElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import {
   CANVAS_ZOOM_BUTTON_STEP,
@@ -339,6 +340,10 @@ export default function Canvas() {
       const obj = createLayaComponent(el, parentObj);
       if (obj) registerObject(el.id, obj);
     });
+    currentPage.elements.forEach((el) => {
+      const obj = getObject(el.id);
+      if (obj) applyEditorLayerVisibility(obj, el, currentPage.elements);
+    });
     prevElementsRef.current = new Map(currentPage.elements.map(e => [e.id, { ...e, props: { ...e.props } }]));
     let cancelled = false;
     setTimeout(() => {
@@ -400,6 +405,10 @@ export default function Canvas() {
         }
       }
     }
+    allEls.forEach((el) => {
+      const obj = getObject(el.id);
+      if (obj) applyEditorLayerVisibility(obj, el, allEls);
+    });
 
     // z-order 同步：页面背景和边框位于 index 0，元素从 index 1 开始。
     const root = canvasRoot();
@@ -472,6 +481,10 @@ export default function Canvas() {
         const obj = createLayaComponent(el, parentObj);
         if (obj) registerObject(el.id, obj);
       });
+      currentPage.elements.forEach((el) => {
+        const obj = getObject(el.id);
+        if (obj) applyEditorLayerVisibility(obj, el, currentPage.elements);
+      });
       prevElementsRef.current = new Map(currentPage.elements.map(e => [e.id, { ...e, props: { ...e.props } }]));
       // 恢复编辑态 world transform + stage 尺寸
       resizeStageRef.current?.();
@@ -519,7 +532,7 @@ export default function Canvas() {
         if (currentPage) {
           selectedElementIds.forEach((id) => {
             const el = currentPage.elements.find((e) => e.id === id);
-            if (el && !el.locked) deleteElement(id);
+            if (el && !isElementLocked(el, new Map(currentPage.elements.map((item) => [item.id, item])))) deleteElement(id);
           });
         }
         return;
@@ -532,11 +545,16 @@ export default function Canvas() {
       if (dir && selectedElementIds.length > 0) {
         e.preventDefault();
         const step = e.shiftKey ? 10 : 1;
+        const elementMap = new Map((currentPage?.elements ?? []).map((item) => [item.id, item]));
+        let changed = false;
         selectedElementIds.forEach((id) => {
           const el = currentPage?.elements.find((el) => el.id === id);
-          if (el) updateElement(id, { x: el.x + dir[0] * step, y: el.y + dir[1] * step });
+          if (el && !isElementLocked(el, elementMap)) {
+            updateElement(id, { x: el.x + dir[0] * step, y: el.y + dir[1] * step });
+            changed = true;
+          }
         });
-        saveHistory();
+        if (changed) saveHistory();
       }
     };
     window.addEventListener('keydown', onKeyDown);
