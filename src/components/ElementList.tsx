@@ -131,11 +131,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   };
 
   const createGroupFromSelection = () => {
-    if (selectedElementIds.length < 2) {
-      showToast('请先选择至少两个同一运行父级下的图层', 'info');
-      return;
-    }
-    const groupId = addEditorLayerGroup(getNextEditorLayerGroupName(layerGroups), selectedElementIds);
+    const groupId = addEditorLayerGroup(getNextEditorLayerGroupName(layerGroups));
     if (!groupId) {
       showToast('图层组成员必须属于同一运行父级，且名称不能重复', 'error');
       return;
@@ -550,10 +546,10 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
           <span className="flex-1">{t('elementList')} ({elements.length})</span>
           <button
             onClick={createGroupFromSelection}
-            disabled={pageFrozen || selectedElementIds.length < 2}
+            disabled={pageFrozen}
             className="p-1 rounded text-slate-400 hover:bg-slate-700 hover:text-slate-200 disabled:opacity-30"
-            title="用选中图层创建图层组"
-            aria-label="用选中图层创建图层组"
+            title="创建空图层组，随后拖入图层"
+            aria-label="创建空图层组"
           >
             <FolderPlus size={13} />
           </button>

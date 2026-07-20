@@ -75,6 +75,8 @@ test('图层组成员必须属于同一运行父级，嵌套不能形成循环',
 
   assert.equal(canAssignElementsToGroup(elements, ['a', 'b'], { runtimeParentId: undefined }), true);
   assert.equal(canAssignElementsToGroup(elements, ['a', 'c'], { runtimeParentId: undefined }), false);
+  assert.equal(canAssignElementsToGroup(elements, ['c'], { runtimeParentId: undefined, memberIds: [] }), true);
+  assert.equal(canAssignElementsToGroup(elements, ['a', 'c'], { runtimeParentId: undefined, memberIds: [] }), false);
   assert.equal(isGroupDescendant(groups, 'child', 'root'), true);
   assert.equal(canNestGroup(groups, 'root', 'child'), false);
   assert.equal(canNestGroup(groups, 'child', undefined), true);
@@ -118,6 +120,24 @@ test('图层组创建、重命名、移入和解散各自只写一条历史', as
   pageState = state.currentCourse!.stages[0].subPages[0];
   assert.equal(pageState.editorLayerGroups?.length, 0);
   assert.equal(pageState.elements.some((item) => item.groupId === groupId), false);
+});
+
+test('空图层组可以先创建，再接收同一运行父级的成员', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  const first = element('first', 'runtime-parent');
+  const second = element('second', 'runtime-parent');
+  useEditorStore.getState().setCurrentCourse({
+    id: 'empty-layer-group-course',
+    stages: [{ id: 'stage', name: '关卡 1', subPages: [{ id: 'page', name: '页面', elements: [first, second] }] }],
+  });
+
+  const groupId = useEditorStore.getState().addEditorLayerGroup('待整理');
+  assert.ok(groupId);
+  assert.equal(useEditorStore.getState().setEditorLayerGroupMembers(groupId, ['first']), true);
+  assert.equal(useEditorStore.getState().setEditorLayerGroupMembers(groupId, ['second']), true);
+  const pageState = useEditorStore.getState().currentCourse!.stages[0].subPages[0];
+  assert.equal(pageState.editorLayerGroups?.[0].runtimeParentId, 'runtime-parent');
+  assert.deepEqual(pageState.elements.filter((item) => item.groupId === groupId).map((item) => item.id), ['first', 'second']);
 });
 
 test('快捷键编组写入一条历史，撤销后恢复未编组状态', async () => {

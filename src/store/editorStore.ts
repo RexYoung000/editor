@@ -1591,6 +1591,10 @@ export const useEditorStore = create<EditorState>()(
         if (groupId) {
           const group = groups.find((item) => item.id === groupId);
           if (!group || group.crossRuntimeParent || !canAssignElementsToGroup(page.elements, elementIds, group)) return;
+          if (group.memberIds.length === 0 && group.runtimeParentId === undefined) {
+            const persistedGroup = getEditorLayerGroups(page).find((item) => item.id === groupId);
+            if (persistedGroup) persistedGroup.runtimeParentId = page.elements.find((element) => element.id === elementIds[0])?.parentId;
+          }
         }
         const selected = new Set(elementIds);
         page.elements.forEach((element) => {

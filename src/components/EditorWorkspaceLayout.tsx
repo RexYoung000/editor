@@ -86,7 +86,6 @@ export default function EditorWorkspaceLayout({
   const currentCourse = useEditorStore((state) => state.currentCourse);
   const currentSubPageId = useEditorStore((state) => state.currentSubPageId);
   const currentInternalPageId = useEditorStore((state) => state.currentInternalPageId);
-  const selectedElementIds = useEditorStore((state) => state.selectedElementIds);
   const addEditorLayerGroup = useEditorStore((state) => state.addEditorLayerGroup);
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
   const workbenchReadonly = useEditorStore((state) => isInternalPagesWorkbenchReadonly(
@@ -366,12 +365,11 @@ export default function EditorWorkspaceLayout({
   const toggleOpen = () => commitLayout({ ...layoutRef.current, open: !layoutRef.current.open });
   const compactSide = !layout.open && (layout.mode === 'left' || layout.mode === 'right');
   const pageFrozen = Boolean(currentPage && 'frozen' in currentPage && currentPage.frozen);
-  const canCreateLayerGroup = !pageFrozen && !workbenchReadonly && selectedElementIds.length >= 2;
+  const canCreateLayerGroup = !pageFrozen && !workbenchReadonly;
   const createLayerGroup = () => {
     if (!canCreateLayerGroup || !currentPage) return;
     const groupId = addEditorLayerGroup(
       getNextEditorLayerGroupName(resolveEditorLayerGroups(currentPage)),
-      selectedElementIds,
     );
     if (!groupId) showToast('图层组成员必须属于同一运行父级，且名称不能重复', 'error');
   };
@@ -451,8 +449,8 @@ export default function EditorWorkspaceLayout({
               onClick={createLayerGroup}
               disabled={!canCreateLayerGroup}
               className="p-1.5 text-slate-500 hover:text-slate-100 disabled:opacity-30"
-              title="用选中图层创建图层组（至少选择两个同一运行父级图层）"
-              aria-label="用选中图层创建图层组"
+              title="创建空图层组，随后拖入图层"
+              aria-label="创建空图层组"
             >
               <FolderPlus size={14} />
             </button>

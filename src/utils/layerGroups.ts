@@ -79,11 +79,14 @@ export function isGroupDescendant(groups: EditorLayerGroup[], groupId: string, a
 export function canAssignElementsToGroup(
   elements: Element[],
   ids: string[],
-  group: Pick<EditorLayerGroup, 'runtimeParentId'>,
+  group: Pick<EditorLayerGroup, 'runtimeParentId'> & { memberIds?: string[] },
 ): boolean {
   const selected = elements.filter((element) => ids.includes(element.id));
   if (selected.length === 0 || selected.length !== new Set(ids).size) return false;
-  return selected.every((element) => element.parentId === group.runtimeParentId);
+  const runtimeParentId = group.runtimeParentId ?? (
+    group.memberIds?.length === 0 ? selected[0]?.parentId : undefined
+  );
+  return selected.every((element) => element.parentId === runtimeParentId);
 }
 
 export function canNestGroup(
