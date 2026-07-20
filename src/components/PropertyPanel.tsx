@@ -11,21 +11,125 @@ import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import PageTurnPageList from './PageTurnPageList';
 import { KEYBOARD_PRESETS } from '../elements/keyboardPresets';
-import { CornerDownLeft, Maximize2, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownLeft, FolderMinus, FolderOpen, Maximize2, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import type { Action, Element } from '../types';
 import { useI18n } from '../i18n/context';
 import { getObject, syncProps } from '../utils/layaBridge';
 import { readFileAsDataUrl } from '../utils/electronFs';
 import { translateLabel } from '../elements/elementMetaI18n';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
-import { collectInternalPageIssues, findActiveElementPage, isInternalPagesSubPage } from '../utils/internalPages';
+import { collectInternalPageIssues, findActiveElementPage, isInternalPagesSubPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
 import { getElementParentContainment } from '../utils/canvasGeometry';
 import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../utils/layerPresentation';
 import { createElementMap, getElementLayerState } from '../utils/layerState';
+import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
+
+interface EditorLayerGroupPropertiesProps {
+  group: ResolvedEditorLayerGroup;
+  groupIndex: number;
+  groupCount: number;
+  disabled: boolean;
+  runtimeParentLabel: string;
+  onRename: (groupId: string, name: string) => boolean;
+  onReorder: (fromIndex: number, toIndex: number) => void;
+  onDissolve: (groupId: string) => void;
+  onDelete: (groupId: string) => void;
+}
+
+function EditorLayerGroupProperties({
+  group,
+  groupIndex,
+  groupCount,
+  disabled,
+  runtimeParentLabel,
+  onRename,
+  onReorder,
+  onDissolve,
+  onDelete,
+}: EditorLayerGroupPropertiesProps) {
+  const [draft, setDraft] = useState(group.name);
+
+  const commitName = () => {
+    const normalized = draft.trim();
+    if (!normalized || normalized === group.name) {
+      setDraft(group.name);
+      return;
+    }
+    if (!onRename(group.id, normalized)) {
+      setDraft(group.name);
+      showToast('图层组名称不能为空或重复', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 text-sm font-medium text-slate-100">
+        <FolderOpen size={16} className="text-blue-300" />
+        <span>图层组</span>
+      </div>
+      <label className="block text-xs text-slate-400">
+        <span className="block mb-1">组名称</span>
+        <input
+          value={draft}
+          disabled={disabled || group.crossRuntimeParent}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commitName}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+            if (event.key === 'Escape') setDraft(group.name);
+          }}
+          className="w-full px-2 py-1.5 bg-slate-700 border border-slate-600 rounded text-xs text-white disabled:opacity-50"
+        />
+      </label>
+      <div className="space-y-1 border-t border-slate-700 pt-2 text-[11px] text-slate-400">
+        <div className="flex justify-between gap-2"><span>成员</span><span className="text-slate-200">{group.memberIds.length} 个</span></div>
+        <div className="flex justify-between gap-2"><span>运行父级</span><span className="text-slate-200 truncate">{runtimeParentLabel}</span></div>
+        {group.memberIds.length === 0 && <div className="text-[10px] text-slate-500">可直接从图层面板拖入元素进行整理。</div>}
+      </div>
+      <div className="border-t border-slate-700 pt-2">
+        <div className="text-xs text-slate-500 mb-1.5">图层组操作</div>
+        <div className="grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            disabled={disabled || groupIndex <= 0}
+            onClick={() => onReorder(groupIndex, groupIndex - 1)}
+            className="flex items-center justify-center gap-1 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-40"
+          >
+            <ArrowUp size={12} /> 上移
+          </button>
+          <button
+            type="button"
+            disabled={disabled || groupIndex >= groupCount - 1}
+            onClick={() => onReorder(groupIndex, groupIndex + 1)}
+            className="flex items-center justify-center gap-1 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-40"
+          >
+            <ArrowDown size={12} /> 下移
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onDissolve(group.id)}
+            className="flex items-center justify-center gap-1 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 rounded disabled:opacity-40"
+          >
+            <FolderMinus size={12} /> 解散组
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onDelete(group.id)}
+            className="flex items-center justify-center gap-1 py-1.5 text-xs bg-red-900/40 hover:bg-red-900/70 text-red-300 rounded disabled:opacity-40"
+          >
+            <Trash2 size={12} /> 删除组
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function PropertyPanel() {
   const { t, language } = useI18n();
@@ -33,11 +137,16 @@ export default function PropertyPanel() {
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
   const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
+  const selectedEditorLayerGroupId = useEditorStore((s) => s.selectedEditorLayerGroupId);
   const updateElement = useEditorStore((s) => s.updateElement);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const moveElementIntoParent = useEditorStore((s) => s.moveElementIntoParent);
   const fitContainerToChildren = useEditorStore((s) => s.fitContainerToChildren);
   const clearSelection = useEditorStore((s) => s.clearSelection);
+  const selectEditorLayerGroup = useEditorStore((s) => s.selectEditorLayerGroup);
+  const renameEditorLayerGroup = useEditorStore((s) => s.renameEditorLayerGroup);
+  const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
+  const reorderEditorLayerGroup = useEditorStore((s) => s.reorderEditorLayerGroup);
   const addChoiceOption = useEditorStore((s) => s.addChoiceOption);
   const removeChoiceOption = useEditorStore((s) => s.removeChoiceOption);
   const addFillBlankInput = useEditorStore((s) => s.addFillBlankInput);
@@ -54,6 +163,11 @@ export default function PropertyPanel() {
   const updateDialogSettings = useEditorStore((s) => s.updateDialogSettings);
   const setNoEntryDeferred = useEditorStore((s) => s.setNoEntryDeferred);
   const saveHistory = useEditorStore((s) => s.saveHistory);
+  const workbenchReadonly = useEditorStore((s) => isInternalPagesWorkbenchReadonly(
+    s.currentCourse,
+    s.currentSubPageId,
+    s.focusSubPageId,
+  ));
 
   const [editingValues, setEditingValues] = useState<Record<string, string>>({});
   const [skinEditorOpen, setSkinEditorOpen] = useState(false);
@@ -69,7 +183,7 @@ export default function PropertyPanel() {
       setTabImgPickerOpen(false);
       setOkBtnPickerOpen(false);
     });
-  }, [selectedElementIds]);
+  }, [selectedElementIds, selectedEditorLayerGroupId]);
 
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
   const currentSubPage = findSubPage(currentCourse, currentSubPageId);
@@ -87,6 +201,13 @@ export default function PropertyPanel() {
   })();
   const elements = currentPage?.elements ?? [];
   const elementMap = createElementMap(elements);
+  const resolvedLayerGroups = currentPage ? resolveEditorLayerGroups(currentPage) : [];
+  const selectedEditorLayerGroup = selectedEditorLayerGroupId
+    ? resolvedLayerGroups.find((group) => group.id === selectedEditorLayerGroupId) ?? null
+    : null;
+  const selectedEditorLayerGroupIndex = selectedEditorLayerGroup
+    ? resolvedLayerGroups.findIndex((group) => group.id === selectedEditorLayerGroup.id)
+    : -1;
   const selectedElements = elements.filter((e) => selectedElementIds.includes(e.id));
   const single = selectedElements.length === 1 ? selectedElements[0] : null;
   const singleLayerState = single ? getElementLayerState(single, elementMap) : null;
@@ -472,11 +593,43 @@ export default function PropertyPanel() {
     clearEditingValue('name');
   };
 
+  const handleDissolveLayerGroup = (groupId: string) => {
+    deleteEditorLayerGroup(groupId, false);
+    selectEditorLayerGroup(null);
+  };
+
+  const handleDeleteLayerGroup = (groupId: string) => {
+    deleteEditorLayerGroup(groupId, true);
+    selectEditorLayerGroup(null);
+  };
+
+  const runtimeParent = selectedEditorLayerGroup?.runtimeParentId
+    ? elementMap.get(selectedEditorLayerGroup.runtimeParentId)
+    : undefined;
+  const runtimeParentLabel = runtimeParent
+    ? getLayerDisplayName(runtimeParent, '运行容器')
+    : selectedEditorLayerGroup?.memberIds.length
+      ? '页面顶层'
+      : '首次拖入成员后确定';
+
   return (
     <>
     <div data-property-panel className="w-64 bg-slate-800 border-l border-slate-700 flex flex-col">
       <div className="flex-1 overflow-y-auto p-3 space-y-1">
-        {!hasSelection ? (
+        {selectedEditorLayerGroup ? (
+          <EditorLayerGroupProperties
+            key={`${selectedEditorLayerGroup.id}:${selectedEditorLayerGroup.name}`}
+            group={selectedEditorLayerGroup}
+            groupIndex={selectedEditorLayerGroupIndex}
+            groupCount={resolvedLayerGroups.length}
+            disabled={Boolean(currentPage && 'frozen' in currentPage && currentPage.frozen) || workbenchReadonly}
+            runtimeParentLabel={runtimeParentLabel}
+            onRename={renameEditorLayerGroup}
+            onReorder={reorderEditorLayerGroup}
+            onDissolve={handleDissolveLayerGroup}
+            onDelete={handleDeleteLayerGroup}
+          />
+        ) : !hasSelection ? (
           isInternalPagesSubPage(currentSubPage) ? (
             <div className="space-y-4">
               <div>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
-import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, FolderMinus, FolderInput, ArrowUp, ArrowDown, ChevronRight, ChevronDown, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, ChevronRight, ChevronDown, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import { findActiveElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
@@ -37,19 +37,17 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     s.focusSubPageId,
   ));
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
+  const selectedEditorLayerGroupId = useEditorStore((s) => s.selectedEditorLayerGroupId);
   const selectElement = useEditorStore((s) => s.selectElement);
-  const selectElements = useEditorStore((s) => s.selectElements);
+  const selectEditorLayerGroup = useEditorStore((s) => s.selectEditorLayerGroup);
   const updateElement = useEditorStore((s) => s.updateElement);
   const setElementEditorHidden = useEditorStore((s) => s.setElementEditorHidden);
   const setElementsEditorHidden = useEditorStore((s) => s.setElementsEditorHidden);
   const setElementLocked = useEditorStore((s) => s.setElementLocked);
   const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
   const addEditorLayerGroup = useEditorStore((s) => s.addEditorLayerGroup);
-  const renameEditorLayerGroup = useEditorStore((s) => s.renameEditorLayerGroup);
-  const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
   const setEditorLayerGroupMembers = useEditorStore((s) => s.setEditorLayerGroupMembers);
   const setEditorLayerGroupParent = useEditorStore((s) => s.setEditorLayerGroupParent);
-  const reorderEditorLayerGroup = useEditorStore((s) => s.reorderEditorLayerGroup);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const reorderElement = useEditorStore((s) => s.reorderElement);
   const setElementParent = useEditorStore((s) => s.setElementParent);
@@ -62,8 +60,6 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [layerDraft, setLayerDraft] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
-  const [groupDraft, setGroupDraft] = useState('');
   const skipNextGroupPreferenceSave = useRef(false);
 
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
@@ -120,14 +116,6 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     if (normalized === getExplicitLayerLabel(el)) return;
     updateElement(el.id, { props: withLayerLabel(el.props, normalized) });
     useEditorStore.getState().saveHistory();
-  };
-
-  const commitGroupName = (group: ResolvedEditorLayerGroup, value: string) => {
-    const normalized = value.trim();
-    setEditingGroupId(null);
-    setGroupDraft('');
-    if (!normalized || normalized === group.name) return;
-    if (!renameEditorLayerGroup(group.id, normalized)) showToast('图层组名称不能为空或重复', 'error');
   };
 
   const createGroupFromSelection = () => {
@@ -399,19 +387,22 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       .filter((element) => group.memberIds.includes(element.id))
       .reverse();
     const childGroups = layerGroups.filter((candidate) => candidate.parentGroupId === group.id);
-    const isEditing = editingGroupId === group.id;
-    const groupIndex = layerGroups.findIndex((candidate) => candidate.id === group.id);
+    const isSelected = selectedEditorLayerGroupId === group.id;
     return (
       <div key={`layer-group-${group.id}`}>
         <div
           className={`flex items-center gap-1 py-1 text-xs ${
             dropTarget?.kind === 'into-group' && dropTarget.groupId === group.id
               ? 'ring-2 ring-emerald-500 bg-emerald-950/30'
-              : group.crossRuntimeParent
+              : isSelected
+                ? 'bg-blue-600/30 text-blue-200'
+                : group.crossRuntimeParent
                 ? 'text-amber-300 bg-amber-950/20'
                 : 'text-slate-300 hover:bg-slate-700'
           }`}
           style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px' }}
+          aria-selected={isSelected}
+          onClick={() => selectEditorLayerGroup(group.id)}
           title={group.crossRuntimeParent ? '旧版跨运行父级编组：保持原有编组行为，重新编组后可转换为新图层组' : `${group.name} · ${members.length} 个成员`}
           onDragOver={(event) => {
             event.preventDefault();
@@ -431,93 +422,38 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
         >
           <button
             className="p-0.5 shrink-0 text-slate-500 hover:text-slate-200"
-            onClick={() => setExpandedGroups((previous) => {
-              const next = new Set(previous);
-              if (next.has(group.id)) next.delete(group.id); else next.add(group.id);
-              return next;
-            })}
+            onClick={(event) => {
+              event.stopPropagation();
+              setExpandedGroups((previous) => {
+                const next = new Set(previous);
+                if (next.has(group.id)) next.delete(group.id); else next.add(group.id);
+                return next;
+              });
+            }}
             aria-label={expanded ? '收起图层组' : '展开图层组'}
           >
             {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           </button>
           {expanded ? <FolderOpen size={13} className="shrink-0 text-blue-300" /> : <Folder size={13} className="shrink-0 text-blue-300" />}
-          {isEditing ? (
-            <input
-              autoFocus
-              value={groupDraft}
-              onChange={(event) => setGroupDraft(event.target.value)}
-              onBlur={() => commitGroupName(group, groupDraft)}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-                if (event.key === 'Enter') event.currentTarget.blur();
-                if (event.key === 'Escape') { setEditingGroupId(null); setGroupDraft(''); }
-              }}
-              className="flex-1 min-w-0 bg-slate-600 text-white rounded px-1 outline-none"
-            />
-          ) : (
-            <span
-              className="truncate flex-1"
-              onClick={() => selectElements(group.memberIds)}
-              onDoubleClick={(event) => {
-                event.stopPropagation();
-                if (pageFrozen || group.crossRuntimeParent) return;
-                setEditingGroupId(group.id);
-                setGroupDraft(group.name);
-              }}
-            >
-              {group.name}
-            </span>
-          )}
-          <span className="text-[10px] text-slate-500 shrink-0">{members.length}</span>
-          <button
-            onClick={() => reorderEditorLayerGroup(groupIndex, groupIndex - 1)}
-            disabled={pageFrozen || groupIndex <= 0}
-            className="p-0.5 rounded text-slate-500 hover:text-slate-200 disabled:opacity-30"
-            title="上移图层组"
-            aria-label="上移图层组"
-          >
-            <ArrowUp size={11} />
-          </button>
-          <button
-            onClick={() => reorderEditorLayerGroup(groupIndex, groupIndex + 1)}
-            disabled={pageFrozen || groupIndex < 0 || groupIndex >= layerGroups.length - 1}
-            className="p-0.5 rounded text-slate-500 hover:text-slate-200 disabled:opacity-30"
-            title="下移图层组"
-            aria-label="下移图层组"
-          >
-            <ArrowDown size={11} />
-          </button>
-          <button
-            onClick={() => {
-              if (pageFrozen) return;
-              if (!setEditorLayerGroupMembers(group.id, selectedElementIds)) showToast('选中的图层必须属于同一运行父级', 'error');
-              else setExpandedGroups((previous) => new Set(previous).add(group.id));
+          <span
+            role="button"
+            tabIndex={0}
+            aria-selected={isSelected}
+            className="truncate flex-1 cursor-pointer"
+            onClick={(event) => {
+              event.stopPropagation();
+              selectEditorLayerGroup(group.id);
             }}
-            disabled={pageFrozen || group.crossRuntimeParent}
-            className="p-0.5 rounded text-slate-500 hover:text-slate-200 disabled:opacity-30"
-            title="将选中图层移入此组"
-            aria-label="将选中图层移入此组"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                selectEditorLayerGroup(group.id);
+              }
+            }}
           >
-            <FolderInput size={12} />
-          </button>
-          <button
-            onClick={() => deleteEditorLayerGroup(group.id, false)}
-            disabled={pageFrozen}
-            className="p-0.5 rounded text-slate-500 hover:text-amber-300 disabled:opacity-30"
-            title="解散图层组并保留内容"
-            aria-label="解散图层组并保留内容"
-          >
-            <FolderMinus size={12} />
-          </button>
-          <button
-            onClick={() => deleteEditorLayerGroup(group.id, true)}
-            disabled={pageFrozen}
-            className="p-0.5 rounded text-slate-500 hover:text-red-300 disabled:opacity-30"
-            title="删除图层组及其内容"
-            aria-label="删除图层组及其内容"
-          >
-            <Trash2 size={12} />
-          </button>
+            {group.name}
+          </span>
+          <span className="text-[10px] text-slate-500 shrink-0">{members.length}</span>
         </div>
         {expanded && (
           <div>
@@ -567,7 +503,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             {renderDropIndicator(undefined, topLevel.length)}
           </div>
         )}
-        {selectedElementIds.length >= 2 && (
+        {!selectedEditorLayerGroupId && selectedElementIds.length >= 2 && (
           <div className="px-2 py-1.5 border-t border-slate-700">
             <div className="flex gap-1 mb-1">
               <button onClick={() => setElementsEditorHidden(selectedElementIds, true)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="隐藏选中图层" aria-label="隐藏选中图层"><EyeOff size={12} /></button>

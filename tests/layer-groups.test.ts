@@ -140,6 +140,39 @@ test('空图层组可以先创建，再接收同一运行父级的成员', async
   assert.deepEqual(pageState.elements.filter((item) => item.groupId === groupId).map((item) => item.id), ['first', 'second']);
 });
 
+test('图层组可以独立选中，并同步选择成员或保留空组选择', async () => {
+  const { useEditorStore } = await import('../src/store/editorStore');
+  useEditorStore.getState().setCurrentCourse({
+    id: 'layer-group-selection-course',
+    stages: [{
+      id: 'stage',
+      name: '关卡 1',
+      subPages: [{
+        id: 'page',
+        name: '页面',
+        elements: [element('first'), element('second', undefined, 'group')],
+        editorLayerGroups: [
+          { id: 'group', name: '素材' },
+          { id: 'empty', name: '待整理' },
+        ],
+      }],
+    }],
+  });
+
+  useEditorStore.getState().selectEditorLayerGroup('group');
+  let state = useEditorStore.getState();
+  assert.equal(state.selectedEditorLayerGroupId, 'group');
+  assert.deepEqual(state.selectedElementIds, ['second']);
+
+  useEditorStore.getState().selectEditorLayerGroup('empty');
+  state = useEditorStore.getState();
+  assert.equal(state.selectedEditorLayerGroupId, 'empty');
+  assert.deepEqual(state.selectedElementIds, []);
+
+  useEditorStore.getState().selectElement('first');
+  assert.equal(useEditorStore.getState().selectedEditorLayerGroupId, null);
+});
+
 test('快捷键编组写入一条历史，撤销后恢复未编组状态', async () => {
   const { useEditorStore } = await import('../src/store/editorStore');
   useEditorStore.getState().setCurrentCourse({

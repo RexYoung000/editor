@@ -72,6 +72,7 @@ interface EditorState {
   currentInternalPageId: string | null;
   focusSubPageId: string | null;
   selectedElementIds: string[];
+  selectedEditorLayerGroupId: string | null;
   selectedStageTarget?: 'preview' | 'normal';
   clipboard: Element[];
   clipboardEditorLayerGroups: EditorLayerGroup[];
@@ -153,6 +154,7 @@ interface EditorState {
   setElementParent: (id: string, newParentId: string | undefined, saveToHistory?: boolean) => void;
   selectElement: (id: string, multi?: boolean) => void;
   selectElements: (ids: string[]) => void;
+  selectEditorLayerGroup: (groupId: string | null) => void;
   selectAll: () => void;
   clearSelection: () => void;
   copyElements: () => void;
@@ -357,6 +359,7 @@ export const useEditorStore = create<EditorState>()(
     currentInternalPageId: null,
     focusSubPageId: null,
     selectedElementIds: [],
+    selectedEditorLayerGroupId: null,
     selectedStageTarget: undefined,
     clipboard: [],
     clipboardEditorLayerGroups: [],
@@ -426,6 +429,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = firstSub?.id ?? null;
         state.currentInternalPageId = isInternalPagesSubPage(firstSub) ? firstSub.id : null;
         state.focusSubPageId = null;
+        state.selectedEditorLayerGroupId = null;
         state.history = [JSON.parse(JSON.stringify(course))];
         state.historyIndex = 0;
         // 重建所有 SubPage 的局部类型计数器，让新建组件按局部序号命名
@@ -452,6 +456,7 @@ export const useEditorStore = create<EditorState>()(
         } else {
           state.selectedElementIds = [];
         }
+        state.selectedEditorLayerGroupId = null;
         state.selectedStageTarget = state.currentCourse?.previewStages?.some(s => s.id === stageId) ? 'preview' : 'normal';
       }),
 
@@ -464,6 +469,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentInternalPageId = subPage.id;
         state.focusSubPageId = subPage.id;
         state.selectedElementIds = [];
+        state.selectedEditorLayerGroupId = null;
         state.selectedStageTarget = state.currentCourse?.previewStages?.some((stage) => stage.id === stageId) ? 'preview' : 'normal';
       }),
 
@@ -472,6 +478,7 @@ export const useEditorStore = create<EditorState>()(
         state.focusSubPageId = null;
         state.currentInternalPageId = null;
         state.selectedElementIds = [];
+        state.selectedEditorLayerGroupId = null;
       }),
 
     setCurrentInternalPage: (pageId) =>
@@ -481,6 +488,7 @@ export const useEditorStore = create<EditorState>()(
         const page = getElementPage(subPage, pageId);
         state.currentInternalPageId = page.id;
         state.selectedElementIds = [];
+        state.selectedEditorLayerGroupId = null;
       }),
 
     addInternalPage: (kind, name, placement) => {
@@ -1577,6 +1585,9 @@ export const useEditorStore = create<EditorState>()(
           });
         }
         page.editorLayerGroups = groups.filter((item) => !childGroupIds.has(item.id));
+        if (childGroupIds.has(state.selectedEditorLayerGroupId ?? '')) {
+          state.selectedEditorLayerGroupId = null;
+        }
         changed = true;
       });
       if (changed) get().saveHistory();
@@ -1870,6 +1881,7 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const page = findCurrentSubPage(state);
         const el = page?.elements.find((e) => e.id === id);
+        state.selectedEditorLayerGroupId = null;
 
         if (multi) {
           // frozen 页面不允许取消锁定元素的选中
@@ -1895,7 +1907,25 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         const page = findCurrentSubPage(state);
         if (page && 'frozen' in page && page.frozen) return;
+        state.selectedEditorLayerGroupId = null;
         state.selectedElementIds = ids;
+      }),
+
+    selectEditorLayerGroup: (groupId) =>
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (page && 'frozen' in page && page.frozen) return;
+        if (!groupId) {
+          state.selectedEditorLayerGroupId = null;
+          state.selectedElementIds = [];
+          return;
+        }
+        const group = page
+          ? resolveEditorLayerGroups(page).find((item) => item.id === groupId)
+          : undefined;
+        if (!group) return;
+        state.selectedEditorLayerGroupId = groupId;
+        state.selectedElementIds = group.memberIds;
       }),
 
     clearSelection: () =>
@@ -1903,13 +1933,17 @@ export const useEditorStore = create<EditorState>()(
         const page = findCurrentSubPage(state);
         // frozen 页面不允许清空选中（锁定元素必须保持选中）
         if (page && 'frozen' in page && page.frozen) return;
+        state.selectedEditorLayerGroupId = null;
         state.selectedElementIds = [];
       }),
 
     selectAll: () =>
       set((state) => {
         const page = findCurrentSubPage(state);
-        if (page) state.selectedElementIds = page.elements.map((e) => e.id);
+        if (page) {
+          state.selectedEditorLayerGroupId = null;
+          state.selectedElementIds = page.elements.map((e) => e.id);
+        }
       }),
 
     copyElements: () =>
