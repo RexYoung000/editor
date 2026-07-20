@@ -13,7 +13,7 @@ import {
   withLayerLabel,
 } from '../utils/layerPresentation';
 import { createElementMap, getElementLayerState } from '../utils/layerState';
-import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
+import { getNextEditorLayerGroupName, resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
 import { showToast } from '../utils/toast';
 
 type DropTarget =
@@ -135,11 +135,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       showToast('请先选择至少两个同一运行父级下的图层', 'info');
       return;
     }
-    const usedNames = new Set(layerGroups.map((group) => group.name));
-    let name = '图层组';
-    let suffix = 2;
-    while (usedNames.has(name)) name = `图层组 ${suffix++}`;
-    const groupId = addEditorLayerGroup(name, selectedElementIds);
+    const groupId = addEditorLayerGroup(getNextEditorLayerGroupName(layerGroups), selectedElementIds);
     if (!groupId) {
       showToast('图层组成员必须属于同一运行父级，且名称不能重复', 'error');
       return;

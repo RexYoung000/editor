@@ -7,9 +7,11 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
-import { ChevronDown, ChevronRight, GripVertical, Layers, RotateCcw } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderPlus, GripVertical, Layers, RotateCcw } from 'lucide-react';
 import { useEditorStore } from '../store/editorStore';
-import { findActiveElementPage } from '../utils/internalPages';
+import { findActiveElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
+import { getNextEditorLayerGroupName, resolveEditorLayerGroups } from '../utils/layerGroups';
+import { showToast } from '../utils/toast';
 import {
   DEFAULT_LAYER_PANEL_LAYOUT,
   LAYER_PANEL_HEADER_SIZE,
@@ -84,7 +86,14 @@ export default function EditorWorkspaceLayout({
   const currentCourse = useEditorStore((state) => state.currentCourse);
   const currentSubPageId = useEditorStore((state) => state.currentSubPageId);
   const currentInternalPageId = useEditorStore((state) => state.currentInternalPageId);
+  const selectedElementIds = useEditorStore((state) => state.selectedElementIds);
+  const addEditorLayerGroup = useEditorStore((state) => state.addEditorLayerGroup);
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
+  const workbenchReadonly = useEditorStore((state) => isInternalPagesWorkbenchReadonly(
+    state.currentCourse,
+    state.currentSubPageId,
+    state.focusSubPageId,
+  ));
 
   const [layout, setLayout] = useState(readLayerPanelLayout);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -356,6 +365,16 @@ export default function EditorWorkspaceLayout({
   const resetLayout = () => commitLayout(normalizeLayerPanelLayout(DEFAULT_LAYER_PANEL_LAYOUT));
   const toggleOpen = () => commitLayout({ ...layoutRef.current, open: !layoutRef.current.open });
   const compactSide = !layout.open && (layout.mode === 'left' || layout.mode === 'right');
+  const pageFrozen = Boolean(currentPage && 'frozen' in currentPage && currentPage.frozen);
+  const canCreateLayerGroup = !pageFrozen && !workbenchReadonly && selectedElementIds.length >= 2;
+  const createLayerGroup = () => {
+    if (!canCreateLayerGroup || !currentPage) return;
+    const groupId = addEditorLayerGroup(
+      getNextEditorLayerGroupName(resolveEditorLayerGroups(currentPage)),
+      selectedElementIds,
+    );
+    if (!groupId) showToast('图层组成员必须属于同一运行父级，且名称不能重复', 'error');
+  };
 
   const leftReservation = layout.mode === 'left' ? dockWidth : 0;
   const rightReservation = layout.mode === 'right' ? dockWidth : 0;
@@ -426,6 +445,18 @@ export default function EditorWorkspaceLayout({
             {!compactSide && <span className="truncate text-xs font-medium text-slate-100">图层</span>}
             {!compactSide && <span className="text-[11px] text-slate-500">({currentPage?.elements.length ?? 0})</span>}
           </div>
+          {!compactSide && (
+            <button
+              type="button"
+              onClick={createLayerGroup}
+              disabled={!canCreateLayerGroup}
+              className="p-1.5 text-slate-500 hover:text-slate-100 disabled:opacity-30"
+              title="用选中图层创建图层组（至少选择两个同一运行父级图层）"
+              aria-label="用选中图层创建图层组"
+            >
+              <FolderPlus size={14} />
+            </button>
+          )}
           {!compactSide && (
             <button
               type="button"

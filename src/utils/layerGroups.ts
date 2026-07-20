@@ -12,6 +12,14 @@ export function getEditorLayerGroups(page: Pick<SubPage, 'editorLayerGroups'>): 
   return Array.isArray(page.editorLayerGroups) ? page.editorLayerGroups : [];
 }
 
+export function getNextEditorLayerGroupName(groups: Pick<EditorLayerGroup, 'name'>[]): string {
+  const usedNames = new Set(groups.map((group) => group.name));
+  let name = '图层组';
+  let suffix = 2;
+  while (usedNames.has(name)) name = `图层组 ${suffix++}`;
+  return name;
+}
+
 function getCommonRuntimeParent(elements: Element[]): { parentId?: string; cross: boolean } {
   const parentIds = new Set(elements.map((element) => element.parentId));
   if (parentIds.size <= 1) return { parentId: elements[0]?.parentId, cross: false };
