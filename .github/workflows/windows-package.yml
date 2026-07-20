@@ -9,7 +9,7 @@ on:
         default: v1.1.0
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   package:
@@ -56,3 +56,14 @@ jobs:
           path: release/**/*.exe
           if-no-files-found: error
           retention-days: 30
+
+      - name: 上传安装包到 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem "release" -Filter "*.exe" -Recurse | Select-Object -First 1
+          if (-not $installer) {
+            throw "未找到 Windows 安装包"
+          }
+          gh release upload "${{ inputs.tag }}" "$($installer.FullName)" --clobber
