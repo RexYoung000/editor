@@ -548,7 +548,11 @@ export default function PropertyPanel() {
                 </div>
               )}
 
-              <fieldset disabled={Boolean(singleLayerState?.effectiveLocked)} className="min-w-0 border-0 p-0 m-0">
+              <fieldset
+                disabled={Boolean(singleLayerState?.effectiveLocked)}
+                aria-disabled={singleLayerState?.effectiveLocked || undefined}
+                className={`min-w-0 border-0 p-0 m-0 ${singleLayerState?.effectiveLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
 
               {single && (() => {
                 const metaLabel = translateLabel(elementMeta[single.type]?.label || single.type, language);
