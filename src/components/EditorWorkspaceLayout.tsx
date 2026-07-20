@@ -418,7 +418,7 @@ export default function EditorWorkspaceLayout({
         data-layer-panel
         data-keep-selection
         data-layer-panel-mode={layout.mode}
-        className={`absolute z-50 flex flex-col overflow-hidden border border-slate-600 text-white transition-[box-shadow,background-color] duration-150 ${
+        className={`absolute z-40 flex flex-col overflow-hidden border border-slate-600 text-white transition-[box-shadow,background-color] duration-150 ${
           layout.mode === 'floating'
             ? 'rounded-lg bg-slate-900/90 shadow-2xl backdrop-blur-md'
             : 'bg-slate-900'
@@ -474,7 +474,7 @@ export default function EditorWorkspaceLayout({
             {layout.open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           </button>
         </div>
-        {layout.open && <div className="flex-1 min-h-0 overflow-hidden"><ElementList showHeader={false} /></div>}
+        {layout.open && <div className="flex flex-1 min-h-0 flex-col overflow-hidden"><ElementList showHeader={false} /></div>}
 
         {layout.open && layout.mode === 'bottom' && (
           <div onPointerDown={beginResize} className="absolute top-0 left-0 right-0 h-1 cursor-row-resize hover:bg-blue-400/70" title="拖动调整高度" />
