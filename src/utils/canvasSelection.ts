@@ -8,17 +8,9 @@ import {
 } from './canvasGeometry';
 import { isContainerElementType } from './elementContainers';
 import { isEditorCanvasHitThrough } from './canvasComposite';
+import { isElementHidden, isElementLocked } from './layerState';
 
-export function isElementHidden(element: Element, elementMap: Map<string, Element>): boolean {
-  let current: Element | undefined = element;
-  const visited = new Set<string>();
-  while (current && !visited.has(current.id)) {
-    visited.add(current.id);
-    if ((current.props as Record<string, unknown>)._editorHidden === true) return true;
-    current = current.parentId ? elementMap.get(current.parentId) : undefined;
-  }
-  return false;
-}
+export { isElementHidden, isElementLocked } from './layerState';
 
 export function getContainerIds(elements: Element[]): Set<string> {
   return new Set(elements.flatMap((element) => {
@@ -52,17 +44,6 @@ export function getSelectionOverflowContextContainerIds(elements: Element[], sel
     if (getElementParentContainment(element, elements)?.isOverflowing) overflowIds.add(element.parentId);
   }
   return overflowIds;
-}
-
-function isLocked(element: Element, elementMap: Map<string, Element>): boolean {
-  let current: Element | undefined = element;
-  const visited = new Set<string>();
-  while (current && !visited.has(current.id)) {
-    visited.add(current.id);
-    if (current.locked) return true;
-    current = current.parentId ? elementMap.get(current.parentId) : undefined;
-  }
-  return false;
 }
 
 function isAncestor(ancestorId: string, descendantId: string, elementMap: Map<string, Element>): boolean {
@@ -190,7 +171,7 @@ export function getTransformRootIds(elements: Element[], selectedIds: string[]):
   const elementMap = new Map(elements.map((element) => [element.id, element]));
   return normalizeSelection(elements, selectedIds).filter((id) => {
     const element = elementMap.get(id);
-    return element ? !isLocked(element, elementMap) : false;
+    return element ? !isElementLocked(element, elementMap) : false;
   });
 }
 
@@ -203,7 +184,7 @@ export function selectElementsInRect(
   const hits = elements.filter((element) => {
     if (containerIds.has(element.id)) return false;
     if (isEditorCanvasHitThrough(element)) return false;
-    if (isElementHidden(element, elementMap) || isLocked(element, elementMap)) return false;
+    if (isElementHidden(element, elementMap) || isElementLocked(element, elementMap)) return false;
     return doesElementIntersectRect(element, elements, rect);
   });
   return normalizeSelection(elements, hits.map((element) => element.id));

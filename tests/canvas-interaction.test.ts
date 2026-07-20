@@ -109,6 +109,14 @@ test('父子不会同时作为选择或变换根，锁定元素不参与变换',
   assert.deepEqual(getTransformRootIds([parent, child, locked], ['parent', 'child', 'locked']), ['parent']);
 });
 
+test('锁定元素可以命中查看，但不进入框选或变换手柄', () => {
+  const locked = element('locked', { x: 10, y: 10, locked: true });
+  assert.equal(findTopElementAtPoint([locked], { x: 20, y: 20 }, [])?.id, 'locked');
+  assert.deepEqual(selectElementsInRect([locked], { x: 0, y: 0, width: 100, height: 100 }), []);
+  assert.equal(getSelectionFrame([locked], ['locked']), null);
+  assert.ok(getSelectionFrame([locked], ['locked'], { includeLocked: true }));
+});
+
 test('编组点击会选择整组，修饰键再次点击会移除整组', () => {
   const first = element('first', { groupId: 'group-1' });
   const second = element('second', { groupId: 'group-1' });

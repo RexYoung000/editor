@@ -15,6 +15,7 @@ import {
   getSelectionOverflowContextContainerIds,
   getTransformRootIds,
   isElementHidden,
+  isElementLocked,
   normalizeSelection,
   resolveMarqueeSelection,
   resolvePointerSelection,
@@ -377,7 +378,10 @@ export default function CanvasOverlay({
         ? normalizeSelection(page.elements, currentIds)
         : resolvePointerSelection(page.elements, currentIds, hit.id, toggle);
       store.selectElements(pointerSelection);
-      const transaction = createMoveTransaction(page.elements, pointerSelection, hit.id);
+      const elementMap = new Map(page.elements.map((element) => [element.id, element]));
+      const transaction = isElementLocked(hit, elementMap)
+        ? null
+        : createMoveTransaction(page.elements, pointerSelection, hit.id);
       if (!transaction) {
         event.currentTarget.releasePointerCapture(event.pointerId);
         return;
@@ -814,7 +818,8 @@ export default function CanvasOverlay({
     const point = pointerToWorld(event.clientX, event.clientY);
     if (!page || !point) return;
     const hit = findTopElementAtPoint(page.elements, point, useEditorStore.getState().selectedElementIds);
-    if (hit && (hit.type === 'NewTextArea' || hit.type === 'Video')) setEditingId(hit.id);
+    const elementMap = new Map(page.elements.map((element) => [element.id, element]));
+    if (hit && !isElementLocked(hit, elementMap) && (hit.type === 'NewTextArea' || hit.type === 'Video')) setEditingId(hit.id);
   }, [pointerToWorld, setEditingId]);
 
   const elements = currentPage?.elements ?? [];
@@ -844,7 +849,7 @@ export default function CanvasOverlay({
   ));
   const contextContainerIds = getSelectionContextContainerIds(displayElements, selectedIds);
   const overflowContextContainerIds = getSelectionOverflowContextContainerIds(displayElements, selectedIds);
-  const selectionFrame = previewFrame ?? getSelectionFrame(displayElements, selectedIds);
+  const selectionFrame = previewFrame ?? getSelectionFrame(displayElements, selectedIds, { includeLocked: true });
   const canTransform = getTransformRootIds(displayElements, selectedIds).length > 0;
 
   const groupColors = new Map<string, string>();

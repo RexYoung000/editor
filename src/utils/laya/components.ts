@@ -9,6 +9,7 @@ import { getCachedVideoThumbnail } from '../videoThumbnail';
 import { getDefaultSkins, generateButtonSkin, generateCheckboxSkin, generateRadioSkin, generateInputSkin } from '../skinGenerator';
 import { resolveElementFont } from '../fontLoader';
 import { getEditorCanvasFillColor, isEditorCanvasHitThrough } from '../canvasComposite';
+import { isElementHidden } from '../layerState';
 
 function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string | null, stroke?: string, sw?: number) {
   if (stroke && sw && sw > 0) g.drawRect(x, y, w, h, fill, stroke, sw);
@@ -505,6 +506,23 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
   const isNewBrushSprite = element.type === 'NewBrushSprite';
   if (!hasSkin && !editorCanvasFillColor && !hasChildren && !hasItemImage && !isTextAreaEdit && !isDragViewBox && !isMatchBox && !isNewBrushSprite) {
     drawPlaceholder(comp, element);
+  }
+}
+
+export function applyEditorLayerVisibility(comp: LayaObj, element: Element, elements: Element[]): void {
+  if (isPreviewMode()) return;
+  const elementMap = new Map(elements.map((item) => [item.id, item]));
+  if (isElementHidden(element, elementMap)) {
+    comp.visible = false;
+    return;
+  }
+  const props = element.props as Record<string, unknown>;
+  if (element.type === 'KlBaseKeyboard') {
+    comp.visible = true;
+  } else if ('visible' in props) {
+    comp.visible = props.visible === true;
+  } else {
+    comp.visible = true;
   }
 }
 

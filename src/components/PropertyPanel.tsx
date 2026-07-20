@@ -22,6 +22,7 @@ import { collectInternalPageIssues, findActiveElementPage, isInternalPagesSubPag
 import { isContainerElementType } from '../utils/elementContainers';
 import { getElementParentContainment } from '../utils/canvasGeometry';
 import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../utils/layerPresentation';
+import { createElementMap, getElementLayerState } from '../utils/layerState';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -85,8 +86,11 @@ export default function PropertyPanel() {
     return (currentCourse.previewStages ?? []).find((stage) => stage.subPages.some((sp) => sp.id === currentSubPageId));
   })();
   const elements = currentPage?.elements ?? [];
+  const elementMap = createElementMap(elements);
   const selectedElements = elements.filter((e) => selectedElementIds.includes(e.id));
   const single = selectedElements.length === 1 ? selectedElements[0] : null;
+  const singleLayerState = single ? getElementLayerState(single, elementMap) : null;
+  const lockedSource = singleLayerState?.lockedById ? elementMap.get(singleLayerState.lockedById) : single;
   const parentContainment = single ? getElementParentContainment(single, elements) : null;
   const parentOverflow = parentContainment?.isOverflowing
     && isContainerElementType(parentContainment.parent.type)
@@ -94,6 +98,7 @@ export default function PropertyPanel() {
     : null;
 
   const handleChange = (key: string, value: unknown) => {
+    if (selectedElements.some((element) => getElementLayerState(element, elementMap).effectiveLocked)) return;
     // MatchingItem rightItemNames 双向同步：支持单线/多线模式
     if (single && single.type === 'MatchingItem' && key === 'rightItemNames') {
       const newTargetNames = String(value ?? '').split(',').map(n => n.trim()).filter(n => n !== '');
@@ -340,6 +345,7 @@ export default function PropertyPanel() {
 
   const handleTransformChange = (key: string, value: unknown) => {
     selectedElements.forEach((el) => {
+      if (getElementLayerState(el, elementMap).effectiveLocked) return;
       updateElement(el.id, { [key]: value } as Partial<Element>);
     });
     // MatchingItem 宽高变化时，需要从 store 读取最新状态后同步图片子节点尺寸
@@ -375,6 +381,7 @@ export default function PropertyPanel() {
   /** 切换父容器时修正 x/y，保持世界坐标不变 */
   const handleParentChange = (newParentId: string | undefined) => {
     selectedElements.forEach((el) => {
+      if (getElementLayerState(el, elementMap).effectiveLocked) return;
       const oldOffset = getAncestorOffset(el.parentId);
       const newOffset = getAncestorOffset(newParentId);
       // 世界坐标 = el.x + oldOffset，新局部坐标 = 世界坐标 - newOffset
@@ -385,7 +392,7 @@ export default function PropertyPanel() {
   };
 
   const handleActionsChange = (actions: Action[]) => {
-    if (single) updateElement(single.id, { actions });
+    if (single && !singleLayerState?.effectiveLocked) updateElement(single.id, { actions });
   };
 
   const handleDelete = () => {
@@ -411,7 +418,7 @@ export default function PropertyPanel() {
 
   // 通用变换属性（locked 元素不显示）
   const isDragSlotBox = single && (single.type === 'DragDropBox' || single.type === 'DragDragBox');
-  const transformFields: PropertyDef[] = single?.locked
+  const transformFields: PropertyDef[] = singleLayerState?.effectiveLocked
     ? (isDragSlotBox ? [] : [{ key: 'opacity', label: t('opacity'), type: 'slider' as const, min: 0, max: 100, step: 1 }])
     : [
       { key: 'x', label: 'X', type: 'number' },
@@ -433,7 +440,7 @@ export default function PropertyPanel() {
   };
 
   const commitLayerLabel = () => {
-    if (!single) return;
+    if (!single || singleLayerState?.effectiveLocked) return;
     const draft = editingValues.layerLabel;
     if (draft === undefined) return;
     const normalized = draft.trim();
@@ -444,7 +451,7 @@ export default function PropertyPanel() {
   };
 
   const commitElementIdentifier = () => {
-    if (!single || single.locked) return;
+    if (!single || singleLayerState?.effectiveLocked) return;
     const newName = editingValues.name?.trim();
     if (!newName || newName === single.name) {
       clearEditingValue('name');
@@ -533,6 +540,16 @@ export default function PropertyPanel() {
                 </div>
               )}
 
+              {singleLayerState?.effectiveLocked && (
+                <div className="mb-3 border border-amber-500/40 bg-amber-950/30 p-2 text-[10px] leading-relaxed text-amber-200" role="status">
+                  {singleLayerState.lockedById && lockedSource
+                    ? `受父级锁定：${getLayerDisplayName(lockedSource, elementMeta[lockedSource.type]?.label)}。请先解锁“${getLayerDisplayName(lockedSource, elementMeta[lockedSource.type]?.label)}”。`
+                    : '当前图层已锁定，仅可查看属性。'}
+                </div>
+              )}
+
+              <fieldset disabled={Boolean(singleLayerState?.effectiveLocked)} className="min-w-0 border-0 p-0 m-0">
+
               {single && (() => {
                 const metaLabel = translateLabel(elementMeta[single.type]?.label || single.type, language);
                 const layerLabel = editingValues.layerLabel !== undefined
@@ -569,7 +586,7 @@ export default function PropertyPanel() {
                       <input
                         className="flex-1 min-w-0 px-1.5 py-1 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
                         value={editingValues.name ?? single.name ?? ''}
-                        disabled={single.locked}
+                        disabled={singleLayerState?.effectiveLocked}
                         onChange={(event) => {
                           const filtered = event.target.value.replace(/[^a-zA-Z0-9_-]/g, '');
                           setEditingValues((previous) => ({ ...previous, name: filtered }));
@@ -871,7 +888,7 @@ export default function PropertyPanel() {
                     {t('optionFill')} 1920×1080
                   </button>
                 )}
-                {single && !single.locked && (
+                {single && !singleLayerState?.effectiveLocked && (
                   <div className="flex gap-1 mt-1">
                     <button onClick={() => { handleTransformChange('x', 0); handleTransformChange('y', 0); }}
                       className="flex-1 py-1 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
@@ -1004,7 +1021,7 @@ export default function PropertyPanel() {
                 />
               )}
 
-              {!single?.locked && (
+              {!singleLayerState?.effectiveLocked && (
                 <button
                   onClick={handleDelete}
                   className="w-full mt-2 flex items-center justify-center gap-1.5 py-1.5 text-xs bg-red-900/40 hover:bg-red-900/70 border border-red-800/50 rounded text-red-400"
@@ -1012,6 +1029,7 @@ export default function PropertyPanel() {
                   <Trash2 size={12} /> {t('deleteElement')}
                 </button>
               )}
+              </fieldset>
             </>
           )}
         </div>
