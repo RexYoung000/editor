@@ -418,7 +418,7 @@ export default function EditorWorkspaceLayout({
         data-layer-panel
         data-keep-selection
         data-layer-panel-mode={layout.mode}
-        className={`absolute z-50 flex flex-col overflow-hidden border border-slate-600 text-white transition-[box-shadow,background-color] duration-150 ${
+        className={`absolute z-40 flex flex-col overflow-hidden border border-slate-600 text-white transition-[box-shadow,background-color] duration-150 ${
           layout.mode === 'floating'
             ? 'rounded-lg bg-slate-900/90 shadow-2xl backdrop-blur-md'
             : 'bg-slate-900'
