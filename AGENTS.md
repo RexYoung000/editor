@@ -81,6 +81,13 @@ pnpm build
 - 改 `electron-builder`、依赖打包或编译 IPC 前阅读 [docs/electron-packaging.md](docs/electron-packaging.md)，不要绕开现有 pnpm 符号链接、传递依赖和 `ELECTRON_RUN_AS_NODE` 处理。
 - 涉及核心模块拆分、重复规则收敛或技术债立项前阅读 [代码健康治理与渐进式重构路线](docs/roadmap/code-health-refactoring.md)，按测试保护、渐进抽离和结果一致的顺序推进。
 
+### 正式发板与内部部署
+
+- 正式版本以已发布的 `vX.Y.Z` Tag 和 GitHub Release 为准；公司台式机只部署明确 Tag，不直接跟随 `main`、发布分支或任意提交。
+- GitHub 自动提供 Tag 源码归档，Windows 安装包作为 Release Asset 手动上传；Release 必须记录客户端是否升级、美术资源快照、已知限制和回退版本。
+- `public/builtin/library/`、`public/uploads/`、`preview-server/lessons/` 和本机配置不随 Git 更新，切换版本前必须检查、备份和保留，禁止用 `git clean` 处理部署目录。
+- 当前内部服务必须运行 `pnpm dev` 才具备 forge API，不能用静态 `pnpm build` 或 `pnpm preview` 代替。完整流程见 [正式发板与内部部署](docs/internal-deployment.md)。
+
 ## GitHub 协作入口
 
 Issue 拆分、Project 状态、任务领取、分支、提交、检查、PR、评审、合并、本地分支清理和版本发布均遵循 [CONTRIBUTING.md](CONTRIBUTING.md)。一个 Issue 对应一个短期分支和一个 PR；AI 在领取时同步“开发中”，创建 PR 后同步“评审中”，阻塞时记录原因并同步“已阻塞”，PR 合并收尾后同步“已完成”，但不自行改变产品范围、优先级或里程碑。

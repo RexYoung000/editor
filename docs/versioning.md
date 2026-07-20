@@ -19,7 +19,7 @@ forge 使用语义化版本（SemVer），版本号以 `package.json` 的 `versi
 - 从最新 `main` 创建 `release/<version>` 分支和发布 PR。
 - 发布 PR 统一修改版本号、回归记录和发布说明。
 
-这样可以避免并行开发分支频繁冲突 `package.json`。
+`release/<version>` 是普通 `<type>/<issue-number>-<short-name>` 分支命名的唯一例外，但仍然保持一个版本 Issue 对应一个发布 PR，并在合并后清理。这样可以避免并行开发分支频繁冲突 `package.json`。
 
 ## 自动同步位置
 
@@ -44,6 +44,8 @@ forge 使用语义化版本（SemVer），版本号以 `package.json` 的 `versi
 9. 创建 GitHub Release，按用户可感知变化编写发布说明并关联 Issue/PR。
 10. 由项目负责人执行最终分发或生产发布。
 
+从安装包上传、公司台式机部署到老师端交付、更新和回退的操作规则见 [正式发板与内部部署](./internal-deployment.md)。部署机只能运行已发布 Release 对应的 Tag，不得直接跟随 `main`。
+
 示例：
 
 ```bash
@@ -52,6 +54,20 @@ git push origin v1.2.0
 ```
 
 Tag 和 GitHub Release 只能在发布 PR 合并、回归完成后创建。
+
+## GitHub Release 内容
+
+GitHub 会根据 Tag 自动提供 Source code ZIP 和 TAR.GZ，不需要再次手动上传源码。每个正式 Release 还必须包含：
+
+- 与版本号一致、在 Windows 真实安装验证过的 Electron 安装包。
+- 安装包 SHA-256 校验值。
+- 面向老师的用户可感知变化和已知限制。
+- 公司服务器是否需要更新、美术资源是否变化。
+- 老师端是否必须重新安装；无法确认兼容时默认需要升级。
+- 上一可用版本和回退说明。
+- 关联版本 Issue 与发布 PR。
+
+源码、安装包、美术资源和运行数据的边界以 [正式发板与内部部署](./internal-deployment.md) 为准。
 
 ## `editor-version.txt`
 
