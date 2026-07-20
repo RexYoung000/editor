@@ -474,7 +474,7 @@ export default function EditorWorkspaceLayout({
             {layout.open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           </button>
         </div>
-        {layout.open && <div className="flex-1 min-h-0 overflow-hidden"><ElementList showHeader={false} /></div>}
+        {layout.open && <div className="flex flex-1 min-h-0 flex-col overflow-hidden"><ElementList showHeader={false} /></div>}
 
         {layout.open && layout.mode === 'bottom' && (
           <div onPointerDown={beginResize} className="absolute top-0 left-0 right-0 h-1 cursor-row-resize hover:bg-blue-400/70" title="拖动调整高度" />
