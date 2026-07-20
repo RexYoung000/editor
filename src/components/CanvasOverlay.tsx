@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { Element } from '../types';
+import type { EditorLayerGroup, Element } from '../types';
 import { useEditorStore } from '../store/editorStore';
 import { getObject } from '../utils/layaBridge';
 import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
@@ -162,7 +162,7 @@ interface CanvasOverlayProps {
   layaHostRef: React.RefObject<HTMLDivElement | null>;
   world: WorldState;
   selectedIds: string[];
-  currentPage: { elements: Element[] } | null;
+  currentPage: { elements: Element[]; editorLayerGroups?: EditorLayerGroup[] } | null;
   editingElement: Element | null;
   pageWidth: number;
   pageHeight: number;
@@ -340,12 +340,14 @@ export default function CanvasOverlay({
       width: Math.abs(marquee.endWX - marquee.startWX),
       height: Math.abs(marquee.endWY - marquee.startWY),
     };
-    const hits = selectElementsInRect(page.elements, rect);
+    const editorLayerGroupIds = new Set(page.editorLayerGroups?.map((group) => group.id) ?? []);
+    const hits = selectElementsInRect(page.elements, rect, editorLayerGroupIds);
     store.selectElements(resolveMarqueeSelection(
       page.elements,
       interaction.initialSelection,
       hits,
       interaction.toggle,
+      editorLayerGroupIds,
     ));
   }, [commitPageTurnPosition, restorePreview, setLocalMarquee]);
 
@@ -369,19 +371,20 @@ export default function CanvasOverlay({
       : findTopElementAtPoint(page.elements, point, currentIds);
     const toggle = event.metaKey || event.ctrlKey;
     const duplicateOnDrag = IS_MAC ? event.altKey : event.ctrlKey;
+    const editorLayerGroupIds = new Set(page.editorLayerGroups?.map((group) => group.id) ?? []);
     if (hit) {
       const hitWasSelected = currentIds.includes(hit.id);
       const delayedMacToggle = IS_MAC && event.metaKey && hitWasSelected;
       const pointerSelection = duplicateOnDrag && hitWasSelected
-        ? normalizeSelection(page.elements, currentIds)
+        ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
         : hitWasSelected && (!toggle || delayedMacToggle)
-        ? normalizeSelection(page.elements, currentIds)
-        : resolvePointerSelection(page.elements, currentIds, hit.id, toggle);
+        ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
+        : resolvePointerSelection(page.elements, currentIds, hit.id, toggle, editorLayerGroupIds);
       store.selectElements(pointerSelection);
       const elementMap = new Map(page.elements.map((element) => [element.id, element]));
       const transaction = isElementLocked(hit, elementMap)
         ? null
-        : createMoveTransaction(page.elements, pointerSelection, hit.id);
+        : createMoveTransaction(page.elements, pointerSelection, hit.id, editorLayerGroupIds);
       if (!transaction) {
         event.currentTarget.releasePointerCapture(event.pointerId);
         return;
@@ -395,11 +398,11 @@ export default function CanvasOverlay({
         started: false,
         transaction,
         clickSelection: delayedMacToggle
-          ? resolvePointerSelection(page.elements, currentIds, hit.id, true)
+          ? resolvePointerSelection(page.elements, currentIds, hit.id, true, editorLayerGroupIds)
           : duplicateOnDrag && toggle
-          ? resolvePointerSelection(page.elements, currentIds, hit.id, true)
+          ? resolvePointerSelection(page.elements, currentIds, hit.id, true, editorLayerGroupIds)
           : hitWasSelected && !toggle
-            ? resolvePointerSelection(page.elements, currentIds, hit.id, false)
+            ? resolvePointerSelection(page.elements, currentIds, hit.id, false, editorLayerGroupIds)
             : null,
         duplicateOnDrag,
         duplicateIds: null,
@@ -435,6 +438,7 @@ export default function CanvasOverlay({
       page.elements,
       useEditorStore.getState().selectedElementIds,
       corner as TransformHandle,
+      new Set(page.editorLayerGroups?.map((group) => group.id) ?? []),
     );
     if (!transaction) return;
     event.stopPropagation();
@@ -461,6 +465,7 @@ export default function CanvasOverlay({
       page.elements,
       useEditorStore.getState().selectedElementIds,
       point,
+      new Set(page.editorLayerGroups?.map((group) => group.id) ?? []),
     );
     if (!transaction) return;
     event.stopPropagation();
@@ -487,7 +492,9 @@ export default function CanvasOverlay({
       setDistanceHint(null);
       return;
     }
-    const frame = getSelectionFrame(page.elements, selectedIds);
+    const frame = getSelectionFrame(page.elements, selectedIds, {
+      editorLayerGroupIds: new Set(page.editorLayerGroups?.map((group) => group.id) ?? []),
+    });
     const hit = findTopElementAtPoint(page.elements, point, []);
     if (!frame || !hit || selectedIds.includes(hit.id)) {
       setDistanceHint(null);
@@ -843,14 +850,18 @@ export default function CanvasOverlay({
     ? displayElements.filter((element) => selectedIds.includes(element.id))
     : [];
   const elementMap = new Map(displayElements.map((element) => [element.id, element]));
+  const editorLayerGroupIds = new Set(currentPage?.editorLayerGroups?.map((group) => group.id) ?? []);
   const containerIds = getContainerIds(displayElements);
   const containerElements = displayElements.filter((element) => (
     containerIds.has(element.id) && !isElementHidden(element, elementMap)
   ));
   const contextContainerIds = getSelectionContextContainerIds(displayElements, selectedIds);
   const overflowContextContainerIds = getSelectionOverflowContextContainerIds(displayElements, selectedIds);
-  const selectionFrame = previewFrame ?? getSelectionFrame(displayElements, selectedIds, { includeLocked: true });
-  const canTransform = getTransformRootIds(displayElements, selectedIds).length > 0;
+  const selectionFrame = previewFrame ?? getSelectionFrame(displayElements, selectedIds, {
+    includeLocked: true,
+    editorLayerGroupIds,
+  });
+  const canTransform = getTransformRootIds(displayElements, selectedIds, editorLayerGroupIds).length > 0;
 
   const groupColors = new Map<string, string>();
   const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -1225,7 +1236,7 @@ export default function CanvasOverlay({
       })()}
 
       {multiElements.map((element) => {
-        const memberFrame = getSelectionFrame(displayElements, [element.id]);
+        const memberFrame = getSelectionFrame(displayElements, [element.id], { editorLayerGroupIds });
         if (!memberFrame) return null;
         const origin = worldRectToScreen(
           memberFrame.origin.x,

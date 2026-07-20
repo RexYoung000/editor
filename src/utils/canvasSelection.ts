@@ -57,13 +57,18 @@ function isAncestor(ancestorId: string, descendantId: string, elementMap: Map<st
   return false;
 }
 
-export function expandLayerGroups(elements: Element[], ids: string[]): string[] {
+export function expandLayerGroups(
+  elements: Element[],
+  ids: string[],
+  editorLayerGroupIds: Iterable<string> = [],
+): string[] {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
+  const explicitGroupIds = new Set(editorLayerGroupIds);
   const expanded: string[] = [];
   const seen = new Set<string>();
   for (const id of ids) {
     const element = elementMap.get(id);
-    const groupIds = element?.groupId
+    const groupIds = element?.groupId && !explicitGroupIds.has(element.groupId)
       ? elements.filter((item) => item.groupId === element.groupId).map((item) => item.id)
       : [id];
     for (const groupId of groupIds) {
@@ -76,10 +81,15 @@ export function expandLayerGroups(elements: Element[], ids: string[]): string[] 
   return expanded;
 }
 
-export function normalizeSelection(elements: Element[], ids: string[], preferredId?: string): string[] {
+export function normalizeSelection(
+  elements: Element[],
+  ids: string[],
+  preferredId?: string,
+  editorLayerGroupIds: Iterable<string> = [],
+): string[] {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
-  let normalized = expandLayerGroups(elements, ids).filter((id) => elementMap.has(id));
-  const preferredIds = preferredId ? new Set(expandLayerGroups(elements, [preferredId])) : null;
+  let normalized = expandLayerGroups(elements, ids, editorLayerGroupIds).filter((id) => elementMap.has(id));
+  const preferredIds = preferredId ? new Set(expandLayerGroups(elements, [preferredId], editorLayerGroupIds)) : null;
 
   if (preferredIds) {
     normalized = normalized.filter((id) => {
@@ -110,16 +120,17 @@ export function resolvePointerSelection(
   currentIds: string[],
   hitId: string | null,
   toggle: boolean,
+  editorLayerGroupIds: Iterable<string> = [],
 ): string[] {
   if (!hitId) return [];
-  const hitGroup = expandLayerGroups(elements, [hitId]);
-  if (!toggle) return normalizeSelection(elements, hitGroup, hitId);
+  const hitGroup = expandLayerGroups(elements, [hitId], editorLayerGroupIds);
+  if (!toggle) return normalizeSelection(elements, hitGroup, hitId, editorLayerGroupIds);
   const current = new Set(currentIds);
   const remove = hitGroup.every((id) => current.has(id));
   const next = remove
     ? currentIds.filter((id) => !hitGroup.includes(id))
     : [...currentIds, ...hitGroup];
-  return normalizeSelection(elements, next, remove ? undefined : hitId);
+  return normalizeSelection(elements, next, remove ? undefined : hitId, editorLayerGroupIds);
 }
 
 export function resolveMarqueeSelection(
@@ -127,15 +138,16 @@ export function resolveMarqueeSelection(
   currentIds: string[],
   hitIds: string[],
   toggle: boolean,
+  editorLayerGroupIds: Iterable<string> = [],
 ): string[] {
-  const expandedHits = expandLayerGroups(elements, hitIds);
-  if (!toggle) return normalizeSelection(elements, expandedHits);
+  const expandedHits = expandLayerGroups(elements, hitIds, editorLayerGroupIds);
+  if (!toggle) return normalizeSelection(elements, expandedHits, undefined, editorLayerGroupIds);
   const next = new Set(currentIds);
   for (const id of expandedHits) {
     if (next.has(id)) next.delete(id);
     else next.add(id);
   }
-  return normalizeSelection(elements, [...next]);
+  return normalizeSelection(elements, [...next], undefined, editorLayerGroupIds);
 }
 
 export function findTopElementAtPoint(
@@ -167,9 +179,13 @@ export function findTopElementAtPoint(
   return topSelected ?? topHit;
 }
 
-export function getTransformRootIds(elements: Element[], selectedIds: string[]): string[] {
+export function getTransformRootIds(
+  elements: Element[],
+  selectedIds: string[],
+  editorLayerGroupIds: Iterable<string> = [],
+): string[] {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
-  return normalizeSelection(elements, selectedIds).filter((id) => {
+  return normalizeSelection(elements, selectedIds, undefined, editorLayerGroupIds).filter((id) => {
     const element = elementMap.get(id);
     return element ? !isElementLocked(element, elementMap) : false;
   });
@@ -178,6 +194,7 @@ export function getTransformRootIds(elements: Element[], selectedIds: string[]):
 export function selectElementsInRect(
   elements: Element[],
   rect: CanvasRect,
+  editorLayerGroupIds: Iterable<string> = [],
 ): string[] {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
   const containerIds = getContainerIds(elements);
@@ -187,5 +204,5 @@ export function selectElementsInRect(
     if (isElementHidden(element, elementMap) || isElementLocked(element, elementMap)) return false;
     return doesElementIntersectRect(element, elements, rect);
   });
-  return normalizeSelection(elements, hits.map((element) => element.id));
+  return normalizeSelection(elements, hits.map((element) => element.id), undefined, editorLayerGroupIds);
 }

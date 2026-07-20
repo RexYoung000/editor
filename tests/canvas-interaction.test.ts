@@ -125,6 +125,19 @@ test('编组点击会选择整组，修饰键再次点击会移除整组', () =>
   assert.deepEqual(resolvePointerSelection(elements, ['first', 'second'], 'second', true), []);
 });
 
+test('显式编辑器图层组的成员可以独立点击、框选和变换', () => {
+  const first = element('first', { groupId: 'group-1', x: 10, y: 10, width: 20, height: 20 });
+  const second = element('second', { groupId: 'group-1', x: 100, y: 100, width: 20, height: 20 });
+  const elements = [first, second];
+  const editorLayerGroupIds = new Set(['group-1']);
+
+  assert.deepEqual(resolvePointerSelection(elements, [], 'first', false, editorLayerGroupIds), ['first']);
+  assert.deepEqual(resolvePointerSelection(elements, ['first'], 'second', true, editorLayerGroupIds), ['first', 'second']);
+  assert.deepEqual(selectElementsInRect(elements, { x: 0, y: 0, width: 40, height: 40 }, editorLayerGroupIds), ['first']);
+  assert.deepEqual(getTransformRootIds(elements, ['first'], editorLayerGroupIds), ['first']);
+  assert.deepEqual(createMoveTransaction(elements, ['first'], 'first', editorLayerGroupIds)?.roots.map((root) => root.id), ['first']);
+});
+
 test('框选默认选择相交元素，并排除锁定元素和拥有子元素的容器', () => {
   const inside = element('inside', { x: 10, y: 10, width: 20, height: 20 });
   const crossing = element('crossing', { x: 25, y: 25, width: 20, height: 20 });
