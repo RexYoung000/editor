@@ -17,7 +17,7 @@ forge 使用语义化版本（SemVer），版本号以 `package.json` 的 `versi
 - 普通功能、修复和文档 PR 不单独修改版本号。
 - 准备向使用者交付一组已完成变化时，创建版本 Issue。
 - 从最新 `main` 创建 `release/<version>` 分支和发布 PR。
-- 发布 PR 统一修改版本号、回归记录和发布说明。
+- 发布 PR 统一修改版本号，并在 `docs/releases/v<version>.md` 记录发布说明、回归结果、待完成验收和已知限制。
 
 `release/<version>` 是普通 `<type>/<issue-number>-<short-name>` 分支命名的唯一例外，但仍然保持一个版本 Issue 对应一个发布 PR，并在合并后清理。这样可以避免并行开发分支频繁冲突 `package.json`。
 
@@ -35,7 +35,7 @@ forge 使用语义化版本（SemVer），版本号以 `package.json` 的 `versi
 
 1. 创建版本 Issue，列出纳入的 PR、目标版本、回归范围和已知风险。
 2. 创建 `release/<version>` 分支与发布 PR。
-3. 更新 `package.json` 版本和 README 展示版本。
+3. 更新 `package.json` 版本、README 展示版本和 `docs/releases/v<version>.md` 发布记录。
 4. 执行 `pnpm test`、`pnpm build` 和版本相关人工回归。
 5. 执行 `pnpm electron:build`，检查安装包启动、服务器连接和关键 IPC。
 6. 由评审者确认版本内容、已知限制和回退方式。
