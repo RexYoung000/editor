@@ -38,6 +38,8 @@ pnpm electron:build
 
 安装包输出到 `release/<version>/`。普通开发和 PR 验证不执行最终打包；版本发布前由项目负责人按 [electron-packaging.md](./electron-packaging.md) 验证。
 
+安装包生成后的 Tag、GitHub Release、公司台式机部署、老师端交付和回退步骤见 [正式发板与内部部署](./internal-deployment.md)。
+
 ## 相关文档
 
 - [开发环境](./development.md)

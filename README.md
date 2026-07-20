@@ -84,6 +84,7 @@ pnpm build
 - [系统架构](./docs/architecture.md)：当前真实架构和关键边界。
 - [测试与验收](./docs/testing.md)：自动检查和人工验收要求。
 - [版本管理](./docs/versioning.md)：SemVer、Tag 和发布流程。
+- [正式发板与内部部署](./docs/internal-deployment.md)：Windows 安装包、GitHub Release、公司台式机、老师端更新和回退流程。
 - [导出流程](./docs/export-pipeline.md)：预览、发布和课件工程生成。
 - [开发服务器](./docs/dev-server.md)：Vite middleware、路由和 API。
 - [自定义模板](./docs/custom-templates.md)：本地模板存储与资源去重。
@@ -106,4 +107,4 @@ docs/                   架构、流程、设计和迭代文档
 
 ## 发布边界
 
-普通开发 PR 不升级版本，也不执行最终发布。准备发布时单独创建版本 Issue 和发布 PR，完成版本号、测试、Electron 打包、Tag 与 GitHub Release。最终生产发布由项目负责人执行。
+普通开发 PR 不升级版本，也不执行最终发布。准备发布时单独创建版本 Issue 和发布 PR，完成版本号、测试、Electron 打包、Tag 与 GitHub Release。公司台式机只部署正式 Release 对应的 Tag；安装包、素材库、老师端交付、更新和回退按 [正式发板与内部部署](./docs/internal-deployment.md) 执行。最终生产发布由项目负责人执行。

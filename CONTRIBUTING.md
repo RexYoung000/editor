@@ -81,6 +81,8 @@ git switch -c feat/23-preset-s4-s7
 
 不要在同一分支混入无关 Issue。需要依赖另一项未合并工作时，应在 Issue 和 PR 中明确依赖关系。
 
+版本 Issue 是分支命名的唯一例外：按 `release/<version>` 创建，例如 `release/1.2.0`。它仍然遵守一个版本 Issue 对应一个发布 PR，不作为长期发布分支保留。
+
 ## 4. 开发顺序
 
 1. 阅读根目录 `AGENTS.md`、Issue、Project 卡片和相关模块文档。
@@ -175,6 +177,8 @@ GitHub 会自动删除通过 PR 合并的远端分支，但不会删除开发者
 - 版本号遵循 SemVer，规则见 `docs/versioning.md`。
 - 发布 PR 完成版本号、回归测试、打包前置检查和发布说明。
 - 合并发布 PR 后创建 `vX.Y.Z` Tag 和 GitHub Release。
+- GitHub 自动生成 Tag 源码归档；Windows 安装包作为 Release Asset 手动上传，并附 SHA-256、客户端升级要求、素材变化和回退说明。
+- 公司台式机只部署正式 Release 对应的 Tag，不直接跟随 `main`；完整操作见 `docs/internal-deployment.md`。
 - 最终 Electron 打包、分发或生产发布由项目负责人执行。
 
 ## 10. AI 协作边界
