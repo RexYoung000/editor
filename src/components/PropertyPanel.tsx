@@ -11,7 +11,6 @@ import FractionAnswerEditorModal from './FractionAnswerEditorModal';
 import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import PageTurnPageList from './PageTurnPageList';
-import { KEYBOARD_PRESETS } from '../elements/keyboardPresets';
 import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock } from 'lucide-react';
 import type { Action, Element } from '../types';
 import { useI18n } from '../i18n/context';
@@ -26,6 +25,7 @@ import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../u
 import { createElementMap, getElementLayerState } from '../utils/layerState';
 import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
 import { fractionInputSummary, parseFractionInput } from '../utils/mathInput';
+import { keyboardBindingInfo, keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -1311,25 +1311,31 @@ export default function PropertyPanel() {
       <BindKeyboardModal
         keyboards={(currentPage?.elements ?? [])
           .filter((el) => el.type === 'KlBaseKeyboard')
-          .filter((el) => {
-            const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-            const preset = KEYBOARD_PRESETS.find((item) => item.id === presetId);
-            return preset?.compatibleInputTypes.includes(single.type) ?? false;
-          })
+          .filter((el) => keyboardSupportsInput(el, single.type, currentPage?.elements ?? []))
           .map((el) => {
-            const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-            const presetId = props?._keyboardPreset?.id;
-            const preset = KEYBOARD_PRESETS.find((p) => p.id === presetId);
-            const thumbnail = preset?.thumbnail ?? elementMeta[el.type]?.placeholderImage;
+            const info = keyboardBindingInfo(el, currentPage?.elements ?? []);
             return {
               element: el,
-              camp: String(props?.camp ?? ''),
-              thumbnail,
+              camp: keyboardCamp(el),
+              thumbnail: info.preset?.thumbnail ?? elementMeta[el.type]?.placeholderImage,
+              label: info.label,
+              legacy: info.legacy,
             };
           })}
         currentCamp={String((single.props as Record<string, unknown> | undefined)?.camp ?? '')}
-        onSelect={(camp) => {
+        onSelect={(keyboard) => {
+          const pageElements = currentPage?.elements ?? [];
+          const camp = keyboard.camp || nextKeyboardCamp(pageElements);
+          const presetId = keyboardPresetId(keyboard.element, pageElements);
+          const keyboardProps: Record<string, unknown> = { ...keyboard.element.props, camp };
+          // 仅为没有子节点的旧键盘补上可复用预设；保留已有历史按键结构，避免导出时被替换。
+          const hasChildren = pageElements.some((element) => element.parentId === keyboard.element.id);
+          if (presetId && !keyboard.element.props._keyboardPreset && !hasChildren) {
+            keyboardProps._keyboardPreset = { id: presetId };
+          }
+          updateElement(keyboard.element.id, { props: keyboardProps });
           handleChange('camp', camp);
+          saveHistory();
           setBindKeyboardOpen(false);
         }}
         onClose={() => setBindKeyboardOpen(false)}

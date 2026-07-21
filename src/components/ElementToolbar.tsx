@@ -14,6 +14,7 @@ import { showToast } from '../utils/toast';
 import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './QuickPresetDialog';
 import type { Action, Element } from '../types';
 import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
+import { keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -128,19 +129,24 @@ export default function ElementToolbar() {
     const [activeTab, setActiveTab] = useState('commonComponents');
   const [keyboardDialogOpen, setKeyboardDialogOpen] = useState(false);
   const [pendingKeyboardInputId, setPendingKeyboardInputId] = useState<string | null>(null);
+  const [pendingKeyboardInputType, setPendingKeyboardInputType] = useState<string | null>(null);
   const [quickPresetOpen, setQuickPresetOpen] = useState(false);
   const [quickPresetKind, setQuickPresetKind] = useState<QuickPresetKind>('confirm');
   const [quickPresetBusy, setQuickPresetBusy] = useState(false);
 
-  const findExistingKeyboardCamp = (presetId: string): string | undefined => {
+  const findExistingKeyboardCamp = (presetId: string, inputType: string): string | undefined => {
     const state = useEditorStore.getState();
     const page = findActiveElementPage(state.currentCourse, state.currentSubPageId, state.currentInternalPageId);
-    const keyboard = page?.elements.find((element) => {
-      const props = element.props as { _keyboardPreset?: { id?: string } } | undefined;
-      return element.type === 'KlBaseKeyboard' && props?._keyboardPreset?.id === presetId;
-    });
-    const camp = (keyboard?.props as { camp?: unknown } | undefined)?.camp;
-    return typeof camp === 'string' && camp ? camp : undefined;
+    const keyboards = (page?.elements ?? []).filter((element) =>
+      element.type === 'KlBaseKeyboard' && keyboardSupportsInput(element, inputType, page?.elements ?? []));
+    const keyboard = keyboards.find((element) => keyboardPresetId(element, page?.elements ?? []) === presetId)
+      ?? keyboards.find((element) => !keyboardPresetId(element, page?.elements ?? []));
+    if (!keyboard || !page) return undefined;
+    const existingCamp = keyboardCamp(keyboard);
+    if (existingCamp) return existingCamp;
+    const camp = nextKeyboardCamp(page.elements);
+    updateElement(keyboard.id, { props: { ...keyboard.props, camp } });
+    return camp;
   };
 
   const addKeyboardFromPreset = (preset: KeyboardPreset, shouldSelect: boolean): string => {
@@ -182,6 +188,7 @@ export default function ElementToolbar() {
     const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
     if (type === 'KlBaseKeyboard') {
       setPendingKeyboardInputId(null);
+      setPendingKeyboardInputType(null);
       setKeyboardDialogOpen(true);
       return;
     }
@@ -195,14 +202,15 @@ export default function ElementToolbar() {
     if (type === 'KlInputImage') {
       const preset = KEYBOARD_PRESETS.find((item) => item.id === 'preset2');
       if (preset) {
-        const camp = findExistingKeyboardCamp(preset.id) ?? addKeyboardFromPreset(preset, false);
-        element.props = { ...element.props, camp };
+        const camp = findExistingKeyboardCamp(preset.id, type);
+        if (camp) element.props = { ...element.props, camp };
+        else needsKeyboardChoice = true;
       }
     }
 
     if (type === 'FractionInput') {
       const preset = KEYBOARD_PRESETS.find((item) => item.id === 'fraction');
-      const camp = preset ? findExistingKeyboardCamp(preset.id) : undefined;
+      const camp = preset ? findExistingKeyboardCamp(preset.id, type) : undefined;
       if (camp) element.props = { ...element.props, camp };
       else needsKeyboardChoice = true;
     }
@@ -213,6 +221,7 @@ export default function ElementToolbar() {
     selectElement(element.id, false);
     if (needsKeyboardChoice) {
       setPendingKeyboardInputId(element.id);
+      setPendingKeyboardInputType(type);
       setKeyboardDialogOpen(true);
     }
   };
@@ -225,6 +234,7 @@ export default function ElementToolbar() {
       if (input) updateElement(input.id, { props: { ...input.props, camp } });
       selectElement(pendingKeyboardInputId, false);
       setPendingKeyboardInputId(null);
+      setPendingKeyboardInputType(null);
       setKeyboardDialogOpen(false);
       return;
     }
@@ -235,8 +245,9 @@ export default function ElementToolbar() {
 
   const handleKeyboardDialogClose = () => {
     if (pendingKeyboardInputId) {
-      showToast('分数输入框已保留，请在属性面板中绑定分数键盘', 'warning');
+      showToast('输入框已保留，请在属性面板中绑定键盘', 'warning');
       setPendingKeyboardInputId(null);
+      setPendingKeyboardInputType(null);
     }
     setKeyboardDialogOpen(false);
   };
@@ -425,25 +436,10 @@ export default function ElementToolbar() {
     const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
     const isFlat = isFlatLesson(course?.kind);
 
-    // 查找或创建键盘2
-    let kbCamp: string | undefined;
-    if (course && subPageId) {
-      for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-        for (const page of stage.subPages) {
-          if (page.id !== subPageId) continue;
-          const active = findActiveElementPage(course, page.id, useEditorStore.getState().currentInternalPageId);
-          for (const el of active?.elements ?? []) {
-            const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-            if (el.type === 'KlBaseKeyboard' && p?._keyboardPreset?.id === 'preset2') {
-              kbCamp = typeof p.camp === 'string' ? p.camp : undefined;
-              break;
-            }
-          }
-        }
-      }
-    }
+    // 优先复用当前页面已有的兼容键盘（包括没有 _keyboardPreset 的旧键盘）。
+    const preset2 = KEYBOARD_PRESETS.find(p => p.id === 'preset2');
+    let kbCamp: string | undefined = preset2 ? findExistingKeyboardCamp(preset2.id, 'KlInputImage') : undefined;
     if (!kbCamp) {
-      const preset2 = KEYBOARD_PRESETS.find(p => p.id === 'preset2');
       if (preset2) {
         let maxIdx = 0;
         if (course) {
@@ -938,8 +934,8 @@ export default function ElementToolbar() {
         open={keyboardDialogOpen}
         onClose={handleKeyboardDialogClose}
         onSelect={handlePresetSelected}
-        presets={pendingKeyboardInputId
-          ? KEYBOARD_PRESETS.filter((preset) => preset.compatibleInputTypes.includes('FractionInput'))
+        presets={pendingKeyboardInputType
+          ? KEYBOARD_PRESETS.filter((preset) => preset.compatibleInputTypes.includes(pendingKeyboardInputType))
           : KEYBOARD_PRESETS}
       />
       {quickPresetOpen && (
