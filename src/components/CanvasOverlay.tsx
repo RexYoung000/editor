@@ -9,6 +9,7 @@ import {
   type CanvasPoint,
 } from '../utils/canvasGeometry';
 import {
+  findCanvasPointerTarget,
   findTopElementAtPoint,
   getContainerIds,
   getSelectionContextContainerIds,
@@ -366,9 +367,12 @@ export default function CanvasOverlay({
 
     const store = useEditorStore.getState();
     const currentIds = store.selectedElementIds;
-    const hit = containerHandle
-      ? page.elements.find((element) => element.id === containerHandle.dataset.containerHandle) ?? null
-      : findTopElementAtPoint(page.elements, point, currentIds);
+    const hit = findCanvasPointerTarget(
+      page.elements,
+      point,
+      currentIds,
+      containerHandle?.dataset.containerHandle,
+    );
     const toggle = event.metaKey || event.ctrlKey;
     const duplicateOnDrag = IS_MAC ? event.altKey : event.ctrlKey;
     const editorLayerGroupIds = new Set(page.editorLayerGroups?.map((group) => group.id) ?? []);
@@ -495,7 +499,7 @@ export default function CanvasOverlay({
     const frame = getSelectionFrame(page.elements, selectedIds, {
       editorLayerGroupIds: new Set(page.editorLayerGroups?.map((group) => group.id) ?? []),
     });
-    const hit = findTopElementAtPoint(page.elements, point, []);
+    const hit = findTopElementAtPoint(page.elements, point, [], { includeLocked: true });
     if (!frame || !hit || selectedIds.includes(hit.id)) {
       setDistanceHint(null);
       return;
