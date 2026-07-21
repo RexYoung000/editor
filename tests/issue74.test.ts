@@ -83,6 +83,8 @@ test('数字与分数键盘的兼容矩阵和资源注册完整', () => {
     },
   );
   assert.equal(elementMeta.FractionInput?.runtime, 'Components.FractionInput');
+  assert.equal(elementMeta.FractionInput?.defaultProps?.sizeGrid, '10,10,10,10');
+  assert.match(String(elementMeta.FractionInput?.placeholderImage), /runtime\/game\/inputImg\/img_1\.png$/);
   assert.match(String(elementMeta.FractionInput?.defaultProps?.lineSkin), /mathKeyboard\/img_line\.png$/);
   assert.match(String(elementMeta.FractionInput?.defaultProps?.fontClipSkin), /mathKeyboard\/img_w2Input\.png$/);
 });

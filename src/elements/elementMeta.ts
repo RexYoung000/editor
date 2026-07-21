@@ -307,7 +307,8 @@ export const elementMeta: Record<string, Meta> = {
     label: '分数输入框',
     category: 'commonComponents',
     defaultSize: { width: 360, height: 120 },
-    placeholderImage: assetSrc('klInput.placeholder'),
+    // 编辑器直接使用普通输入框底图；配合 sizeGrid 避免宽分数框拉伸圆角。
+    placeholderImage: assetSrc('klInput.bg'),
     runtime: 'Components.FractionInput',
     defaultProps: {
       anchorX: 0,
@@ -324,6 +325,7 @@ export const elementMeta: Record<string, Meta> = {
       spaceX: 0,
       align: 'center',
       canSelected: true,
+      sizeGrid: '10,10,10,10',
     },
     exportChildren: KL_INPUT_IMAGE_CONFIG.exportChildren,
     properties: [
