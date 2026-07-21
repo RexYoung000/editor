@@ -149,6 +149,19 @@ test('普通数字与分数混排时按实际字体缩放宽度推进位置', ()
   }
 });
 
+test('分数的分子分母子输入格禁止再次插入分数结构', () => {
+  const runtimeFiles = [
+    'public/builtin/layaProjectModel/Game1_LT/src/view/game_lt/Components/FractionInput.ts',
+    'public/builtin/layaProjectModel/Game1_HW/src/view/game_hw/Components/FractionInput.ts',
+    'public/builtin/layaProjectModel/Game1_PREVIEW/src/view/game_preview/Components/FractionInput.ts',
+  ];
+
+  for (const relativePath of runtimeFiles) {
+    const source = readFileSync(join(process.cwd(), relativePath), 'utf8');
+    assert.match(source, /input1\["inputValidator"\] = \(value: string\) => value !== "<_>" && value !== "\[<_>\]"/);
+  }
+});
+
 test('嵌套键盘皮肤目录生成完整 atlas 路径', () => {
   const normal = normalCourseFixture();
   normal.stages[0].subPages[0].elements.push(decimalKeyboardElement('normal-decimal-keyboard'));

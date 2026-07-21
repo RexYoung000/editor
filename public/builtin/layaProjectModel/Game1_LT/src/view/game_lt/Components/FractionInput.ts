@@ -372,6 +372,8 @@ export default class FractionInput extends KlInputImage {
         input1.canSelected = "true";
         input1.fontClipSkin = this.fontClipSkin;
         input1["sheet"] = this.sheet;
+        // 分子和分母是叶子输入格，不允许在其中再次插入分数结构。
+        input1["inputValidator"] = (value: string) => value !== "<_>" && value !== "[<_>]";
 
         input1.place = this.fractionDigits;
         input1["contentScale"] = 0.8;
