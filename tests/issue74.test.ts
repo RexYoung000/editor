@@ -56,6 +56,22 @@ function decimalKeyboardElement(id: string): Element {
   };
 }
 
+function decimalInputElement(id: string): Element {
+  return {
+    id,
+    type: 'KlInputImage',
+    layaType: 'KlInputImage',
+    name: 'decimal input',
+    x: 300,
+    y: 300,
+    width: 120,
+    height: 60,
+    rotation: 0,
+    opacity: 1,
+    props: { camp: 'L12_DECIMAL-1', place: 4, _judgeAnswer: '1.2' },
+  };
+}
+
 test('数字与分数键盘的兼容矩阵和资源注册完整', () => {
   assert.deepEqual(
     Object.fromEntries(KEYBOARD_PRESETS.map((preset) => [preset.id, preset.compatibleInputTypes])),
@@ -97,10 +113,16 @@ test('正课、作业、预习导出都引用 FractionInput 运行时', () => {
 test('嵌套键盘皮肤目录生成完整 atlas 路径', () => {
   const normal = normalCourseFixture();
   normal.stages[0].subPages[0].elements.push(decimalKeyboardElement('normal-decimal-keyboard'));
-  const normalPage = (buildExportRegressionArtifacts(normal).config.pages as Array<Record<string, unknown>>)[0];
+  normal.stages[0].subPages[0].elements.push(decimalInputElement('normal-decimal-input'));
+  const normalArtifacts = buildExportRegressionArtifacts(normal);
+  const normalPage = (normalArtifacts.config.pages as Array<Record<string, unknown>>)[0];
   assert.ok((normalPage.res as Array<Record<string, unknown>>).some((entry) =>
     entry.url === 'res/atlas/game_lt/image/mathKeyboard/yellow.atlas',
   ));
+  const exportedInput = sceneNodes(normalArtifacts.scenes[0].scene).find((node) =>
+    node.type === 'KlInputImage' && node.props?.camp === 'L12_DECIMAL-1' && node.props?.place === 4,
+  );
+  assert.ok(exportedInput?.props?.var, '数学键盘输入格必须带有运行时 var');
 
   const preview = previewCourseFixture();
   preview.previewStages![0].subPages[0].elements.push(decimalKeyboardElement('preview-decimal-keyboard'));

@@ -351,6 +351,29 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
     }
   }
 
+  // 数学键盘初始化代码会直接引用这些组件，需要把对应 var 写入 scene。
+  const decimalCamps = new Set(elements.flatMap((el) => {
+    const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
+    return el.type === 'KlBaseKeyboard'
+      && props?._keyboardPreset?.id === 'decimal'
+      && typeof props.camp === 'string'
+      ? [props.camp]
+      : [];
+  }));
+  for (const el of elements) {
+    const props = el.props as Record<string, unknown> | undefined;
+    const presetId = (props?._keyboardPreset as { id?: string } | undefined)?.id;
+    if (el.type === 'KlInputImage' && decimalCamps.has(String(props?.camp ?? ''))) {
+      needsVar.add(el.id);
+    }
+    if (el.type === 'KlBaseKeyboard' && (presetId === 'decimal' || presetId === 'fraction') && props?.disabled === true) {
+      needsVar.add(el.id);
+    }
+    if (el.type === 'FractionInput' && (props?.canSelected === false || props?.canSelected === 'false')) {
+      needsVar.add(el.id);
+    }
+  }
+
   // 3. 翻页组件:左/右按钮 + 标签按钮 + 分页 ContainerBox(被 actionType 内部 inline 引用)
   const ptBoxes = elements.filter(e => e.type === 'PageTurnBox');
   for (const ptBox of ptBoxes) {

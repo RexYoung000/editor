@@ -323,11 +323,13 @@ const preset2Children: ExportChild[] = [
   },
 ];
 
-const MATH_KEY_SHEET = '0123456789.%+-*/=()x:';
-const MATH_KEY_X = [24, 106, 188, 270, 352, 434];
+const MATH_KEY_SHEET = '0123456789+-*/=<>()p';
+const MATH_KEY_X = [69, 165, 261];
+const MATH_KEY_Y = [67, 159, 252, 344];
 
 const mathKey = (x: number, y: number, output: string | number): ExportChild => {
   const isFraction = output === '<_>';
+  const isDelete = output === 'del';
   const icon = isFraction
     ? {
         normal: assetExport('keyboard.math.fractionNormal'),
@@ -335,22 +337,36 @@ const mathKey = (x: number, y: number, output: string | number): ExportChild => 
       }
     : null;
   const childForState = (active: boolean): ExportChild[] => {
-    if (output === 'del') {
-      return [{ type: 'Image', props: { skin: assetExport('keyboard.math.delIcon'), centerX: 0, centerY: 0 } }];
+    if (isDelete) {
+      return [{
+        type: 'Image',
+        props: {
+          skin: assetExport(active ? 'keyboard.math.delActive' : 'keyboard.math.delIcon'),
+          centerX: 0,
+          centerY: 0,
+        },
+      }];
     }
     if (icon) {
-      return [{ type: 'Image', props: { skin: active ? icon.active : icon.normal, centerX: 0, centerY: 0 } }];
+      return [{
+        type: 'Image',
+        props: {
+          skin: active ? icon.active : icon.normal,
+          centerX: 0,
+          centerY: 0,
+        },
+      }];
     }
     return [{
       type: 'FontClip',
       props: {
-        x: active ? 20 : 14,
-        y: active ? 7 : 2,
-        value: String(output),
+        x: 42,
+        y: 39,
+        anchorX: 0.5,
+        anchorY: 0.5,
+        value: output === '.' ? 'p' : String(output),
         skin: assetExport(active ? 'keyboard.math.numActive' : 'keyboard.math.numNormal'),
         sheet: MATH_KEY_SHEET,
-        scaleX: 0.8,
-        scaleY: 0.8,
       },
     }];
   };
@@ -359,8 +375,10 @@ const mathKey = (x: number, y: number, output: string | number): ExportChild => 
     props: {
       x,
       y,
-      width: 74,
-      height: 47,
+      width: 84,
+      height: 88,
+      anchorX: 0.5,
+      anchorY: 0.5,
       output,
       runtime: 'com.klzz.ui.custom.KeyBoard.KlKey',
     },
@@ -368,12 +386,8 @@ const mathKey = (x: number, y: number, output: string | number): ExportChild => 
       {
         type: 'Image',
         props: {
-          top: 0,
-          right: 0,
-          bottom: 0,
-          left: 0,
           skin: assetExport('keyboard.math.keyNormal'),
-          sizeGrid: '13,13,13,13',
+          sizeGrid: '0,28,0,28',
           name: 'normal',
         },
         child: childForState(false),
@@ -381,12 +395,7 @@ const mathKey = (x: number, y: number, output: string | number): ExportChild => 
       {
         type: 'Image',
         props: {
-          top: -6,
-          right: -6,
-          bottom: -6,
-          left: -6,
           skin: assetExport('keyboard.math.keyActive'),
-          sizeGrid: '20,20,20,20',
           name: 'active',
         },
         child: childForState(true),
@@ -401,19 +410,23 @@ function mathKeyboardChildren(specialOutput: '.' | '<_>'): ExportChild[] {
     {
       type: 'Image',
       props: {
-        x: 0,
-        y: 0,
-        width: 532,
-        height: 146,
+        x: 65,
+        y: 65,
+        width: 330,
+        height: 420,
         skin: assetExport('keyboard.math.bg'),
-        sizeGrid: '20,16,20,12',
+        sizeGrid: '53,0,57,0',
       },
     },
-    { type: 'Image', props: { name: 'arrow' } },
+    { type: 'Image', props: { x: 230, y: 0, skin: assetExport('keyboard.math.arrow'), name: 'arrow', anchorX: 0.5 } },
     {
       type: 'Box',
-      props: { x: 0, y: 0, width: 532, height: 146, name: 'keysBox' },
-      child: outputs.map((output, index) => mathKey(MATH_KEY_X[index % 6], index < 6 ? 20 : 79, output)),
+      props: { x: 65, y: 65, width: 330, height: 420, name: 'keysBox' },
+      child: outputs.map((output, index) => mathKey(
+        MATH_KEY_X[index % 3],
+        MATH_KEY_Y[Math.floor(index / 3)],
+        output,
+      )),
     },
   ];
 }
@@ -459,7 +472,7 @@ export const KEYBOARD_PRESETS: KeyboardPreset[] = [
     thumbnail: assetSrc('keyboard.decimal.thumbnail'),
     compatibleInputTypes: ['KlInputImage'],
     campPrefix: 'L12_DECIMAL',
-    defaultSize: { width: 532, height: 146 },
+    defaultSize: { width: 460, height: 550 },
     defaultProps: {
       anchorX: 0,
       anchorY: 0,
@@ -478,7 +491,7 @@ export const KEYBOARD_PRESETS: KeyboardPreset[] = [
     thumbnail: assetSrc('keyboard.fraction.thumbnail'),
     compatibleInputTypes: ['FractionInput'],
     campPrefix: 'L12_FRACTION',
-    defaultSize: { width: 532, height: 146 },
+    defaultSize: { width: 460, height: 550 },
     defaultProps: {
       anchorX: 0,
       anchorY: 0,
