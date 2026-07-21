@@ -2,7 +2,7 @@
 
 > 作者：Wills.Deng【微信：43592330】  
 > 第二作者：AI 助手 Kiro  
-> 更新日期：2026-07-16
+> 更新日期：2026-07-21
 
 ---
 
@@ -122,6 +122,10 @@
 - 皮肤预览裂图修复（share/comp/ 路径不显示缩略图）
 - 皮肤编辑器应用修复（一次性合并所有 props 变更）
 
+### v1.2.0 已确认需求（待实施）
+
+v1.2.0 已确认资源库检索、锁定图层命中、数字小数点与分数键盘、填空题答案方案、选择题配置五项工作。完整范围、优先级、资源索取时机和验收边界见 [forge v1.2.0 需求基线](./roadmap/v1.2.0-requirements.md)。本节仅表示需求已对齐，不表示功能已完成。
+
 ---
 
 ## 未完成 / 后续计划
@@ -156,6 +160,7 @@
 | 同步机制 | docs/sync-mechanism.md | ISyncComp、xpath、TransManager |
 | 视图架构 | docs/view-architecture.md | ViewManager/MainView/PageView |
 | 资源管理 | docs/resource-management.md | 资源体系、打包方案、皮肤规范 |
+| v1.2.0 需求基线 | docs/roadmap/v1.2.0-requirements.md | 已确认的产品规则、Issue、资源依赖与验收边界 |
 | 里程碑 | docs/milestones.md | 本文档 |
 
 ## 代码结构
