@@ -3,7 +3,7 @@
 > 作者：Wills.Deng【微信：43592330】  
 > 第二作者：AI 助手 Kiro  
 > 来源：`sdk_baiya_base_prod_2.0` 源码 + `sdk_baiya_base.js` 编译产物  
-> 更新日期：2026-07-16
+> 更新日期：2026-07-21
 
 所有组件均实现 `ISyncComp` 接口，属性变更时自动触发三端同步。
 
@@ -158,6 +158,12 @@
 
 事件：`INPUT_LATER`
 
+#### v1.2.0 计划扩展（尚未实施）
+
+[Issue #74](https://github.com/RexYoung000/editor/issues/74) 将新增可视化分数输入框，并与普通输入框按键盘兼容性分别绑定；一个分数固定占外框 3 个逻辑字符位，分子与分母各最多 4 位，外框缩放只改变显示尺寸，不改变老师配置的最大字符数。
+
+[Issue #72](https://github.com/RexYoung000/editor/issues/72) 将在同一个填空题判定目标内部增加多套完整答案方案和指定空位互换规则。该计划不等于 SDK 当前已经提供多目标聚合 API；实现需要保持编辑器、预览和导出结果一致。
+
 ---
 
 ## 图片类
@@ -265,6 +271,10 @@
 | isNull | Boolean | true | 是否未选 |
 
 方法：`cancelSel(name)`, `cancelAllSel()`, `pushSel(name)`, `getSelRetArray()`, `currSelObjs()`
+
+#### v1.2.0 计划扩展（尚未实施）
+
+[Issue #76](https://github.com/RexYoung000/editor/issues/76) 将在编辑器侧增加明确的单选/多选模式和按子选项元素引用保存的正确答案配置。单选模式限制一个答案；多选模式允许配置多个答案并做完整集合比较。现有 `rightItemNames` 和 `upperLimit` 仍是当前运行时事实，兼容或迁移方式需在实施 Issue 中确定，不能把计划字段当作当前 SDK 属性。
 
 ---
 
@@ -528,6 +538,15 @@
 ### KlKeyboard
 
 继承：`KlBaseKeyboard`（完整键盘组件，含布局）
+
+#### v1.2.0 新键盘预设（尚未实施）
+
+[Issue #74](https://github.com/RexYoung000/editor/issues/74) 将在现有选择器中新增两种预设：
+
+- 数字与小数点键盘：0–9、小数点、删除；最多一个小数点，首位小数点自动补为 `0.`。
+- 分数输入键盘：0–9、分数按钮、删除；只绑定计划新增的分数输入框。
+
+数学表达式键盘（数字、分数、运算符、括号和小数点组合）不在 v1.2.0 范围。视觉资源需在领取 #74 后向开发者索要，资源未到位时不得自行定稿皮肤。
 
 ### KlInputImage
 
