@@ -1223,6 +1223,47 @@ export function buildSdkJudgeClickInitCode(
   return code;
 }
 
+export function buildMathKeyboardInitCode(page: SubPage, getVar: (element: Element) => string): string {
+  const decimalCamps = new Set(page.elements.flatMap((element) => {
+    const props = element.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
+    return element.type === 'KlBaseKeyboard'
+      && props?._keyboardPreset?.id === 'decimal'
+      && typeof props.camp === 'string'
+      ? [props.camp]
+      : [];
+  }));
+  let code = '';
+
+  for (const element of page.elements) {
+    const props = element.props as Record<string, unknown> | undefined;
+    const elementRef = `this.${getVar(element)}`;
+    if (element.type === 'KlInputImage' && decimalCamps.has(String(props?.camp ?? ''))) {
+      code += `        ${elementRef}.on(KlKeyboardEvent.INPUT_LATER, this, function(input: KlInputImage) {\n`;
+      code += `            var target: KlInputImage = input || ${elementRef};\n`;
+      code += `            var value = String(target.fontClipValue || "");\n`;
+      code += `            var firstDot = value.indexOf(".");\n`;
+      code += `            if (firstDot >= 0) value = value.substring(0, firstDot + 1) + value.substring(firstDot + 1).replace(/\\./g, "");\n`;
+      code += `            if (value.charAt(0) === ".") value = target.place >= 2 ? "0." : "";\n`;
+      code += `            if (value !== target.fontClipValue) target.fontClipValue = value;\n`;
+      code += `        });\n`;
+    }
+
+    const presetId = (props?._keyboardPreset as { id?: string } | undefined)?.id;
+    const isDisabledMathKeyboard = element.type === 'KlBaseKeyboard'
+      && (presetId === 'decimal' || presetId === 'fraction')
+      && props?.disabled === true;
+    const isDisabledFractionInput = element.type === 'FractionInput'
+      && (props?.canSelected === false || props?.canSelected === 'false');
+    if (isDisabledMathKeyboard || isDisabledFractionInput) {
+      code += `        ${elementRef}.alpha = 0.45;\n`;
+      code += `        ${elementRef}.gray = true;\n`;
+      code += `        ${elementRef}.mouseEnabled = false;\n`;
+    }
+  }
+
+  return code;
+}
+
 function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<string, string>, varAssignment: Map<string, string>, uiNamespace = 'game_lt'): string {
   /** 根据元素 ID 获取分配的 var 名（用于 this.xxx 引用） */
   const getVar = (el: Element): string => {
@@ -1231,6 +1272,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   const buildActionBody = makeActionBuilder(varAssignment, resourceMap, uiNamespace);
   let initCode = '';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildMathKeyboardInitCode(page, getVar);
 
   // 口才反馈动画：如果有 onClickInitConfirmCH / *WithLock / onClickInitGameConfirmCH / *WithLock 或 playKcRightAni / playKcWrongAni，需要在类末尾追加 playRightAni/playWrongAni
   const hasCHConfirm = page.elements.some(el =>
@@ -1604,6 +1646,9 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
 import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
 `
     : '';
+  const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
+  const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
+  const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n\n' : '';
 
   initCode += internalRuntime.initCode;
 
@@ -1616,11 +1661,11 @@ import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
 import KlKey = com.klzz.ui.custom.KeyBoard.KlKey;
 import KlBaseKeyboard = com.klzz.ui.custom.KeyBoard.KlBaseKeyboard;
 import SelectableObj = com.klzz.ui.custom.SelectableObj;
-${matchingImports}import { GameUtils } from "./GameUtils";
+${matchingImports}${fractionImport}import { GameUtils } from "./GameUtils";
 
 export default class ${sceneName} extends ui.${uiNamespace}.${sceneName}UI {
 
-    public initView(byReset: boolean) {
+${fractionReference}    public initView(byReset: boolean) {
         super.initView(byReset);
 
 ${initCode}        //add script
@@ -1643,6 +1688,7 @@ function generateHomeworkSceneTs(
   let initCode = '';
   let checkResultCode = '';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildMathKeyboardInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
 
@@ -1808,18 +1854,19 @@ function generateHomeworkSceneTs(
 import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
 `
     : '';
+  const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
+  const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
+  const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n' : '';
 
   initCode += internalRuntime.initCode;
 
   return `import { ui } from "../../ui/layaMaxUI";
 import KlInputImage = com.klzz.ui.custom.KeyBoard.KlInputImage;
 import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
-${matchingImports}import { GameUtils } from "./GameUtils";
-import FractionInput from "./Components/FractionInput";
+${matchingImports}${fractionImport}import { GameUtils } from "./GameUtils";
 
 export default class ${sceneName} extends ui.game_hw.${sceneName}UI {
-    _ref = [FractionInput];
-    public initView(byReset: boolean) {
+${fractionReference}    public initView(byReset: boolean) {
         super.initView(byReset);
 ${initCode}        //add script
     }

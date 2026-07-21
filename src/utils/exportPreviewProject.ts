@@ -8,6 +8,7 @@ import { collectImageSizes, isLargeImage } from './imageSize';
 import {
   buildScene,
   buildSdkJudgeClickInitCode,
+  buildMathKeyboardInitCode,
   collectGameZipFiles,
   collectResources,
   extractZipFromServer,
@@ -64,6 +65,7 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     return '';
   };
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildMathKeyboardInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
   // onClickInitConfirm / onClickInitConfirmWithLock 事件：在 initView 注入 GameUtils.initConfirm
@@ -247,6 +249,9 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
 
   // 页面首次显示动作最后执行，确保输入、拖拽、翻页等组件已完成初始化。
   initCode += internalRuntime.initCode;
+  const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
+  const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
+  const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n\n' : '';
 
   return `import { ui } from "../../ui/layaMaxUI";
 
@@ -257,11 +262,11 @@ import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
 import KlKey = com.klzz.ui.custom.KeyBoard.KlKey;
 import KlBaseKeyboard = com.klzz.ui.custom.KeyBoard.KlBaseKeyboard;
 import SelectableObj = com.klzz.ui.custom.SelectableObj;
-import { GameUtils } from "./GameUtils";
+${fractionImport}import { GameUtils } from "./GameUtils";
 
 export default class ${sceneName} extends ui.game_preview.${sceneName}UI {
 
-    public initView(byReset: boolean) {
+${fractionReference}    public initView(byReset: boolean) {
         super.initView(byReset);
 
 ${initCode}        //add script

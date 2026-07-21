@@ -71,6 +71,20 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'keyboard.preset2.delIcon',     src: 'runtime/game/jpL8/img_delete.png',  exportPath: 'game/jpL8/img_delete.png' },
   { id: 'keyboard.preset2.thumbnail',   src: 'editor/keyboard-preset2-thumb.png' },
 
+  // v1.2 数学输入键盘：小数与分数预设共用的旧课件资源
+  { id: 'keyboard.math.bg',             src: 'runtime/game/mathKeyboard/img_box.png',       exportPath: 'game/mathKeyboard/img_box.png' },
+  { id: 'keyboard.math.keyNormal',      src: 'runtime/game/mathKeyboard/img_bg.png',        exportPath: 'game/mathKeyboard/img_bg.png' },
+  { id: 'keyboard.math.keyActive',      src: 'runtime/game/mathKeyboard/img_light.png',     exportPath: 'game/mathKeyboard/img_light.png' },
+  { id: 'keyboard.math.numNormal',      src: 'runtime/game/mathKeyboard/img_w1Nor.png',     exportPath: 'game/mathKeyboard/img_w1Nor.png' },
+  { id: 'keyboard.math.numActive',      src: 'runtime/game/mathKeyboard/img_w1Sel.png',     exportPath: 'game/mathKeyboard/img_w1Sel.png' },
+  { id: 'keyboard.math.delIcon',        src: 'runtime/game/mathKeyboard/img_back.png',      exportPath: 'game/mathKeyboard/img_back.png' },
+  { id: 'keyboard.math.fractionNormal', src: 'runtime/game/mathKeyboard/img_fraction1.png', exportPath: 'game/mathKeyboard/img_fraction1.png' },
+  { id: 'keyboard.math.fractionActive', src: 'runtime/game/mathKeyboard/img_fraction2.png', exportPath: 'game/mathKeyboard/img_fraction2.png' },
+  { id: 'keyboard.math.fractionLine',   src: 'runtime/game/mathKeyboard/img_line.png',      exportPath: 'game/mathKeyboard/img_line.png' },
+  { id: 'keyboard.math.inputFont',      src: 'runtime/game/mathKeyboard/img_w2Input.png',   exportPath: 'game/mathKeyboard/img_w2Input.png' },
+  { id: 'keyboard.decimal.thumbnail',   src: 'editor/keyboard-decimal-thumb.png' },
+  { id: 'keyboard.fraction.thumbnail',  src: 'editor/keyboard-fraction-thumb.png' },
+
   // ─── 标签图资源（标签图组件 NewTabImg 的内置皮肤库）───
   { id: 'tabImg.img_bc',      src: 'runtime/game/tabImg/img_bc.png',      exportPath: 'game/tabImg/img_bc.png' },
   { id: 'tabImg.img_gg_1',    src: 'runtime/game/tabImg/img_gg_1.png',    exportPath: 'game/tabImg/img_gg_1.png' },

@@ -18,7 +18,7 @@ const TWO_STATE: JudgeCondition[] = ['right', 'wrong'];
 
 export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCapability | null {
   if (!element) return null;
-  if (element.type === 'KlInputImage') {
+  if (element.type === 'KlInputImage' || element.type === 'FractionInput') {
     return {
       kind: 'inputImage',
       conditions: THREE_STATE,

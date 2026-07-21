@@ -106,6 +106,7 @@ function getMatchingLayout(direction: 0 | 1 | 2): MatchingLayout {
 export default function ElementToolbar() {
   const { language } = useI18n();
   const addElement = useEditorStore((s) => s.addElement);
+  const updateElement = useEditorStore((s) => s.updateElement);
   const selectElement = useEditorStore((s) => s.selectElement);
   const frozen = useEditorStore((s) => {
     const course = s.currentCourse;
@@ -126,123 +127,41 @@ export default function ElementToolbar() {
   });
     const [activeTab, setActiveTab] = useState('commonComponents');
   const [keyboardDialogOpen, setKeyboardDialogOpen] = useState(false);
+  const [pendingKeyboardInputId, setPendingKeyboardInputId] = useState<string | null>(null);
   const [quickPresetOpen, setQuickPresetOpen] = useState(false);
   const [quickPresetKind, setQuickPresetKind] = useState<QuickPresetKind>('confirm');
   const [quickPresetBusy, setQuickPresetBusy] = useState(false);
 
-  const handleAdd = (type: string) => {
-    if (frozen) return;
-    const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
-    if (type === 'KlBaseKeyboard') {
-      setKeyboardDialogOpen(true);
-      return;
-    }
-    if (type === 'NewBrushSprite') {
-      handleAddBrush();
-      return;
-    }
-    const element = createDefaultElement(type, subPageId);
-
-    // 输入框组件：自动绑定或创建键盘2
-    if (type === 'KlInputImage') {
-      const course = useEditorStore.getState().currentCourse;
-      let existingKbCamp: string | undefined;
-      if (course && subPageId) {
-        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-          for (const page of stage.subPages) {
-            if (page.id !== subPageId) continue;
-            const active = findActiveElementPage(course, page.id, useEditorStore.getState().currentInternalPageId);
-            for (const el of active?.elements ?? []) {
-              const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-              if (el.type === 'KlBaseKeyboard' && p?._keyboardPreset?.id === 'preset2') {
-                existingKbCamp = typeof p.camp === 'string' ? p.camp : undefined;
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      if (existingKbCamp) {
-        // 画布上已有键盘2，直接绑定
-        element.props = { ...element.props, camp: existingKbCamp };
-      } else {
-        // 画布上没有键盘2，自动创建一个并绑定
-        const preset2 = KEYBOARD_PRESETS.find(p => p.id === 'preset2');
-        if (preset2) {
-          let maxIdx = 0;
-          if (course) {
-            const re = new RegExp(`^${preset2.campPrefix}-(\\d+)$`);
-            for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-              for (const page of stage.subPages) {
-                for (const elementPage of getElementPages(page)) for (const el of elementPage.elements) {
-                  const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-                  if (p?._keyboardPreset?.id !== preset2.id) continue;
-                  const camp = typeof p.camp === 'string' ? p.camp : '';
-                  const m = camp.match(re);
-                  if (m) {
-                    const n = parseInt(m[1], 10);
-                    if (n > maxIdx) maxIdx = n;
-                  }
-                }
-              }
-            }
-          }
-          const kbCamp = `${preset2.campPrefix}-${maxIdx + 1}`;
-          const kbElement = createDefaultElement('KlBaseKeyboard', subPageId);
-          kbElement.width = preset2.defaultSize.width;
-          kbElement.height = preset2.defaultSize.height;
-          // 放在画布底部居中，避免与输入框重叠
-          kbElement.x = Math.round((1920 - preset2.defaultSize.width) / 2);
-          kbElement.y = 1080 - preset2.defaultSize.height;
-          kbElement.props = {
-            ...preset2.defaultProps,
-            camp: kbCamp,
-            _keyboardPreset: { id: preset2.id },
-          };
-          const kbObj = createLayaComponent(kbElement);
-          if (kbObj) registerObject(kbElement.id, kbObj);
-          addElement(kbElement);
-          element.props = { ...element.props, camp: kbCamp };
-        }
-      }
-    }
-
-    const obj = createLayaComponent(element);
-    if (obj) registerObject(element.id, obj);
-    addElement(element);
-    selectElement(element.id, false);
+  const findExistingKeyboardCamp = (presetId: string): string | undefined => {
+    const state = useEditorStore.getState();
+    const page = findActiveElementPage(state.currentCourse, state.currentSubPageId, state.currentInternalPageId);
+    const keyboard = page?.elements.find((element) => {
+      const props = element.props as { _keyboardPreset?: { id?: string } } | undefined;
+      return element.type === 'KlBaseKeyboard' && props?._keyboardPreset?.id === presetId;
+    });
+    const camp = (keyboard?.props as { camp?: unknown } | undefined)?.camp;
+    return typeof camp === 'string' && camp ? camp : undefined;
   };
 
-  const handlePresetSelected = (preset: KeyboardPreset) => {
-    // 直接从 store 取最新状态，避免 closure 捕获到旧 currentCourse 导致 camp 编号不递增
+  const addKeyboardFromPreset = (preset: KeyboardPreset, shouldSelect: boolean): string => {
     const state = useEditorStore.getState();
-    const course = state.currentCourse;
-    const currentStageId = state.currentStageId;
     const currentSubPageId = state.currentSubPageId;
     let maxIdx = 0;
-    if (course && currentStageId && currentSubPageId) {
+    if (state.currentCourse && currentSubPageId) {
       const re = new RegExp(`^${preset.campPrefix}-(\\d+)$`);
-      // 只扫描当前 subPage（小关卡），每个 subPage 内 camp 编号独立
-      const currentStage = [...course.stages, ...(course.previewStages ?? [])].find(s => s.id === currentStageId);
-      const currentPage = currentStage?.subPages.find(p => p.id === currentSubPageId);
-      if (currentPage) {
-        const active = findActiveElementPage(course, currentPage.id, state.currentInternalPageId);
-        for (const el of active?.elements ?? []) {
-          const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-          if (p?._keyboardPreset?.id !== preset.id) continue;
-          const camp = typeof p.camp === 'string' ? p.camp : '';
-          const m = camp.match(re);
-          if (m) {
-            const n = parseInt(m[1], 10);
-            if (n > maxIdx) maxIdx = n;
-          }
+      const page = findActiveElementPage(state.currentCourse, currentSubPageId, state.currentInternalPageId);
+      for (const element of page?.elements ?? []) {
+        const props = element.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
+        if (props?._keyboardPreset?.id !== preset.id) continue;
+        const match = String(props.camp ?? '').match(re);
+        if (match) {
+          const index = Number(match[1]);
+          if (index > maxIdx) maxIdx = index;
         }
       }
     }
     const camp = `${preset.campPrefix}-${maxIdx + 1}`;
     const subPageId = currentSubPageId ?? undefined;
-
     const element = createDefaultElement('KlBaseKeyboard', subPageId);
     element.width = preset.defaultSize.width;
     element.height = preset.defaultSize.height;
@@ -254,7 +173,71 @@ export default function ElementToolbar() {
     const obj = createLayaComponent(element);
     if (obj) registerObject(element.id, obj);
     addElement(element);
+    if (shouldSelect) selectElement(element.id, false);
+    return camp;
+  };
+
+  const handleAdd = (type: string) => {
+    if (frozen) return;
+    const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
+    if (type === 'KlBaseKeyboard') {
+      setPendingKeyboardInputId(null);
+      setKeyboardDialogOpen(true);
+      return;
+    }
+    if (type === 'NewBrushSprite') {
+      handleAddBrush();
+      return;
+    }
+    const element = createDefaultElement(type, subPageId);
+    let needsKeyboardChoice = false;
+
+    if (type === 'KlInputImage') {
+      const preset = KEYBOARD_PRESETS.find((item) => item.id === 'preset2');
+      if (preset) {
+        const camp = findExistingKeyboardCamp(preset.id) ?? addKeyboardFromPreset(preset, false);
+        element.props = { ...element.props, camp };
+      }
+    }
+
+    if (type === 'FractionInput') {
+      const preset = KEYBOARD_PRESETS.find((item) => item.id === 'fraction');
+      const camp = preset ? findExistingKeyboardCamp(preset.id) : undefined;
+      if (camp) element.props = { ...element.props, camp };
+      else needsKeyboardChoice = true;
+    }
+
+    const obj = createLayaComponent(element);
+    if (obj) registerObject(element.id, obj);
+    addElement(element);
     selectElement(element.id, false);
+    if (needsKeyboardChoice) {
+      setPendingKeyboardInputId(element.id);
+      setKeyboardDialogOpen(true);
+    }
+  };
+
+  const handlePresetSelected = (preset: KeyboardPreset) => {
+    if (pendingKeyboardInputId) {
+      const camp = addKeyboardFromPreset(preset, false);
+      const page = currentElementPage();
+      const input = page?.elements.find((element) => element.id === pendingKeyboardInputId);
+      if (input) updateElement(input.id, { props: { ...input.props, camp } });
+      selectElement(pendingKeyboardInputId, false);
+      setPendingKeyboardInputId(null);
+      setKeyboardDialogOpen(false);
+      return;
+    }
+
+    addKeyboardFromPreset(preset, true);
+    setKeyboardDialogOpen(false);
+  };
+
+  const handleKeyboardDialogClose = () => {
+    if (pendingKeyboardInputId) {
+      showToast('分数输入框已保留，请在属性面板中绑定分数键盘', 'warning');
+      setPendingKeyboardInputId(null);
+    }
     setKeyboardDialogOpen(false);
   };
 
@@ -953,8 +936,11 @@ export default function ElementToolbar() {
 
       <KeyboardPresetDialog
         open={keyboardDialogOpen}
-        onClose={() => setKeyboardDialogOpen(false)}
+        onClose={handleKeyboardDialogClose}
         onSelect={handlePresetSelected}
+        presets={pendingKeyboardInputId
+          ? KEYBOARD_PRESETS.filter((preset) => preset.compatibleInputTypes.includes('FractionInput'))
+          : KEYBOARD_PRESETS}
       />
       {quickPresetOpen && (
         <QuickPresetDialog

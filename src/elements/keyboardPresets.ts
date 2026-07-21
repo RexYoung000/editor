@@ -19,6 +19,7 @@ export interface KeyboardPreset {
   id: string;
   label: string;
   thumbnail: string;
+  compatibleInputTypes: string[];
   /** 自动 camp 编号前缀：拖入第 N 个该预设时，camp = `${campPrefix}-${N}`（如 'L11_1' → L11_1-1, L11_1-2…）*/
   campPrefix: string;
   defaultProps: Record<string, unknown>;
@@ -322,11 +323,107 @@ const preset2Children: ExportChild[] = [
   },
 ];
 
+const MATH_KEY_SHEET = '0123456789.%+-*/=()x:';
+const MATH_KEY_X = [24, 106, 188, 270, 352, 434];
+
+const mathKey = (x: number, y: number, output: string | number): ExportChild => {
+  const isFraction = output === '<_>';
+  const icon = isFraction
+    ? {
+        normal: assetExport('keyboard.math.fractionNormal'),
+        active: assetExport('keyboard.math.fractionActive'),
+      }
+    : null;
+  const childForState = (active: boolean): ExportChild[] => {
+    if (output === 'del') {
+      return [{ type: 'Image', props: { skin: assetExport('keyboard.math.delIcon'), centerX: 0, centerY: 0 } }];
+    }
+    if (icon) {
+      return [{ type: 'Image', props: { skin: active ? icon.active : icon.normal, centerX: 0, centerY: 0 } }];
+    }
+    return [{
+      type: 'FontClip',
+      props: {
+        x: active ? 20 : 14,
+        y: active ? 7 : 2,
+        value: String(output),
+        skin: assetExport(active ? 'keyboard.math.numActive' : 'keyboard.math.numNormal'),
+        sheet: MATH_KEY_SHEET,
+        scaleX: 0.8,
+        scaleY: 0.8,
+      },
+    }];
+  };
+  return {
+    type: 'KlKey',
+    props: {
+      x,
+      y,
+      width: 74,
+      height: 47,
+      output,
+      runtime: 'com.klzz.ui.custom.KeyBoard.KlKey',
+    },
+    child: [
+      {
+        type: 'Image',
+        props: {
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          skin: assetExport('keyboard.math.keyNormal'),
+          sizeGrid: '13,13,13,13',
+          name: 'normal',
+        },
+        child: childForState(false),
+      },
+      {
+        type: 'Image',
+        props: {
+          top: -6,
+          right: -6,
+          bottom: -6,
+          left: -6,
+          skin: assetExport('keyboard.math.keyActive'),
+          sizeGrid: '20,20,20,20',
+          name: 'active',
+        },
+        child: childForState(true),
+      },
+    ],
+  };
+};
+
+function mathKeyboardChildren(specialOutput: '.' | '<_>'): ExportChild[] {
+  const outputs: Array<string | number> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0, specialOutput, 'del'];
+  return [
+    {
+      type: 'Image',
+      props: {
+        x: 0,
+        y: 0,
+        width: 532,
+        height: 146,
+        skin: assetExport('keyboard.math.bg'),
+        sizeGrid: '20,16,20,12',
+      },
+    },
+    { type: 'Image', props: { name: 'arrow' } },
+    {
+      type: 'Box',
+      props: { x: 0, y: 0, width: 532, height: 146, name: 'keysBox' },
+      child: outputs.map((output, index) => mathKey(MATH_KEY_X[index % 6], index < 6 ? 20 : 79, output)),
+    },
+  ];
+}
+
 export const KEYBOARD_PRESETS: KeyboardPreset[] = [
   {
     id: 'preset1',
     label: '键盘1',
     thumbnail: assetSrc('keyboard.preset1.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
     campPrefix: 'L11_1',
     defaultSize: { width: 446, height: 436 },
     defaultProps: {
@@ -343,6 +440,7 @@ export const KEYBOARD_PRESETS: KeyboardPreset[] = [
     id: 'preset2',
     label: '键盘2',
     thumbnail: assetSrc('keyboard.preset2.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
     campPrefix: 'L8_2',
     defaultSize: { width: 681, height: 419 },
     defaultProps: {
@@ -354,6 +452,44 @@ export const KEYBOARD_PRESETS: KeyboardPreset[] = [
       fixed: true,
     },
     children: preset2Children,
+  },
+  {
+    id: 'decimal',
+    label: '数字与小数点',
+    thumbnail: assetSrc('keyboard.decimal.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
+    campPrefix: 'L12_DECIMAL',
+    defaultSize: { width: 532, height: 146 },
+    defaultProps: {
+      anchorX: 0,
+      anchorY: 0,
+      sheet: '0123456789.',
+      pattern: 13,
+      visible: false,
+      isHide: true,
+      fixed: true,
+      disabled: false,
+    },
+    children: mathKeyboardChildren('.'),
+  },
+  {
+    id: 'fraction',
+    label: '分数输入',
+    thumbnail: assetSrc('keyboard.fraction.thumbnail'),
+    compatibleInputTypes: ['FractionInput'],
+    campPrefix: 'L12_FRACTION',
+    defaultSize: { width: 532, height: 146 },
+    defaultProps: {
+      anchorX: 0,
+      anchorY: 0,
+      sheet: '0123456789',
+      pattern: 13,
+      visible: false,
+      isHide: true,
+      fixed: true,
+      disabled: false,
+    },
+    children: mathKeyboardChildren('<_>'),
   },
 ];
 
