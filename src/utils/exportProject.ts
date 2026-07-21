@@ -2112,6 +2112,7 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
           }
           // PageTurnBox 不携带 pages 数组，ContainerBox 子元素资源由主循环收集
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
+          collectExportChildrenRes(meta?.exportChildren, resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
           const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
           const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
           collectExportChildrenRes(presetChildren, resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
@@ -2264,6 +2265,7 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
             }
           }
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
+          collectExportChildrenRes(meta?.exportChildren, resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);
           const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
           const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
           collectExportChildrenRes(presetChildren, resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);

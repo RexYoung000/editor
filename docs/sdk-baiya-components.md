@@ -809,7 +809,7 @@ Kl* 系列：KlButton, KlLabel, KlCheckBox, KlRadio, KlRadioGroup,
             MatchingGame, MatchingItem,
             OneStrokeGame, OneStrokeItem,
             KlKeyboard, KlKey, KlBaseKeyboard,
-            ChoiceBox, KlInputBox, KlInputImage,
+            ChoiceBox, KlInputBox, KlInputImage, FractionInput,
             BrushSprite, TwinkleBox, CountDown,
             DragViewBox, KlChangeColorBox,
             PriviewGuideFinger, ImageScaleTime,
@@ -828,3 +828,5 @@ window.Klzz.__init__(1920, 1080, null, null, null, null);
 ```
 
 已在 `layaBridge.ts` 的 `preloadAtlas()` 中调用。
+
+`FractionInput` 是课件工程按页生成的自定义组件。为兼容旧版场景 JSON，生成代码会同时注册 `Components.FractionInput` 和 `FractionInput` 两个名称；两者都可以作为 Laya UI JSON 的 `type` 使用。

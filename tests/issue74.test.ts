@@ -104,6 +104,10 @@ test('正课、作业、预习导出都引用 FractionInput 运行时', () => {
   const homeworkArtifacts = buildExportRegressionArtifacts(homework);
   assert.match(homeworkArtifacts.scenes[0].source, /import FractionInput from "\.\/Components\/FractionInput"/);
   assert.match(homeworkArtifacts.scenes[0].source, /_ref = \[FractionInput\]/);
+  const homeworkPage = (homeworkArtifacts.config.pages as Array<Record<string, unknown>>)[0];
+  assert.ok((homeworkPage.res as Array<Record<string, unknown>>).some((entry) =>
+    entry.url === 'res/atlas/game_hw/image/inputImg.atlas',
+  ));
 
   const preview = previewCourseFixture();
   preview.previewStages![0].subPages[0].elements.push(fractionElement('preview-fraction'));

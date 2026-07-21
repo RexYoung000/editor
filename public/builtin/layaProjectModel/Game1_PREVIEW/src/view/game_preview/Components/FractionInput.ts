@@ -640,5 +640,7 @@ export default class FractionInput extends KlInputImage {
 }
 
 Laya.View.regComponent("Components.FractionInput", FractionInput);
+// 兼容旧版场景 JSON 使用的短组件名。
+Laya.View.regComponent("FractionInput", FractionInput);
 
 
