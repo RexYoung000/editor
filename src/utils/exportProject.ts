@@ -88,6 +88,14 @@ export function isBuiltinResourcePath(v: unknown): v is string {
   return typeof v === 'string' && lookupBuiltinByExportPath(v) !== undefined;
 }
 
+/** 返回图片所属的 atlas 目录，保留图片前缀后的全部目录层级。 */
+export function getImageAtlasDirectory(mapped: string, imagePrefix: string): string | undefined {
+  if (!mapped.startsWith(imagePrefix)) return undefined;
+  const relative = mapped.slice(imagePrefix.length);
+  const lastSlash = relative.lastIndexOf('/');
+  return lastSlash > 0 ? relative.slice(0, lastSlash) : undefined;
+}
+
 /** game/xxx/file.png → <viewDir>/image/xxx/file.png，game/image/file.png → <viewDir>/image/img/file.png */
 export function builtinExportToProjectPath(exportPath: string, viewDir = 'game_lt'): string {
   const parts = exportPath.split('/');
@@ -1927,8 +1935,8 @@ function collectExportChildrenRes(
         const mapped = resourceMap.get(String(v));
         if (!mapped) continue;
         if (mapped.startsWith(imagePrefix)) {
-          const parts = mapped.split('/');
-          if (parts.length >= 3) imageDirs.add(parts[2]);
+          const dir = getImageAtlasDirectory(mapped, imagePrefix);
+          if (dir) imageDirs.add(dir);
         } else if (mapped.startsWith(soundPrefix) && !addedSingleFiles.has(mapped)) {
           resEntries.push({ url: mapped, type: 'sound' });
           addedSingleFiles.add(mapped);
@@ -2019,8 +2027,8 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
               }
               // 小图收集子目录用于 atlas
               if (!isLarge) {
-                const parts = mapped.split('/');
-                if (parts.length >= 3) imageDirs.add(parts[2]);
+                const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                if (dir) imageDirs.add(dir);
               }
             }
 
@@ -2055,8 +2063,8 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
@@ -2073,8 +2081,8 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
@@ -2174,8 +2182,8 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                 addedSingleFiles.add(mapped);
               }
               if (!isLarge) {
-                const parts = mapped.split('/');
-                if (parts.length >= 3) imageDirs.add(parts[2]);
+                const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                if (dir) imageDirs.add(dir);
               }
             }
             if (mapped.startsWith('game_hw/sound/') && !addedSingleFiles.has(mapped)) {
@@ -2208,8 +2216,8 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
@@ -2226,8 +2234,8 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }

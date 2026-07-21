@@ -63,6 +63,12 @@ s9_v8_89_LessonZK/
 }
 ```
 
+当内置资源存在多级目录时，atlas 路径必须保留完整目录层级。例如
+`game_lt/image/mathKeyboard/yellow/img_jpk.png` 对应
+`res/atlas/game_lt/image/mathKeyboard/yellow.atlas`，不能截断为
+`mathKeyboard.atlas`。`config.json` 中的 atlas URL 必须与
+`fileconfig.json` 的 key 和目录前缀一一对应。
+
 **version.json** — 文件名 hash 映射（缓存控制）：
 ```json
 {

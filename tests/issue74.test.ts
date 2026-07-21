@@ -41,6 +41,21 @@ function fractionElement(id: string): Element {
   };
 }
 
+function decimalKeyboardElement(id: string): Element {
+  return {
+    id,
+    type: 'KlBaseKeyboard',
+    layaType: 'KlBaseKeyboard',
+    x: 600,
+    y: 500,
+    width: 330,
+    height: 420,
+    rotation: 0,
+    opacity: 1,
+    props: { _keyboardPreset: { id: 'decimal' }, camp: 'L12_DECIMAL-1' },
+  };
+}
+
 test('数字与分数键盘的兼容矩阵和资源注册完整', () => {
   assert.deepEqual(
     Object.fromEntries(KEYBOARD_PRESETS.map((preset) => [preset.id, preset.compatibleInputTypes])),
@@ -77,6 +92,22 @@ test('正课、作业、预习导出都引用 FractionInput 运行时', () => {
   const previewArtifacts = buildPreviewExportRegressionArtifacts(preview);
   assert.match(previewArtifacts.scenes[0].source, /import FractionInput from "\.\/Components\/FractionInput"/);
   assert.match(previewArtifacts.scenes[0].source, /_ref = \[FractionInput\]/);
+});
+
+test('嵌套键盘皮肤目录生成完整 atlas 路径', () => {
+  const normal = normalCourseFixture();
+  normal.stages[0].subPages[0].elements.push(decimalKeyboardElement('normal-decimal-keyboard'));
+  const normalPage = (buildExportRegressionArtifacts(normal).config.pages as Array<Record<string, unknown>>)[0];
+  assert.ok((normalPage.res as Array<Record<string, unknown>>).some((entry) =>
+    entry.url === 'res/atlas/game_lt/image/mathKeyboard/yellow.atlas',
+  ));
+
+  const preview = previewCourseFixture();
+  preview.previewStages![0].subPages[0].elements.push(decimalKeyboardElement('preview-decimal-keyboard'));
+  const previewPage = (buildPreviewExportRegressionArtifacts(preview).config.pages as Array<Record<string, unknown>>)[0];
+  assert.ok((previewPage.res as Array<Record<string, unknown>>).some((entry) =>
+    entry.url === 'res/atlas/game_preview/image/mathKeyboard/yellow.atlas',
+  ));
 });
 
 test('绑定小数键盘的输入框生成首位补零和重复小数点约束', () => {

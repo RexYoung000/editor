@@ -12,6 +12,7 @@ import {
   collectGameZipFiles,
   collectResources,
   extractZipFromServer,
+  getImageAtlasDirectory,
   isLocalSkPath,
   isLocalSoundPath,
   isLocalVideoPath,
@@ -295,8 +296,8 @@ function collectPreviewExportChildrenRes(
         const mapped = resourceMap.get(String(v));
         if (!mapped) continue;
         if (mapped.startsWith('game_preview/image/')) {
-          const parts = mapped.split('/');
-          if (parts.length >= 3) imageDirs.add(parts[2]);
+          const dir = getImageAtlasDirectory(mapped, 'game_preview/image/');
+          if (dir) imageDirs.add(dir);
         } else if (mapped.startsWith('game_preview/sound/') && !addedSingleFiles.has(mapped)) {
           resEntries.push({ url: mapped, type: 'sound' });
           addedSingleFiles.add(mapped);
@@ -346,8 +347,8 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
                 addedSingleFiles.add(mapped);
               }
               if (!isLarge) {
-                const parts = mapped.split('/');
-                if (parts.length >= 3) imageDirs.add(parts[2]);
+                const dir = getImageAtlasDirectory(mapped, 'game_preview/image/');
+                if (dir) imageDirs.add(dir);
               }
             }
 
@@ -381,8 +382,8 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_preview/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
