@@ -1,5 +1,5 @@
 import type { Action, Course, SubPage, Element } from '../types';
-import { elementMeta, type ExportChild } from '../elements/elementMeta';
+import { elementMeta, FRACTION_INPUT_SHEET, type ExportChild } from '../elements/elementMeta';
 import { getKeyboardPreset } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath, lookupBuiltinBySrcPath, assetSrc, assetExport } from '../elements/builtinAssets';
 import { renderTextToImage, type RenderTextProps } from './textToImage';
@@ -86,6 +86,14 @@ export function isLocalAnimAudioPath(v: unknown): v is string {
 
 export function isBuiltinResourcePath(v: unknown): v is string {
   return typeof v === 'string' && lookupBuiltinByExportPath(v) !== undefined;
+}
+
+/** 返回图片所属的 atlas 目录，保留图片前缀后的全部目录层级。 */
+export function getImageAtlasDirectory(mapped: string, imagePrefix: string): string | undefined {
+  if (!mapped.startsWith(imagePrefix)) return undefined;
+  const relative = mapped.slice(imagePrefix.length);
+  const lastSlash = relative.lastIndexOf('/');
+  return lastSlash > 0 ? relative.slice(0, lastSlash) : undefined;
 }
 
 /** game/xxx/file.png → <viewDir>/image/xxx/file.png，game/image/file.png → <viewDir>/image/img/file.png */
@@ -343,6 +351,29 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
     }
   }
 
+  // 数学键盘初始化代码会直接引用这些组件，需要把对应 var 写入 scene。
+  const decimalCamps = new Set(elements.flatMap((el) => {
+    const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
+    return el.type === 'KlBaseKeyboard'
+      && props?._keyboardPreset?.id === 'decimal'
+      && typeof props.camp === 'string'
+      ? [props.camp]
+      : [];
+  }));
+  for (const el of elements) {
+    const props = el.props as Record<string, unknown> | undefined;
+    const presetId = (props?._keyboardPreset as { id?: string } | undefined)?.id;
+    if (el.type === 'KlInputImage' && decimalCamps.has(String(props?.camp ?? ''))) {
+      needsVar.add(el.id);
+    }
+    if (el.type === 'KlBaseKeyboard' && (presetId === 'decimal' || presetId === 'fraction') && props?.disabled === true) {
+      needsVar.add(el.id);
+    }
+    if (el.type === 'FractionInput' && (props?.canSelected === false || props?.canSelected === 'false')) {
+      needsVar.add(el.id);
+    }
+  }
+
   // 3. 翻页组件:左/右按钮 + 标签按钮 + 分页 ContainerBox(被 actionType 内部 inline 引用)
   const ptBoxes = elements.filter(e => e.type === 'PageTurnBox');
   for (const ptBox of ptBoxes) {
@@ -409,6 +440,10 @@ function buildSceneNode(
   const rawProps = { ...(element.props ?? {}) };
   // 旧数据兼容：_hidden → hidden
   if ('_hidden' in rawProps && !('hidden' in rawProps)) rawProps.hidden = rawProps._hidden;
+  // 旧版分数输入框只保存了 0-9，导出时补回与 img_w2Input.png 对应的完整字符表。
+  if (element.type === 'FractionInput' && rawProps.sheet === '0123456789') {
+    rawProps.sheet = FRACTION_INPUT_SHEET;
+  }
   const merged = { ...(meta?.defaultProps ?? {}), ...rawProps };
   const rewritten = rewriteProps(merged, resourceMap);
 
@@ -1223,6 +1258,47 @@ export function buildSdkJudgeClickInitCode(
   return code;
 }
 
+export function buildMathKeyboardInitCode(page: SubPage, getVar: (element: Element) => string): string {
+  const decimalCamps = new Set(page.elements.flatMap((element) => {
+    const props = element.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
+    return element.type === 'KlBaseKeyboard'
+      && props?._keyboardPreset?.id === 'decimal'
+      && typeof props.camp === 'string'
+      ? [props.camp]
+      : [];
+  }));
+  let code = '';
+
+  for (const element of page.elements) {
+    const props = element.props as Record<string, unknown> | undefined;
+    const elementRef = `this.${getVar(element)}`;
+    if (element.type === 'KlInputImage' && decimalCamps.has(String(props?.camp ?? ''))) {
+      code += `        ${elementRef}.on(KlKeyboardEvent.INPUT_LATER, this, function(input: KlInputImage) {\n`;
+      code += `            var target: KlInputImage = input || ${elementRef};\n`;
+      code += `            var value = String(target.fontClipValue || "");\n`;
+      code += `            var firstDot = value.indexOf(".");\n`;
+      code += `            if (firstDot >= 0) value = value.substring(0, firstDot + 1) + value.substring(firstDot + 1).replace(/\\./g, "");\n`;
+      code += `            if (value.charAt(0) === ".") value = target.place >= 2 ? "0." : "";\n`;
+      code += `            if (value !== target.fontClipValue) target.fontClipValue = value;\n`;
+      code += `        });\n`;
+    }
+
+    const presetId = (props?._keyboardPreset as { id?: string } | undefined)?.id;
+    const isDisabledMathKeyboard = element.type === 'KlBaseKeyboard'
+      && (presetId === 'decimal' || presetId === 'fraction')
+      && props?.disabled === true;
+    const isDisabledFractionInput = element.type === 'FractionInput'
+      && (props?.canSelected === false || props?.canSelected === 'false');
+    if (isDisabledMathKeyboard || isDisabledFractionInput) {
+      code += `        ${elementRef}.alpha = 0.45;\n`;
+      code += `        ${elementRef}.gray = true;\n`;
+      code += `        ${elementRef}.mouseEnabled = false;\n`;
+    }
+  }
+
+  return code;
+}
+
 function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<string, string>, varAssignment: Map<string, string>, uiNamespace = 'game_lt'): string {
   /** 根据元素 ID 获取分配的 var 名（用于 this.xxx 引用） */
   const getVar = (el: Element): string => {
@@ -1231,6 +1307,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   const buildActionBody = makeActionBuilder(varAssignment, resourceMap, uiNamespace);
   let initCode = '';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildMathKeyboardInitCode(page, getVar);
 
   // 口才反馈动画：如果有 onClickInitConfirmCH / *WithLock / onClickInitGameConfirmCH / *WithLock 或 playKcRightAni / playKcWrongAni，需要在类末尾追加 playRightAni/playWrongAni
   const hasCHConfirm = page.elements.some(el =>
@@ -1604,6 +1681,9 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
 import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
 `
     : '';
+  const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
+  const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
+  const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n\n' : '';
 
   initCode += internalRuntime.initCode;
 
@@ -1616,11 +1696,11 @@ import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
 import KlKey = com.klzz.ui.custom.KeyBoard.KlKey;
 import KlBaseKeyboard = com.klzz.ui.custom.KeyBoard.KlBaseKeyboard;
 import SelectableObj = com.klzz.ui.custom.SelectableObj;
-${matchingImports}import { GameUtils } from "./GameUtils";
+${matchingImports}${fractionImport}import { GameUtils } from "./GameUtils";
 
 export default class ${sceneName} extends ui.${uiNamespace}.${sceneName}UI {
 
-    public initView(byReset: boolean) {
+${fractionReference}    public initView(byReset: boolean) {
         super.initView(byReset);
 
 ${initCode}        //add script
@@ -1643,6 +1723,7 @@ function generateHomeworkSceneTs(
   let initCode = '';
   let checkResultCode = '';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildMathKeyboardInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
 
@@ -1808,18 +1889,19 @@ function generateHomeworkSceneTs(
 import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
 `
     : '';
+  const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
+  const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
+  const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n' : '';
 
   initCode += internalRuntime.initCode;
 
   return `import { ui } from "../../ui/layaMaxUI";
 import KlInputImage = com.klzz.ui.custom.KeyBoard.KlInputImage;
 import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
-${matchingImports}import { GameUtils } from "./GameUtils";
-import FractionInput from "./Components/FractionInput";
+${matchingImports}${fractionImport}import { GameUtils } from "./GameUtils";
 
 export default class ${sceneName} extends ui.game_hw.${sceneName}UI {
-    _ref = [FractionInput];
-    public initView(byReset: boolean) {
+${fractionReference}    public initView(byReset: boolean) {
         super.initView(byReset);
 ${initCode}        //add script
     }
@@ -1880,8 +1962,8 @@ function collectExportChildrenRes(
         const mapped = resourceMap.get(String(v));
         if (!mapped) continue;
         if (mapped.startsWith(imagePrefix)) {
-          const parts = mapped.split('/');
-          if (parts.length >= 3) imageDirs.add(parts[2]);
+          const dir = getImageAtlasDirectory(mapped, imagePrefix);
+          if (dir) imageDirs.add(dir);
         } else if (mapped.startsWith(soundPrefix) && !addedSingleFiles.has(mapped)) {
           resEntries.push({ url: mapped, type: 'sound' });
           addedSingleFiles.add(mapped);
@@ -1972,8 +2054,8 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
               }
               // 小图收集子目录用于 atlas
               if (!isLarge) {
-                const parts = mapped.split('/');
-                if (parts.length >= 3) imageDirs.add(parts[2]);
+                const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                if (dir) imageDirs.add(dir);
               }
             }
 
@@ -2008,8 +2090,8 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
@@ -2026,14 +2108,15 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
           }
           // PageTurnBox 不携带 pages 数组，ContainerBox 子元素资源由主循环收集
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
+          collectExportChildrenRes(meta?.exportChildren, resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
           const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
           const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
           collectExportChildrenRes(presetChildren, resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
@@ -2127,8 +2210,8 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                 addedSingleFiles.add(mapped);
               }
               if (!isLarge) {
-                const parts = mapped.split('/');
-                if (parts.length >= 3) imageDirs.add(parts[2]);
+                const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                if (dir) imageDirs.add(dir);
               }
             }
             if (mapped.startsWith('game_hw/sound/') && !addedSingleFiles.has(mapped)) {
@@ -2161,8 +2244,8 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
@@ -2179,13 +2262,14 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
           }
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
+          collectExportChildrenRes(meta?.exportChildren, resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);
           const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
           const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
           collectExportChildrenRes(presetChildren, resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);

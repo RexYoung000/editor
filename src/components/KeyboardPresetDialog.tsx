@@ -6,9 +6,10 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSelect: (preset: KeyboardPreset) => void;
+  presets?: KeyboardPreset[];
 }
 
-export default function KeyboardPresetDialog({ open, onClose, onSelect }: Props) {
+export default function KeyboardPresetDialog({ open, onClose, onSelect, presets = KEYBOARD_PRESETS }: Props) {
   if (!open) return null;
 
   return (
@@ -21,7 +22,7 @@ export default function KeyboardPresetDialog({ open, onClose, onSelect }: Props)
 
         <div className="p-4">
           <div className="grid grid-cols-3 gap-4">
-            {KEYBOARD_PRESETS.map((preset) => (
+            {presets.map((preset) => (
               <PresetCard key={preset.id} preset={preset} onClick={() => onSelect(preset)} />
             ))}
           </div>

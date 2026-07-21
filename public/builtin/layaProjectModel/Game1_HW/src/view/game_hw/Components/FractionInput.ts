@@ -30,6 +30,8 @@ export default class FractionInput extends KlInputImage {
         return this._currXpath;
     }
     public fontWidth = 42;
+    /** 普通位图字体的实际渲染缩放，布局必须与 creatKlFontClip 保持一致。 */
+    private readonly fontScale = 1.3;
     private _camp: string;
     public get camp(): string {
         return this._camp;
@@ -39,6 +41,7 @@ export default class FractionInput extends KlInputImage {
     }
     public fractionPlace = 3;
     public fractionPlace2 = 6;
+    public fractionDigits = 4;
 
     private _lineSkin: string;
     public get lineSkin(): string {
@@ -202,6 +205,7 @@ export default class FractionInput extends KlInputImage {
     }
 
     private _onClick(evt: Laya.Event) {
+        if ((this.canSelected as any) === false || this.canSelected === "false") return;
         let view = (VipThink.viewMgr["currPage"] && VipThink.viewMgr["currPage"].currView) as KlView;
         if (this.parentsIsHide)
             return;
@@ -214,6 +218,7 @@ export default class FractionInput extends KlInputImage {
         this.isSelected = true;
     }
     private onInput(key: KlKey) {
+        if ((this.canSelected as any) === false || this.canSelected === "false") return;
         if (!key) {
             return;
         }
@@ -226,8 +231,7 @@ export default class FractionInput extends KlInputImage {
         if (key.output == "del") {
             let last = this.fontClipValue.charAt(this.fontClipValue.length - 1);
             if (last == ">") {
-                let arr = this.fontClipValue.match(/<.+?>/g);
-                this.fontClipValue = this.fontClipValue.replace(arr[arr.length - 1], "");
+                this.fontClipValue = this.fontClipValue.replace(/<\d*_\d*>$/, "");
             } else if (last == "]") {
                 let arr = this.fontClipValue.match(/[<.+?>]/g);
                 this.fontClipValue = this.fontClipValue.replace(arr[arr.length - 1], "");
@@ -246,6 +250,9 @@ export default class FractionInput extends KlInputImage {
             if (key.output != "<_>" && !this.getKlFontClip() && this.lastOutPut == "<_>") return;
             this.fontClipValue += key.output;
             this.lastOutPut = key.output;
+            if (key.output == "<_>") {
+                this.frameOnce(1, this, this.focusLatestFractionNumerator);
+            }
         }
         this.event(KlKeyboardEvent.INPUT_LATER, [this]);
     }
@@ -281,6 +288,7 @@ export default class FractionInput extends KlInputImage {
 
     private updateValue() {
         this.removeAllInput();
+        if (this.content) this.content.width = 0;
         if (this.fontClipValue) {
             let x = 0;
             let count = 0;
@@ -303,7 +311,7 @@ export default class FractionInput extends KlInputImage {
                     font1.fontClipValue = i1;
                     font2.fontClipValue = i2;
                     box.x = x;
-                    x += box.width + this.spaceX;
+                    x += box.width + this.getLayoutGap();
                     box.visible = true;
                 } else if (str.charAt(0) == "[") {//分子分母 3个框
                     let [i1, i2, i3] = str.match(/\d+/g) || [" ", " ", " "];
@@ -322,28 +330,29 @@ export default class FractionInput extends KlInputImage {
                     font1.fontClipValue = i2;
                     font2.fontClipValue = i3;
                     box.x = x;
-                    x += box.width + this.spaceX;
+                    x += box.width + this.getLayoutGap();
                     box.visible = true;
                 } else {
                     let font = this.getKlFontClip();
                     if (!font) continue;
                     font.value = str;
                     font.x = x;
-                    x += this.fontWidth * (str.length + this.spaceX) + this.spaceX;
+                    x += this.getFontClipAdvance(str.length) + this.getLayoutGap();
                     font.visible = true;
                 }
                 count++;
             }
             this.content.width = x;
         }
+        this.updateContentScale();
     }
     private nFontClipCount = 0;
     public creatKlFontClip() {
         let font = new KlFontClip(this.fontClipSkin, this.sheet);
         
-        font.scale(1.3,1.3);
+        font.scale(this.fontScale, this.fontScale);
 
-        font.spaceX = this.spaceX;
+        font.spaceX = this.getLayoutGap();
         font.centerY = 0;
         font.name = "font_" + this.nFontClipCount;
         font.mouseEnabled = false;
@@ -359,12 +368,14 @@ export default class FractionInput extends KlInputImage {
         let input1 = new KlInputImage;
         input1["onPrepared"]();
         input1.name = "input_" + flag + "_" + count;
-        input1.camp = this.camp2;
+        input1.camp = this.camp;
         input1.canSelected = "true";
         input1.fontClipSkin = this.fontClipSkin;
         input1["sheet"] = this.sheet;
+        // 分子和分母是叶子输入格，不允许在其中再次插入分数结构。
+        input1["inputValidator"] = (value: string) => value !== "<_>" && value !== "[<_>]";
 
-        input1.place = this.fractionPlace;
+        input1.place = this.fractionDigits;
         input1["contentScale"] = 0.8;
         input1.frameOnce(1, this, () => {
             input1.fontClipValue = input1Value;
@@ -454,11 +465,11 @@ export default class FractionInput extends KlInputImage {
         box.centerY = 0;
         box.mouseThrough = true;
         box.name = "box_" + count;
-        box.width = this.fractionPlace * this.fontWidth + 20;
+        box.width = this.fractionDigits * this.fontWidth + 20;
         let input1 = this.creatKlinputImage(count, 0, input1Value);
         input1.x = 10;
         input1.y = 0;
-        input1.width = this.fractionPlace * this.fontWidth;
+        input1.width = this.fractionDigits * this.fontWidth;
         input1.height = 60;
         box.addChild(input1);
         this.inputList.push(input1);
@@ -466,7 +477,7 @@ export default class FractionInput extends KlInputImage {
         let input2 = this.creatKlinputImage(count, 1, input2Value);
         input2.x = 10;
         input2.y = 75;
-        input2.width = this.fractionPlace * this.fontWidth;
+        input2.width = this.fractionDigits * this.fontWidth;
         input2.height = 60;
         box.addChild(input2);
         this.inputList.push(input2);
@@ -475,7 +486,7 @@ export default class FractionInput extends KlInputImage {
         img.name = "img" + count;
         img.skin = this.lineSkin;
         img.y = 65;
-        img.width = this.fractionPlace * this.fontWidth + 20;
+        img.width = this.fractionDigits * this.fontWidth + 20;
         box.addChild(img);
 
         this.content.addChild(box);
@@ -483,6 +494,13 @@ export default class FractionInput extends KlInputImage {
     }
     private onInput1Child(count: number, input1: KlInputImage, input2: KlInputImage) {
         let values = this.analysisFormula(this.fontClipValue);
+        if (!input1.fontClipValue && !input2.fontClipValue) {
+            values.splice(count, 1);
+            this.fontClipValue = values.join("");
+            this.focusParentInput();
+            this.event(KlKeyboardEvent.INPUT_LATER, [this]);
+            return;
+        }
         let str = values[count] = `<${input1.fontClipValue}_${input2.fontClipValue}>`;
         let v = values.join("");
         this.sync("fontClipValue", this.fontClipValue, v, undefined);
@@ -520,12 +538,52 @@ export default class FractionInput extends KlInputImage {
                 break;
         }
     }
+    private getLayoutGap(): number {
+        const gap = Number(this.spaceX);
+        return Number.isFinite(gap) ? gap : 0;
+    }
+    private getFontClipAdvance(charCount: number): number {
+        const width = Number(this.fontWidth);
+        const fontWidth = Number.isFinite(width) ? width : 0;
+        return charCount * (fontWidth + this.getLayoutGap()) * this.fontScale;
+    }
+    private updateContentScale() {
+        if (!this.content) return;
+        let scale = Number(this.contentScale);
+        if (!scale || scale <= 0) {
+            let widthScale = this.content.width > 0 ? (this.width - 16) / this.content.width : 1;
+            let heightScale = (this.height - 12) / 135;
+            scale = Math.max(0.35, Math.min(1, widthScale, heightScale));
+        }
+        this.content.scale(scale, scale);
+    }
+    private focusInput(input: KlInputImage) {
+        if (!input) return;
+        this.addInputToKeyBorad(input);
+        KlKeyboardEvent.instance.event(KlKeyboardEvent.UNSELECT_ALLINPUTIMAGE, [input]);
+        let evt: any = { target: input };
+        KlKeyboardEvent.instance.event(KlKeyboardEvent.ACTIVE, [evt]);
+        input.isSelected = true;
+    }
+    private focusLatestFractionNumerator() {
+        let latest: KlBox;
+        for (const input of this.inputs) {
+            if (input.visible) latest = input;
+        }
+        if (latest) this.focusInput(latest.getChildAt(0) as KlInputImage);
+    }
+    private focusParentInput() {
+        KlKeyboardEvent.instance.event(KlKeyboardEvent.UNSELECT_ALLINPUTIMAGE, [this]);
+        let evt: any = { target: this };
+        KlKeyboardEvent.instance.event(KlKeyboardEvent.ACTIVE, [evt]);
+        this.isSelected = true;
+    }
     private onDisPlay() {
         this.nor = this.getChildAt(0) as KlImage;
         this.bg = this.getChildByName("bg") as KlImage;
         let box = new KlBox;
         box.mouseThrough = true;
-        box.scale(this.contentScale, this.contentScale);
+        box.scale(1, 1);
         box.name = "content";
         box.height = this.height;
         this.content = this.addChild(box) as KlBox;
@@ -555,6 +613,10 @@ export default class FractionInput extends KlInputImage {
                 return input;
             }
         }
+        let input = this.createInput(this.inputs.length, "", "");
+        input.visible = false;
+        this.inputs.push(input);
+        return input;
     }
     private getInput2() {
         for (const input of this.inputs2) {
@@ -569,6 +631,10 @@ export default class FractionInput extends KlInputImage {
                 return clip;
             }
         }
+        let clip = this.creatKlFontClip();
+        clip.visible = false;
+        this.clips.push(clip);
+        return clip;
     }
     private clearAll() {
         for (const input of this.inputs) {
@@ -587,5 +653,7 @@ export default class FractionInput extends KlInputImage {
 }
 
 Laya.View.regComponent("Components.FractionInput", FractionInput);
+// 兼容旧版场景 JSON 使用的短组件名。
+Laya.View.regComponent("FractionInput", FractionInput);
 
 

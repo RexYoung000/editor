@@ -79,6 +79,9 @@ const COMMON_STATE_PROPS: PropertyDef[] = [
   { key: 'blockThrough', label: '阻止穿透', type: 'boolean', group: '状态' },
 ];
 
+/** FractionInput 的位图字体切片表，顺序必须与 img_w2Input.png 的 29 个格子一致。 */
+export const FRACTION_INPUT_SHEET = '0123456789+-×÷=()><.tabcdxyπ²';
+
 // ─── 常用属性模板 ───
 const P_TEXT: PropertyDef[] = [
   { key: 'text', label: '文本', type: 'text', group: '文本' },
@@ -302,6 +305,43 @@ export const elementMeta: Record<string, Meta> = {
     ],
   },
   KlInputImage: { layaType: 'KlInputImage', label: '输入框', category: 'commonComponents', defaultSize: { width: 120, height: 60 }, placeholderImage: assetSrc('klInput.placeholder'), defaultProps: { ...KL_INPUT_IMAGE_CONFIG.defaultProps }, runtime: KL_INPUT_IMAGE_CONFIG.runtime, exportChildren: KL_INPUT_IMAGE_CONFIG.exportChildren, properties: [...COMMON_STATE_PROPS, ...KL_INPUT_IMAGE_CONFIG.properties.filter(p => p.key !== 'keyBoradID' && p.key !== 'pattern')] },
+  FractionInput: {
+    layaType: 'FractionInput',
+    label: '分数输入框',
+    category: 'commonComponents',
+    defaultSize: { width: 360, height: 120 },
+    // 编辑器直接使用普通输入框底图；配合 sizeGrid 避免宽分数框拉伸圆角。
+    placeholderImage: assetSrc('klInput.bg'),
+    runtime: 'Components.FractionInput',
+    defaultProps: {
+      anchorX: 0,
+      anchorY: 0,
+      _judgeAnswer: '',
+      place: 11,
+      sheet: FRACTION_INPUT_SHEET,
+      lineSkin: assetExport('keyboard.math.fractionLine'),
+      fontClipSkin: assetExport('keyboard.math.inputFont'),
+      fontWidth: 42,
+      fractionPlace: 3,
+      fractionDigits: 4,
+      contentScale: 0,
+      spaceX: 0,
+      align: 'center',
+      canSelected: true,
+      sizeGrid: '10,10,10,10',
+    },
+    exportChildren: KL_INPUT_IMAGE_CONFIG.exportChildren,
+    properties: [
+      ...COMMON_STATE_PROPS,
+      { key: '_judgeAnswer', label: '正确答案', type: 'text', group: '交互' },
+      { key: 'place', label: '最大字符数', type: 'number', min: 3, max: 60, group: '交互' },
+      { key: 'camp', label: '阵营', type: 'text', group: '交互' },
+      { key: 'canSelected', label: '可输入', type: 'boolean', group: '交互' },
+      { key: 'align', label: '内容对齐', type: 'select', options: [{ label: '左', value: 'left' }, { label: '中', value: 'center' }, { label: '右', value: 'right' }], group: '外观' },
+      { key: 'lineSkin', label: '分数线皮肤', type: 'file', group: '外观', advanced: true },
+      { key: 'fontClipSkin', label: '数字字体图', type: 'file', group: '外观', advanced: true },
+    ],
+  },
   KlBaseKeyboard: {
     layaType: 'KlBaseKeyboard',
     label: '键盘',
@@ -318,6 +358,7 @@ export const elementMeta: Record<string, Meta> = {
       { key: 'visible', label: '初始可见',  type: 'boolean', group: '外观' },
       { key: 'isHide',  label: '可隐藏',    type: 'boolean', group: '交互' },
       { key: 'fixed',   label: '固定位置',  type: 'boolean', group: '交互' },
+      { key: 'disabled', label: '禁用', type: 'boolean', group: '状态' },
     ],
   },
   ConfirmButton: { layaType: 'ScaleButton', label: '确定按钮', category: 'commonComponents', defaultSize: { width: 238, height: 126 }, defaultPosition: { x: 160, y: 160 }, placeholderImage: assetSrc('okBtn.m_qddk_on'), varFromName: true, defaultProps: { anchorX: 0.5, anchorY: 0.5, skin: assetExport('okBtn.m_qddk_on'), stateNum: 1, label: '' }, properties: [...COMMON_STATE_PROPS] },

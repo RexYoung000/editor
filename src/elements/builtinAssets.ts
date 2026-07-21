@@ -71,6 +71,24 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'keyboard.preset2.delIcon',     src: 'runtime/game/jpL8/img_delete.png',  exportPath: 'game/jpL8/img_delete.png' },
   { id: 'keyboard.preset2.thumbnail',   src: 'editor/keyboard-preset2-thumb.png' },
 
+  // v1.2 数学输入键盘：沿用 SDK KeyBoard41UI 的黄色主题资源
+  { id: 'keyboard.math.bg',             src: 'runtime/game/mathKeyboard/yellow/img_jpk.png',     exportPath: 'game/mathKeyboard/yellow/img_jpk.png' },
+  { id: 'keyboard.math.keyNormal',      src: 'runtime/game/mathKeyboard/yellow/img_anniu1a.png', exportPath: 'game/mathKeyboard/yellow/img_anniu1a.png' },
+  { id: 'keyboard.math.keyActive',      src: 'runtime/game/mathKeyboard/yellow/img_anniu1b.png', exportPath: 'game/mathKeyboard/yellow/img_anniu1b.png' },
+  { id: 'keyboard.math.wideNormal',     src: 'runtime/game/mathKeyboard/yellow/img_anniu2a.png', exportPath: 'game/mathKeyboard/yellow/img_anniu2a.png' },
+  { id: 'keyboard.math.wideActive',     src: 'runtime/game/mathKeyboard/yellow/img_anniu2b.png', exportPath: 'game/mathKeyboard/yellow/img_anniu2b.png' },
+  { id: 'keyboard.math.numNormal',      src: 'runtime/game/mathKeyboard/yellow/img_shuzi1.png',  exportPath: 'game/mathKeyboard/yellow/img_shuzi1.png' },
+  { id: 'keyboard.math.numActive',      src: 'runtime/game/mathKeyboard/yellow/img_shuzi2.png',  exportPath: 'game/mathKeyboard/yellow/img_shuzi2.png' },
+  { id: 'keyboard.math.delIcon',        src: 'runtime/game/mathKeyboard/yellow/img_delete1.png',  exportPath: 'game/mathKeyboard/yellow/img_delete1.png' },
+  { id: 'keyboard.math.delActive',      src: 'runtime/game/mathKeyboard/yellow/img_delete2.png',  exportPath: 'game/mathKeyboard/yellow/img_delete2.png' },
+  { id: 'keyboard.math.arrow',          src: 'runtime/game/mathKeyboard/yellow/img_ydjt.png',    exportPath: 'game/mathKeyboard/yellow/img_ydjt.png' },
+  { id: 'keyboard.math.fractionNormal', src: 'runtime/game/mathKeyboard/img_fraction1.png', exportPath: 'game/mathKeyboard/img_fraction1.png' },
+  { id: 'keyboard.math.fractionActive', src: 'runtime/game/mathKeyboard/img_fraction2.png', exportPath: 'game/mathKeyboard/img_fraction2.png' },
+  { id: 'keyboard.math.fractionLine',   src: 'runtime/game/mathKeyboard/img_line.png',      exportPath: 'game/mathKeyboard/img_line.png' },
+  { id: 'keyboard.math.inputFont',      src: 'runtime/game/mathKeyboard/img_w2Input.png',   exportPath: 'game/mathKeyboard/img_w2Input.png' },
+  { id: 'keyboard.decimal.thumbnail',   src: 'editor/keyboard-decimal-thumb.png' },
+  { id: 'keyboard.fraction.thumbnail',  src: 'editor/keyboard-fraction-thumb.png' },
+
   // ─── 标签图资源（标签图组件 NewTabImg 的内置皮肤库）───
   { id: 'tabImg.img_bc',      src: 'runtime/game/tabImg/img_bc.png',      exportPath: 'game/tabImg/img_bc.png' },
   { id: 'tabImg.img_gg_1',    src: 'runtime/game/tabImg/img_gg_1.png',    exportPath: 'game/tabImg/img_gg_1.png' },

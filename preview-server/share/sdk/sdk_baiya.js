@@ -69387,6 +69387,10 @@ var MainView=(function(_super){
 				this._removeIdx.length=0;
 			}
 			VipThink.viewMgr.setLoadingView(false);
+			// 首屏已准备好时关闭 GameLoader 启动层，避免同步恢复事件缺失导致卡在 100%。
+			var gli=com.biz.VipThink.getGameLoader(true);
+			if (gli && !gli.hasCleard)
+				VipThink.destroyGameLoaderProgess();
 			}else if (nstatus=="ctoring"){
 			this.visible=true;
 			this.scaleX=this.scaleY=1;

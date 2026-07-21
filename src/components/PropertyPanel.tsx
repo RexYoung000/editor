@@ -7,10 +7,10 @@ import FieldRenderer from './FieldRenderer';
 import SkinEditor from './SkinEditor';
 import ActionEditor from './ActionEditor';
 import BindKeyboardModal from './BindKeyboardModal';
+import FractionAnswerEditorModal from './FractionAnswerEditorModal';
 import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import PageTurnPageList from './PageTurnPageList';
-import { KEYBOARD_PRESETS } from '../elements/keyboardPresets';
 import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock } from 'lucide-react';
 import type { Action, Element } from '../types';
 import { useI18n } from '../i18n/context';
@@ -24,6 +24,8 @@ import { getElementParentContainment } from '../utils/canvasGeometry';
 import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../utils/layerPresentation';
 import { createElementMap, getElementLayerState } from '../utils/layerState';
 import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
+import { fractionInputSummary, parseFractionInput } from '../utils/mathInput';
+import { keyboardBindingInfo, keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -209,6 +211,7 @@ export default function PropertyPanel() {
   const [editingValues, setEditingValues] = useState<Record<string, string>>({});
   const [skinEditorOpen, setSkinEditorOpen] = useState(false);
   const [bindKeyboardOpen, setBindKeyboardOpen] = useState(false);
+  const [fractionAnswerEditorOpen, setFractionAnswerEditorOpen] = useState(false);
   const [tabImgPickerOpen, setTabImgPickerOpen] = useState(false);
   const [okBtnPickerOpen, setOkBtnPickerOpen] = useState(false);
 
@@ -217,6 +220,7 @@ export default function PropertyPanel() {
       setEditingValues({});
       setSkinEditorOpen(false);
       setBindKeyboardOpen(false);
+      setFractionAnswerEditorOpen(false);
       setTabImgPickerOpen(false);
       setOkBtnPickerOpen(false);
     });
@@ -1182,11 +1186,29 @@ export default function PropertyPanel() {
                   if (!groups.has(g)) groups.set(g, []);
                   groups.get(g)!.push(f);
                 });
-                const isInputImage = meta?.layaType === 'KlInputImage';
-                if (isInputImage && !groups.has('交互')) groups.set('交互', []);
+                const isKeyboardInput = meta?.layaType === 'KlInputImage' || meta?.layaType === 'FractionInput';
+                if (isKeyboardInput && !groups.has('交互')) groups.set('交互', []);
                 const renderField = (field: PropertyDef) => {
                   const propDefault = single ? (elementMeta[single.type]?.defaultProps as Record<string, unknown> | undefined)?.[field.key] : undefined;
                   const numDefault = typeof propDefault === 'number' ? propDefault : undefined;
+                  if (single?.type === 'FractionInput' && field.key === '_judgeAnswer') {
+                    const answer = String((single.props as Record<string, unknown> | undefined)?._judgeAnswer ?? '');
+                    return (
+                      <div key={field.key} className="mb-2 rounded border border-slate-700 bg-slate-800/60 p-2">
+                        <div className="mb-1 text-[10px] text-slate-500">正确答案</div>
+                        <div className="mb-2 break-words text-xs text-slate-200">
+                          {fractionInputSummary(parseFractionInput(answer))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFractionAnswerEditorOpen(true)}
+                          className="w-full rounded border border-blue-500/50 bg-blue-600/30 py-1.5 text-xs text-blue-200 hover:bg-blue-600/50"
+                        >
+                          设置正确答案
+                        </button>
+                      </div>
+                    );
+                  }
                   const fieldEl = <FieldRenderer key={field.key} field={field} elements={selectedElements} onChange={handleChange} propDefault={numDefault} />;
                   // DropObj 的 skin/tipSkin 字段：追加「对齐」按钮
                   if (single && single.type === 'DropObj' && (field.key === 'skin' || field.key === 'tipSkin')) {
@@ -1209,13 +1231,21 @@ export default function PropertyPanel() {
                       <div key={groupName} className="mb-2 pb-2 border-b border-slate-700">
                         <div className="text-xs text-slate-500 mb-1.5">{groupName}</div>
                         {fields.map(renderField)}
-                        {isInputImage && groupName === '交互' && (
-                          <button
-                            onClick={() => setBindKeyboardOpen(true)}
-                            className="w-full mt-1.5 py-1.5 text-xs bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 rounded text-blue-200"
-                          >
-                            绑定键盘
-                          </button>
+                        {isKeyboardInput && groupName === '交互' && (
+                          <>
+                            {single?.type === 'FractionInput' && !(single.props as Record<string, unknown> | undefined)?.camp && (
+                              <div className="mt-1.5 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-[10px] text-amber-300">
+                                未绑定键盘，预览和导出课件中无法输入
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setBindKeyboardOpen(true)}
+                              className="w-full mt-1.5 py-1.5 text-xs bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 rounded text-blue-200"
+                            >
+                              绑定键盘
+                            </button>
+                          </>
                         )}
                       </div>
                     ))}
@@ -1281,23 +1311,46 @@ export default function PropertyPanel() {
       <BindKeyboardModal
         keyboards={(currentPage?.elements ?? [])
           .filter((el) => el.type === 'KlBaseKeyboard')
+          .filter((el) => keyboardSupportsInput(el, single.type, currentPage?.elements ?? []))
           .map((el) => {
-            const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-            const presetId = props?._keyboardPreset?.id;
-            const preset = KEYBOARD_PRESETS.find((p) => p.id === presetId);
-            const thumbnail = preset?.thumbnail ?? elementMeta[el.type]?.placeholderImage;
+            const info = keyboardBindingInfo(el, currentPage?.elements ?? []);
             return {
               element: el,
-              camp: String(props?.camp ?? ''),
-              thumbnail,
+              camp: keyboardCamp(el),
+              thumbnail: info.preset?.thumbnail ?? elementMeta[el.type]?.placeholderImage,
+              label: info.label,
+              legacy: info.legacy,
             };
           })}
         currentCamp={String((single.props as Record<string, unknown> | undefined)?.camp ?? '')}
-        onSelect={(camp) => {
+        onSelect={(keyboard) => {
+          const pageElements = currentPage?.elements ?? [];
+          const camp = keyboard.camp || nextKeyboardCamp(pageElements);
+          const presetId = keyboardPresetId(keyboard.element, pageElements);
+          const keyboardProps: Record<string, unknown> = { ...keyboard.element.props, camp };
+          // 仅为没有子节点的旧键盘补上可复用预设；保留已有历史按键结构，避免导出时被替换。
+          const hasChildren = pageElements.some((element) => element.parentId === keyboard.element.id);
+          if (presetId && !keyboard.element.props._keyboardPreset && !hasChildren) {
+            keyboardProps._keyboardPreset = { id: presetId };
+          }
+          updateElement(keyboard.element.id, { props: keyboardProps });
           handleChange('camp', camp);
+          saveHistory();
           setBindKeyboardOpen(false);
         }}
         onClose={() => setBindKeyboardOpen(false)}
+      />
+    )}
+
+    {fractionAnswerEditorOpen && single?.type === 'FractionInput' && (
+      <FractionAnswerEditorModal
+        value={String((single.props as Record<string, unknown> | undefined)?._judgeAnswer ?? '')}
+        maxLength={Number((single.props as Record<string, unknown> | undefined)?.place ?? 11)}
+        onSave={(value) => {
+          handleChange('_judgeAnswer', value);
+          setFractionAnswerEditorOpen(false);
+        }}
+        onClose={() => setFractionAnswerEditorOpen(false)}
       />
     )}
 

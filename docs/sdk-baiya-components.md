@@ -129,6 +129,8 @@
 
 `KlInputImage` 没有 `isRight()`、`isNull()` 或 SDK `answer` 属性。forge 允许独立输入格作为判定目标：正确答案保存在编辑器专用 `_judgeAnswer`，导出时比较 `fontClipValue`，并用 `valueOrSkinIsNull` 区分未完成；`_judgeAnswer` 不写入运行时 scene。
 
+`FractionInput` 使用 `img_w2Input.png` 的 29 格位图字体，字符表固定为 `0123456789+-×÷=()><.tabcdxyπ²`。字符表数量必须与素材切片数量一致，否则单次输入会显示相邻的整段美术资源，并导致内容宽度计算错误。普通字符按字体实际缩放后的 advance width（字符格宽度与字间距的合计）参与布局，分数结构和普通字符之间的间距也必须计入；外框内容按真实字符宽度自适应缩放，不允许溢出九宫格外框。每个普通分数结构占 3 个逻辑字符位，分子和分母各最多 4 位数字，子输入格不允许再次插入分数结构。
+
 ### KlTextInput
 
 继承：`TextInput → ISyncComp`
@@ -546,6 +548,18 @@
 - 数字与小数点键盘：0–9、小数点、删除；最多一个小数点，首位小数点自动补为 `0.`。
 - 分数输入键盘：0–9、分数按钮、删除；只绑定计划新增的分数输入框。
 
+2026-07-21 已确认新预设复用键盘资源：键盘外框、普通/按下键帽、数字和小数点字形、删除图标、分数按钮、分数线均作为内置运行资源注册。新版资源提供黄色、蓝色、绿色三套皮肤，#74 第一版默认使用黄色主题，并沿用 SDK `KeyBoard41UI` 的 `330×420` 底板和 3 列 4 行布局。分数输入框外框继续复用 `klInput` 普通、聚焦、错误三态皮肤；禁用态使用普通态降低透明度并去饱和，同时关闭输入响应，不增加独立切图。分子/分母焦点高亮由运行状态动态绘制。
+
+编辑器中的 `FractionInput` 外框也复用 `klInput` 普通态底图，并设置 `sizeGrid=10,10,10,10`；调整分数输入框宽度时只拉伸中间区域，不拉伸四角。发布课件继续由普通、聚焦、错误三层子节点分别使用同一九宫格规则。
+
+### 键盘绑定规则（编辑器）
+
+- 绑定列表扫描当前编辑页面内所有 `KlBaseKeyboard`，不能只依赖编辑器生成的 `_keyboardPreset.id`。
+- 历史课件中的键盘可能只有 `pattern`、尺寸、按键子节点和 `camp`，没有 `_keyboardPreset`；这类组件显示为“旧版/自定义键盘”，不应被误报为“没有键盘”。
+- 绑定已有键盘时，输入框和键盘必须写入同一个非空 `camp`。旧键盘缺少 `camp` 时由编辑器补发页面内唯一阵营标识，并同步写回两者。
+- 新增输入框先复用当前页面兼容的已有键盘；只有找不到可用键盘时才打开预设选择并创建一个新的键盘，禁止静默创建重复键盘。
+- 能明确识别预设的键盘继续按输入框类型过滤；无法明确识别的旧版/自定义键盘保留在绑定列表中，并由使用者确认其实际按键能力。
+
 数学表达式键盘（数字、分数、运算符、括号和小数点组合）不在 v1.2.0 范围。视觉资源需在领取 #74 后向开发者索要，资源未到位时不得自行定稿皮肤。
 
 ### KlInputImage
@@ -797,7 +811,7 @@ Kl* 系列：KlButton, KlLabel, KlCheckBox, KlRadio, KlRadioGroup,
             MatchingGame, MatchingItem,
             OneStrokeGame, OneStrokeItem,
             KlKeyboard, KlKey, KlBaseKeyboard,
-            ChoiceBox, KlInputBox, KlInputImage,
+            ChoiceBox, KlInputBox, KlInputImage, FractionInput,
             BrushSprite, TwinkleBox, CountDown,
             DragViewBox, KlChangeColorBox,
             PriviewGuideFinger, ImageScaleTime,
@@ -816,3 +830,5 @@ window.Klzz.__init__(1920, 1080, null, null, null, null);
 ```
 
 已在 `layaBridge.ts` 的 `preloadAtlas()` 中调用。
+
+`FractionInput` 是课件工程按页生成的自定义组件。为兼容旧版场景 JSON，生成代码会同时注册 `Components.FractionInput` 和 `FractionInput` 两个名称；两者都可以作为 Laya UI JSON 的 `type` 使用。
