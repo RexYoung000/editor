@@ -30,6 +30,8 @@ export default class FractionInput extends KlInputImage {
         return this._currXpath;
     }
     public fontWidth = 42;
+    /** 普通位图字体的实际渲染缩放，布局必须与 creatKlFontClip 保持一致。 */
+    private readonly fontScale = 1.3;
     private _camp: string;
     public get camp(): string {
         return this._camp;
@@ -309,7 +311,7 @@ export default class FractionInput extends KlInputImage {
                     font1.fontClipValue = i1;
                     font2.fontClipValue = i2;
                     box.x = x;
-                    x += box.width + this.spaceX;
+                    x += box.width + this.getLayoutGap();
                     box.visible = true;
                 } else if (str.charAt(0) == "[") {//分子分母 3个框
                     let [i1, i2, i3] = str.match(/\d+/g) || [" ", " ", " "];
@@ -328,14 +330,14 @@ export default class FractionInput extends KlInputImage {
                     font1.fontClipValue = i2;
                     font2.fontClipValue = i3;
                     box.x = x;
-                    x += box.width + this.spaceX;
+                    x += box.width + this.getLayoutGap();
                     box.visible = true;
                 } else {
                     let font = this.getKlFontClip();
                     if (!font) continue;
                     font.value = str;
                     font.x = x;
-                    x += this.fontWidth * (str.length + this.spaceX) + this.spaceX;
+                    x += this.getFontClipAdvance(str.length) + this.getLayoutGap();
                     font.visible = true;
                 }
                 count++;
@@ -348,9 +350,9 @@ export default class FractionInput extends KlInputImage {
     public creatKlFontClip() {
         let font = new KlFontClip(this.fontClipSkin, this.sheet);
         
-        font.scale(1.3,1.3);
+        font.scale(this.fontScale, this.fontScale);
 
-        font.spaceX = this.spaceX;
+        font.spaceX = this.getLayoutGap();
         font.centerY = 0;
         font.name = "font_" + this.nFontClipCount;
         font.mouseEnabled = false;
@@ -533,6 +535,15 @@ export default class FractionInput extends KlInputImage {
             default:
                 break;
         }
+    }
+    private getLayoutGap(): number {
+        const gap = Number(this.spaceX);
+        return Number.isFinite(gap) ? gap : 0;
+    }
+    private getFontClipAdvance(charCount: number): number {
+        const width = Number(this.fontWidth);
+        const fontWidth = Number.isFinite(width) ? width : 0;
+        return charCount * (fontWidth + this.getLayoutGap()) * this.fontScale;
     }
     private updateContentScale() {
         if (!this.content) return;

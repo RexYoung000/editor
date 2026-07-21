@@ -1,5 +1,5 @@
 import type { Action, Course, SubPage, Element } from '../types';
-import { elementMeta, type ExportChild } from '../elements/elementMeta';
+import { elementMeta, FRACTION_INPUT_SHEET, type ExportChild } from '../elements/elementMeta';
 import { getKeyboardPreset } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath, lookupBuiltinBySrcPath, assetSrc, assetExport } from '../elements/builtinAssets';
 import { renderTextToImage, type RenderTextProps } from './textToImage';
@@ -440,6 +440,10 @@ function buildSceneNode(
   const rawProps = { ...(element.props ?? {}) };
   // 旧数据兼容：_hidden → hidden
   if ('_hidden' in rawProps && !('hidden' in rawProps)) rawProps.hidden = rawProps._hidden;
+  // 旧版分数输入框只保存了 0-9，导出时补回与 img_w2Input.png 对应的完整字符表。
+  if (element.type === 'FractionInput' && rawProps.sheet === '0123456789') {
+    rawProps.sheet = FRACTION_INPUT_SHEET;
+  }
   const merged = { ...(meta?.defaultProps ?? {}), ...rawProps };
   const rewritten = rewriteProps(merged, resourceMap);
 

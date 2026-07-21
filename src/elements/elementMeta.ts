@@ -79,6 +79,9 @@ const COMMON_STATE_PROPS: PropertyDef[] = [
   { key: 'blockThrough', label: '阻止穿透', type: 'boolean', group: '状态' },
 ];
 
+/** FractionInput 的位图字体切片表，顺序必须与 img_w2Input.png 的 29 个格子一致。 */
+export const FRACTION_INPUT_SHEET = '0123456789+-×÷=()><.tabcdxyπ²';
+
 // ─── 常用属性模板 ───
 const P_TEXT: PropertyDef[] = [
   { key: 'text', label: '文本', type: 'text', group: '文本' },
@@ -315,7 +318,7 @@ export const elementMeta: Record<string, Meta> = {
       anchorY: 0,
       _judgeAnswer: '',
       place: 11,
-      sheet: '0123456789',
+      sheet: FRACTION_INPUT_SHEET,
       lineSkin: assetExport('keyboard.math.fractionLine'),
       fontClipSkin: assetExport('keyboard.math.inputFont'),
       fontWidth: 42,

@@ -129,6 +129,8 @@
 
 `KlInputImage` 没有 `isRight()`、`isNull()` 或 SDK `answer` 属性。forge 允许独立输入格作为判定目标：正确答案保存在编辑器专用 `_judgeAnswer`，导出时比较 `fontClipValue`，并用 `valueOrSkinIsNull` 区分未完成；`_judgeAnswer` 不写入运行时 scene。
 
+`FractionInput` 使用 `img_w2Input.png` 的 29 格位图字体，字符表固定为 `0123456789+-×÷=()><.tabcdxyπ²`。字符表数量必须与素材切片数量一致，否则单次输入会显示相邻的整段美术资源，并导致内容宽度计算错误。普通字符按字体实际缩放后的 advance width（字符格宽度与字间距的合计）参与布局，分数结构和普通字符之间的间距也必须计入；外框内容按真实字符宽度自适应缩放，不允许溢出九宫格外框。
+
 ### KlTextInput
 
 继承：`TextInput → ISyncComp`

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { elementMeta } from '../src/elements/elementMeta';
 import { KEYBOARD_PRESETS } from '../src/elements/keyboardPresets';
 import {
@@ -84,6 +86,8 @@ test('数字与分数键盘的兼容矩阵和资源注册完整', () => {
   );
   assert.equal(elementMeta.FractionInput?.runtime, 'Components.FractionInput');
   assert.equal(elementMeta.FractionInput?.defaultProps?.sizeGrid, '10,10,10,10');
+  assert.equal(elementMeta.FractionInput?.defaultProps?.sheet, '0123456789+-×÷=()><.tabcdxyπ²');
+  assert.equal(Array.from(String(elementMeta.FractionInput?.defaultProps?.sheet)).length, 29);
   assert.match(String(elementMeta.FractionInput?.placeholderImage), /runtime\/game\/inputImg\/img_1\.png$/);
   assert.match(String(elementMeta.FractionInput?.defaultProps?.lineSkin), /mathKeyboard\/img_line\.png$/);
   assert.match(String(elementMeta.FractionInput?.defaultProps?.fontClipSkin), /mathKeyboard\/img_w2Input\.png$/);
@@ -114,6 +118,35 @@ test('正课、作业、预习导出都引用 FractionInput 运行时', () => {
   const previewArtifacts = buildPreviewExportRegressionArtifacts(preview);
   assert.match(previewArtifacts.scenes[0].source, /import FractionInput from "\.\/Components\/FractionInput"/);
   assert.match(previewArtifacts.scenes[0].source, /_ref = \[FractionInput\]/);
+});
+
+test('旧版分数输入框导出时迁移完整位图字符表', () => {
+  const course = normalCourseFixture();
+  course.stages[0].subPages[0].elements.push({
+    ...fractionElement('legacy-fraction'),
+    props: { _judgeAnswer: '', sheet: '0123456789' },
+  });
+  const artifacts = buildExportRegressionArtifacts(course);
+  const fractionNode = sceneNodes(artifacts.scenes[0].scene).find((node) => node.type === 'FractionInput');
+  assert.equal(fractionNode?.props?.sheet, '0123456789+-×÷=()><.tabcdxyπ²');
+});
+
+test('普通数字与分数混排时按实际字体缩放宽度推进位置', () => {
+  const runtimeFiles = [
+    'public/builtin/layaProjectModel/Game1_LT/src/view/game_lt/Components/FractionInput.ts',
+    'public/builtin/layaProjectModel/Game1_HW/src/view/game_hw/Components/FractionInput.ts',
+    'public/builtin/layaProjectModel/Game1_PREVIEW/src/view/game_preview/Components/FractionInput.ts',
+  ];
+  const expectedAdvance = 4 * 42 * 1.3;
+  assert.ok(expectedAdvance > 4 * 42, '四位数字的实际绘制宽度必须大于未缩放宽度');
+
+  for (const relativePath of runtimeFiles) {
+    const source = readFileSync(join(process.cwd(), relativePath), 'utf8');
+    assert.match(source, /private readonly fontScale = 1\.3/);
+    assert.match(source, /font\.scale\(this\.fontScale, this\.fontScale\)/);
+    assert.match(source, /x \+= this\.getFontClipAdvance\(str\.length\) \+ this\.getLayoutGap\(\)/);
+    assert.match(source, /return charCount \* \(fontWidth \+ this\.getLayoutGap\(\)\) \* this\.fontScale/);
+  }
 });
 
 test('嵌套键盘皮肤目录生成完整 atlas 路径', () => {
