@@ -34,7 +34,7 @@
 1. [#74 新增数字小数点键盘与分数输入键盘](https://github.com/RexYoung000/editor/issues/74)（P1，最优先）。
 2. [#73 重构资源库为独立搜索与三级快捷筛选](https://github.com/RexYoung000/editor/issues/73)。
 3. [#75 修复锁定图层阻断其他图层的画布选择](https://github.com/RexYoung000/editor/issues/75)。
-4. [#72 支持填空题多套答案方案与空位互换判定](https://github.com/RexYoung000/editor/issues/72)。
+4. [#72 支持单框多答案与两框算式关系判定](https://github.com/RexYoung000/editor/issues/72)。
 5. [#76 优化选择题单选、多选配置与正确答案判定](https://github.com/RexYoung000/editor/issues/76)。
 
 键盘、选择题和资源库正式素材不在需求对齐阶段预制。领取对应 Issue 后，开发者先索要资源和规格；资源未到位时可以完成不依赖最终视觉的逻辑，但不能自行确定最终皮肤或素材归属。

@@ -574,8 +574,12 @@ export default function ActionEditor({
                         <Crosshair size={11} /> 编辑目标
                       </button>
                     </div>
-                    {capability.kind === 'input' ? (
-                      <div className="text-[10px] text-slate-500">请进入目标组件配置完整答案方案。</div>
+                    {capability.kind === 'input' || capability.kind === 'inputImage' ? (
+                      <div className="text-[10px] text-slate-500">
+                        {capability.kind === 'input'
+                          ? '请进入目标组件配置空位候选答案或两框算式关系。'
+                          : '请进入目标组件配置候选正确答案。'}
+                      </div>
                     ) : capability.answerKey ? (
                       <label className="flex items-center gap-1 text-[10px] text-slate-400">
                         <span className="w-14 shrink-0">{capability.answerLabel}</span>

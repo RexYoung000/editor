@@ -36,7 +36,7 @@ import {
   resolveMovedPageName,
   validInternalPageGroupId,
 } from '../utils/internalPages';
-import { remapFillAnswerSchemeRefs } from '../utils/fillAnswerSchemes';
+import { remapInputRelationRefs } from '../utils/inputAnswerRules';
 
 type InternalPagePlacement = { pageGroupId?: string; afterPageId?: string };
 
@@ -256,7 +256,7 @@ function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[
         if (a.judgeTargetId && idMap.has(a.judgeTargetId)) a.judgeTargetId = idMap.get(a.judgeTargetId);
       }
     }
-    remapFillAnswerSchemeRefs(el, idMap, genId);
+    remapInputRelationRefs(el, idMap, genId);
   }
   return cloned;
 }
@@ -2060,7 +2060,7 @@ export const useEditorStore = create<EditorState>()(
               if (a.branchId && branchIdMap.has(a.branchId)) a.branchId = branchIdMap.get(a.branchId);
             });
           }
-          remapFillAnswerSchemeRefs(newEl, idMap, genId);
+          remapInputRelationRefs(newEl, idMap, genId);
 
           // 生成唯一的 name
           if (FIXED_NAME_TYPES.has(newEl.type)) {

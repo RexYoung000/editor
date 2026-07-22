@@ -184,7 +184,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 **Homework 模板** `generateHomeworkSceneTs`：继承 `ui.game_hw` 并保留 `_result` / `checkResult` getter/setter。题型组件继续通过 `onChoiceJudge`、`onInputJudge`、`onDragJudge`、`onMatchingJudge` 接入结果；显式 `onClickSdkJudge` 继续生成点击监听。除此之外，导出器会收集未嵌套在 `KlInputBox` 内且配置了非空 `_judgeAnswer` 的 `KlInputImage` / `FractionInput`，在 `checkResult()` 中按“任一未填为 `null`、全部填写且全对为 `true`、全部填写但任一错误为 `false`”聚合。未配置答案的普通输入控件不会进入判定，编辑器专用 `_judgeAnswer` 仍不写入 scene。
 
-配置了 `_answerSchemes` 的 `KlInputBox` 会在正常、作业和预习场景的 `initView()` 中注入实例级判定：`isNull()` 统一检查该题当前全部输入格，`isRight()` 按固定顺序或保留重复次数的可互换集合比较，并在多套方案之间取 OR。方案引用的输入格会强制生成 scene `var`，`_answerSchemes` 本身仍作为编辑器专用字段剥离。这样通用点击判定、`GameUtils.initConfirm` 和作业 `checkResult()` 无需建立平行入口即可得到同一结果。导出前会校验方案完整性；失效引用、漏配空位或空答案会中止预览与发布并返回可修复信息。
+配置了多候选答案或 `_inputRelations` 的 `KlInputBox` 会在正常、作业和预习场景的 `initView()` 中注入实例级判定：`isNull()` 统一检查该题全部输入格，`isRight()` 将未关联空位的候选答案判断与两框算式关系判断做 AND 聚合。关系支持加、减、乘、除和相等，小数使用稳定容差，简单分数转换为数值后参与计算。被引用输入格会强制生成 scene `var`，编辑器专用候选与关系字段仍从 scene 剥离。这样通用点击判定、`GameUtils.initConfirm` 和作业 `checkResult()` 无需建立平行入口即可得到同一结果；失效引用、重复占用、无效目标或无规则空位会在预览与发布前中止并返回可修复信息。
 
 ### 4.10 `finalConfig.json`
 

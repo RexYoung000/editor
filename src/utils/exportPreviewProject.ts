@@ -24,7 +24,7 @@ import {
   compileInternalPagesCourse,
   internalPageActionBody,
 } from './internalPageCompiler';
-import { buildFillAnswerSchemeInitCode } from './fillAnswerSchemes';
+import { buildInputRuleInitCode } from './inputAnswerRules';
 
 // ─── 预习场景差异 ───
 
@@ -68,7 +68,7 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
   };
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildMathKeyboardInitCode(page, getVar);
-  initCode += buildFillAnswerSchemeInitCode(page, getVar);
+  initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
   // onClickInitConfirm / onClickInitConfirmWithLock 事件：在 initView 注入 GameUtils.initConfirm

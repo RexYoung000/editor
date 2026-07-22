@@ -2,18 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Course, Element, SubPage } from '../src/types';
 import {
-  buildFillAnswerSchemeInitCode,
-  collectFillAnswerSchemeIssues,
-  createFillAnswerScheme,
-  FILL_ANSWER_SCHEMES_KEY,
-  hasFillAnswerSchemes,
-  remapFillAnswerSchemeRefs,
-  type FillAnswerScheme,
-} from '../src/utils/fillAnswerSchemes';
-import {
-  buildExportRegressionArtifacts,
-  collectElementsNeedingVar,
-} from '../src/utils/exportProject';
+  buildInputRuleInitCode,
+  collectInputRuleIssues,
+  createInputRelation,
+  evaluateStructuredInputRuleState,
+  evaluateInputRelation,
+  getInputAnswerCandidates,
+  hasStructuredInputRules,
+  INPUT_ANSWER_CANDIDATES_KEY,
+  INPUT_RELATIONS_KEY,
+  parseRuleNumber,
+  remapInputRelationRefs,
+  splitAnswerCandidates,
+  type InputRelation,
+} from '../src/utils/inputAnswerRules';
+import { buildExportRegressionArtifacts, collectElementsNeedingVar } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
 import {
   homeworkCourseFixture,
@@ -43,148 +46,180 @@ function activePage(course: Course, preview = false): SubPage {
   return (preview ? course.previewStages! : course.stages)[0].subPages[0];
 }
 
-function answerPage(orderMode: FillAnswerScheme['orderMode'] = 'fixed'): {
+function relationPage(withStandaloneSlot = false): {
   page: SubPage;
   target: Element;
-  normalInput: Element;
-  fractionInput: Element;
+  left: Element;
+  right: Element;
+  standalone?: Element;
 } {
   const target = element('fill-box', 'KlInputBox');
-  const normalInput = element('normal-input', 'KlInputImage', { parentId: target.id });
-  const fractionInput = element('fraction-input', 'FractionInput', { parentId: target.id });
-  target.props[FILL_ANSWER_SCHEMES_KEY] = [{
-    id: 'scheme-1',
-    orderMode,
-    slots: [
-      { inputId: normalInput.id, inputNameSnapshot: normalInput.name, answer: '5' },
-      { inputId: fractionInput.id, inputNameSnapshot: fractionInput.name, answer: '6' },
-    ],
-  } satisfies FillAnswerScheme];
-  return {
-    page: { id: 'page', name: '页面', elements: [target, normalInput, fractionInput] },
-    target,
-    normalInput,
-    fractionInput,
+  const left = element('left-input', 'KlInputImage', { parentId: target.id });
+  const right = element('right-input', 'KlInputImage', { parentId: target.id });
+  const relation: InputRelation = {
+    id: 'relation-1',
+    leftInputId: left.id,
+    rightInputId: right.id,
+    operator: 'multiply',
+    target: '4',
   };
+  target.props[INPUT_RELATIONS_KEY] = [relation];
+  const standalone = withStandaloneSlot
+    ? element('standalone-slot', 'FractionInput', {
+        parentId: target.id,
+        props: { [INPUT_ANSWER_CANDIDATES_KEY]: ['<1_2>', '<2_3>'] },
+      })
+    : undefined;
+  return { page: { id: 'page', name: '页面', elements: [target, left, right, ...(standalone ? [standalone] : [])] }, target, left, right, standalone };
 }
 
-function installGeneratedJudge(page: SubPage): Record<string, { fontClipValue?: string; valueOrSkinIsNull?: boolean; isRight?: () => boolean; isNull?: () => boolean }> {
-  const context: Record<string, { fontClipValue?: string; valueOrSkinIsNull?: boolean; isRight?: () => boolean; isNull?: () => boolean }> = {};
+function installGeneratedJudge(page: SubPage): Record<string, {
+  fontClipValue?: string;
+  valueOrSkinIsNull?: boolean;
+  isRight?: () => boolean;
+  isNull?: () => boolean;
+}> {
+  const context: Record<string, {
+    fontClipValue?: string;
+    valueOrSkinIsNull?: boolean;
+    isRight?: () => boolean;
+    isNull?: () => boolean;
+  }> = {};
   for (const item of page.elements) context[item.name ?? item.id] = {};
-  const code = buildFillAnswerSchemeInitCode(page, (item) => item.name ?? item.id);
+  const code = buildInputRuleInitCode(page, (item) => item.name ?? item.id);
   Function('context', `return (function() { ${code} return this; }).call(context);`)(context);
   return context;
 }
 
-test('固定顺序方案按稳定输入引用判定，并在多套方案之间取 OR', () => {
-  const { page, target } = answerPage('fixed');
-  const schemes = target.props[FILL_ANSWER_SCHEMES_KEY] as FillAnswerScheme[];
-  target.props[FILL_ANSWER_SCHEMES_KEY] = [
-    ...schemes,
-    {
-      id: 'scheme-2',
-      orderMode: 'fixed',
-      slots: schemes[0].slots.map((slot, index) => ({ ...slot, answer: index === 0 ? '7' : '8' })),
-    },
-  ];
-  const runtime = installGeneratedJudge(page);
-  const box = runtime.fill_box;
-  runtime.normal_input.fontClipValue = '7';
-  runtime.normal_input.valueOrSkinIsNull = false;
-  runtime.fraction_input.fontClipValue = '8';
-  runtime.fraction_input.valueOrSkinIsNull = false;
-  assert.equal(box.isNull?.(), false);
-  assert.equal(box.isRight?.(), true);
-
-  runtime.normal_input.fontClipValue = '8';
-  runtime.fraction_input.fontClipValue = '7';
-  assert.equal(box.isRight?.(), false);
-  runtime.fraction_input.valueOrSkinIsNull = true;
-  assert.equal(box.isNull?.(), true);
-  assert.equal(box.isRight?.(), false);
+test('普通输入框支持逗号、分号和回车分隔多个候选答案', () => {
+  assert.deepEqual(splitAnswerCandidates('1, 2；3\n2'), ['1', '2', '3']);
+  const input = element('input', 'KlInputImage', { props: { _judgeAnswer: '甲;乙，丙' } });
+  assert.deepEqual(getInputAnswerCandidates(input), ['甲', '乙', '丙']);
+  input.props[INPUT_ANSWER_CANDIDATES_KEY] = ['新答案', '另一个'];
+  assert.deepEqual(getInputAnswerCandidates(input), ['新答案', '另一个']);
 });
 
-test('可互换方案保留重复次数，允许 5、6 互换但拒绝 5、5', () => {
-  const { page } = answerPage('interchangeable');
+test('数值解析支持小数、简单分数和带整数部分的结构化分数', () => {
+  assert.equal(parseRuleNumber('0.5'), 0.5);
+  assert.equal(parseRuleNumber('1/2'), 0.5);
+  assert.equal(parseRuleNumber('<1_2>'), 0.5);
+  assert.equal(parseRuleNumber('1<1_2>'), 1.5);
+  assert.equal(parseRuleNumber('<1_0>'), null);
+  assert.equal(parseRuleNumber('1+2'), null);
+});
+
+test('乘法关系动态接受所有满足目标的整数和小数答案', () => {
+  const relation = createInputRelation('left', 'right', 'multiply', '4');
+  assert.equal(evaluateInputRelation(relation, '1', '4'), true);
+  assert.equal(evaluateInputRelation(relation, '4', '1'), true);
+  assert.equal(evaluateInputRelation(relation, '2', '2'), true);
+  assert.equal(evaluateInputRelation(relation, '0.5', '8'), true);
+  assert.equal(evaluateInputRelation(relation, '<1_2>', '8'), true);
+  assert.equal(evaluateInputRelation(relation, '1', '1'), false);
+  assert.equal(evaluateInputRelation(relation, '2', '3'), false);
+});
+
+test('加减乘除和相等关系覆盖浮点容差与除零', () => {
+  assert.equal(evaluateInputRelation(createInputRelation('a', 'b', 'add', '0.3'), '0.1', '0.2'), true);
+  assert.equal(evaluateInputRelation(createInputRelation('a', 'b', 'subtract', '2'), '5', '3'), true);
+  assert.equal(evaluateInputRelation(createInputRelation('a', 'b', 'divide', '2'), '4', '2'), true);
+  assert.equal(evaluateInputRelation(createInputRelation('a', 'b', 'divide', '2'), '4', '0'), false);
+  assert.equal(evaluateInputRelation(createInputRelation('a', 'b', 'equal'), '<1_2>', '0.5'), true);
+});
+
+test('填空题将算式关系与未关联空位候选答案做 AND 聚合', () => {
+  const { page } = relationPage(true);
   const runtime = installGeneratedJudge(page);
-  runtime.normal_input.fontClipValue = '6';
-  runtime.normal_input.valueOrSkinIsNull = false;
-  runtime.fraction_input.fontClipValue = '5';
-  runtime.fraction_input.valueOrSkinIsNull = false;
+  runtime.left_input.fontClipValue = '0.5';
+  runtime.left_input.valueOrSkinIsNull = false;
+  runtime.right_input.fontClipValue = '8';
+  runtime.right_input.valueOrSkinIsNull = false;
+  runtime.standalone_slot.fontClipValue = '<1_2>';
+  runtime.standalone_slot.valueOrSkinIsNull = false;
+  assert.equal(runtime.fill_box.isNull?.(), false);
   assert.equal(runtime.fill_box.isRight?.(), true);
 
-  runtime.normal_input.fontClipValue = '5';
-  runtime.fraction_input.fontClipValue = '5';
+  runtime.standalone_slot.fontClipValue = '<3_4>';
   assert.equal(runtime.fill_box.isRight?.(), false);
+  runtime.standalone_slot.valueOrSkinIsNull = true;
+  assert.equal(runtime.fill_box.isNull?.(), true);
 });
 
-test('答案引用不受改名和排序影响，新增或删除空位会给出可修复问题', () => {
-  const { page, target, normalInput, fractionInput } = answerPage();
-  normalInput.name = 'renamed_input';
-  page.elements = [fractionInput, target, normalInput];
-  assert.deepEqual(collectFillAnswerSchemeIssues(target, page.elements), []);
-
-  const newInput = element('new-input', 'KlInputImage', { parentId: target.id });
-  page.elements.push(newInput);
-  assert.ok(collectFillAnswerSchemeIssues(target, page.elements).some((issue) => issue.code === 'missing-slot'));
-  page.elements = page.elements.filter((item) => item.id !== fractionInput.id);
-  assert.ok(collectFillAnswerSchemeIssues(target, page.elements).some((issue) => issue.code === 'missing-input'));
-});
-
-test('复制页面时答案方案同步重建输入引用和方案 ID', () => {
-  const { target, normalInput, fractionInput } = answerPage();
-  const idMap = new Map([
-    [target.id, 'fill-box-copy'],
-    [normalInput.id, 'normal-input-copy'],
-    [fractionInput.id, 'fraction-input-copy'],
+test('编辑器即时预览与导出使用相同的结构化判定状态', () => {
+  const { page, target, left, right } = relationPage();
+  const values = new Map<string, { value: string; isEmpty: boolean }>([
+    [left.id, { value: '0.5', isEmpty: false }],
+    [right.id, { value: '8', isEmpty: false }],
   ]);
-  const cloned = structuredClone(target);
-  remapFillAnswerSchemeRefs(cloned, idMap, (prefix) => `${prefix}-copy`);
-  const scheme = (cloned.props[FILL_ANSWER_SCHEMES_KEY] as FillAnswerScheme[])[0];
-  assert.equal(scheme.id, 'answer-scheme-copy');
-  assert.deepEqual(scheme.slots.map((slot) => slot.inputId), ['normal-input-copy', 'fraction-input-copy']);
+  assert.equal(evaluateStructuredInputRuleState(target, page.elements, (input) => values.get(input.id)), true);
+  values.set(right.id, { value: '7', isEmpty: false });
+  assert.equal(evaluateStructuredInputRuleState(target, page.elements, (input) => values.get(input.id)), false);
+  values.set(right.id, { value: '', isEmpty: true });
+  assert.equal(evaluateStructuredInputRuleState(target, page.elements, (input) => values.get(input.id)), null);
 });
 
-test('答案方案输入格会生成 var，并在正常、作业和预习导出中注入同一判定', () => {
-  const addQuestion = (page: SubPage) => {
-    const answer = answerPage();
-    page.elements.push(...answer.page.elements);
-  };
+test('关系引用稳定，并阻止重复占用、失效输入和无规则空位', () => {
+  const { page, target, left, right } = relationPage();
+  assert.deepEqual(collectInputRuleIssues(target, page.elements), []);
+  const extra = element('extra-input', 'KlInputImage', { parentId: target.id });
+  page.elements.push(extra);
+  assert.ok(collectInputRuleIssues(target, page.elements).some((issue) => issue.code === 'missing-answer'));
+  extra.props[INPUT_ANSWER_CANDIDATES_KEY] = ['9'];
+  (target.props[INPUT_RELATIONS_KEY] as InputRelation[]).push({
+    id: 'relation-2',
+    leftInputId: left.id,
+    rightInputId: extra.id,
+    operator: 'add',
+    target: '10',
+  });
+  assert.ok(collectInputRuleIssues(target, page.elements).some((issue) => issue.code === 'duplicate-input'));
+  page.elements = page.elements.filter((item) => item.id !== right.id);
+  assert.ok(collectInputRuleIssues(target, page.elements).some((issue) => issue.code === 'missing-input'));
+});
+
+test('复制页面时算式关系同步重建输入引用和关系 ID', () => {
+  const { target, left, right } = relationPage();
+  const cloned = structuredClone(target);
+  remapInputRelationRefs(cloned, new Map([
+    [target.id, 'fill-box-copy'],
+    [left.id, 'left-copy'],
+    [right.id, 'right-copy'],
+  ]), (prefix) => `${prefix}-copy`);
+  const relation = (cloned.props[INPUT_RELATIONS_KEY] as InputRelation[])[0];
+  assert.equal(relation.id, 'input-relation-copy');
+  assert.equal(relation.leftInputId, 'left-copy');
+  assert.equal(relation.rightInputId, 'right-copy');
+});
+
+test('正常、作业和预习导出注入同一关系判定并剥离编辑器字段', () => {
+  const addQuestion = (page: SubPage) => page.elements.push(...relationPage(true).page.elements);
 
   const normal = normalCourseFixture();
   addQuestion(activePage(normal));
   const normalPage = activePage(normal);
-  const normalVars = collectElementsNeedingVar(normalPage);
-  assert.ok(normalVars.has('normal-input'));
-  assert.ok(normalVars.has('fraction-input'));
+  const vars = collectElementsNeedingVar(normalPage);
+  assert.ok(vars.has('left-input'));
+  assert.ok(vars.has('right-input'));
   const normalArtifacts = buildExportRegressionArtifacts(normal, regressionImageSizes('game_lt'));
   assert.match(normalArtifacts.scenes[0].source, /__target\.isRight = function\(\)/);
-  assert.doesNotMatch(JSON.stringify(normalArtifacts.scenes[0].scene), /_answerSchemes/);
+  assert.match(normalArtifacts.scenes[0].source, /Math\.abs\(a - b\)/);
+  assert.doesNotMatch(JSON.stringify(normalArtifacts.scenes[0].scene), /_inputRelations|_judgeAnswers/);
 
   const homework = homeworkCourseFixture();
   addQuestion(activePage(homework));
-  const homeworkSource = buildExportRegressionArtifacts(homework, regressionImageSizes('game_hw')).scenes[0].source;
-  assert.match(homeworkSource, /__target\.isNull = function\(\)/);
+  assert.match(buildExportRegressionArtifacts(homework, regressionImageSizes('game_hw')).scenes[0].source, /__target\.isNull = function\(\)/);
 
   const preview = previewCourseFixture();
   addQuestion(activePage(preview, true));
-  const previewSource = buildPreviewExportRegressionArtifacts(preview, regressionImageSizes('game_preview')).scenes[0].source;
-  assert.match(previewSource, /__target\.isRight = function\(\)/);
+  assert.match(buildPreviewExportRegressionArtifacts(preview, regressionImageSizes('game_preview')).scenes[0].source, /__target\.isRight = function\(\)/);
 });
 
-test('旧 KlInputBox 未配置结构化方案时继续保留原 answer 行为', () => {
+test('没有新候选或关系的历史填空题继续使用原 answer 判定', () => {
   const target = element('legacy-box', 'KlInputBox', { props: { answer: '1,2' } });
   const input1 = element('legacy-1', 'KlInputImage', { parentId: target.id });
   const input2 = element('legacy-2', 'KlInputImage', { parentId: target.id });
   const page: SubPage = { id: 'legacy-page', name: '旧页面', elements: [target, input1, input2] };
-  assert.equal(buildFillAnswerSchemeInitCode(page, (item) => item.name ?? item.id), '');
-  assert.deepEqual(collectFillAnswerSchemeIssues(target, page.elements), []);
-  const seeded = createFillAnswerScheme([input1, input2], String(target.props.answer).split(','));
-  assert.deepEqual(seeded.slots.map((slot) => slot.answer), ['1', '2']);
-});
-
-test('删除最后一套方案后回退到旧答案模式', () => {
-  const target = element('legacy-box', 'KlInputBox', { props: { _answerSchemes: undefined } });
-  assert.equal(hasFillAnswerSchemes(target), false);
-  assert.deepEqual(collectFillAnswerSchemeIssues(target, [target]), []);
+  assert.equal(hasStructuredInputRules(target, page.elements), false);
+  assert.equal(buildInputRuleInitCode(page, (item) => item.name ?? item.id), '');
+  assert.deepEqual(collectInputRuleIssues(target, page.elements), []);
 });

@@ -168,9 +168,9 @@
 
 [Issue #74](https://github.com/RexYoung000/editor/issues/74) 将新增可视化分数输入框，并与普通输入框按键盘兼容性分别绑定；一个分数固定占外框 3 个逻辑字符位，分子与分母各最多 4 位，外框缩放只改变显示尺寸，不改变老师配置的最大字符数。
 
-[Issue #72](https://github.com/RexYoung000/editor/issues/72) 在同一个 `KlInputBox` 内增加多套完整答案方案。编辑器用 `_answerSchemes` 保存按输入控件 ID 绑定的结构化答案；运行时不会把该编辑器字段写入 scene，而是在生成的场景初始化代码中为该 `KlInputBox` 注入统一的 `isRight()` / `isNull()` 判定。方案内全部空格同时匹配，多套方案任选一套即可；可互换模式保留答案重复次数。普通输入框和 `FractionInput` 可以混合，分数仍按结构化字符串精确比较。
+[Issue #72](https://github.com/RexYoung000/editor/issues/72) 允许 `KlInputImage` 与 `FractionInput` 保存多个候选正确答案，并允许同一个 `KlInputBox` 内的两个输入框建立算式关系。独立输入格和未关联空位按候选答案 OR 判定；加、减、乘、除和相等关系读取两个输入值动态计算。普通小数与简单分数按数值参与关系，例如目标为 4 时，允许小数输入的 `0.5 × 8` 应正确。
 
-没有 `_answerSchemes` 的历史课件继续走 SDK 原有 `answer`。结构化方案引用缺失、漏配当前空位或存在空答案时必须先在编辑器修复，预览与发布不得生成不完整规则。
+算式关系用 `_inputRelations` 按输入控件 ID 保存到父容器；一个输入框最多参与一条关系，不跨容器连接。运行时不会把编辑器专用候选和关系字段写入 scene，而是在生成的场景初始化代码中为 `KlInputBox` 注入统一 `isRight()` / `isNull()`。没有新配置的历史课件继续走原有 `_judgeAnswer` 或 `KlInputBox.answer`；引用失效、重复占用、目标结果无效或存在无判定规则的空位时必须先修复。
 
 ---
 

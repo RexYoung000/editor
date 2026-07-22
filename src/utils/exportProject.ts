@@ -18,11 +18,12 @@ import {
 } from './internalPageCompiler';
 import { getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
 import {
-  buildFillAnswerSchemeInitCode,
-  collectCourseFillAnswerSchemeIssues,
+  buildInputRuleInitCode,
+  collectCourseInputRuleIssues,
   getFillAnswerInputs,
-  hasFillAnswerSchemes,
-} from './fillAnswerSchemes';
+  getInputAnswerCandidates,
+  hasStructuredInputRules,
+} from './inputAnswerRules';
 
 // ─── Text 烘焙 ───
 
@@ -364,7 +365,7 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
 
   // 结构化填空题判定会直接读取容器内每一个输入格。
   for (const el of elements) {
-    if (el.type !== 'KlInputBox' || !hasFillAnswerSchemes(el)) continue;
+    if (el.type !== 'KlInputBox' || !hasStructuredInputRules(el, elements)) continue;
     needsVar.add(el.id);
     for (const input of getFillAnswerInputs(el, elements)) needsVar.add(input.id);
   }
@@ -1251,7 +1252,7 @@ export function buildSdkJudgeClickInitCode(
       };
 
       const rightCheck = capability.kind === 'inputImage'
-        ? `!${targetRef}.valueOrSkinIsNull && ${targetRef}.fontClipValue === ${JSON.stringify(String(target.props._judgeAnswer ?? ''))}`
+        ? `!${targetRef}.valueOrSkinIsNull && (${JSON.stringify(getInputAnswerCandidates(target))}).indexOf(String(${targetRef}.fontClipValue || "")) >= 0`
         : capability.kind === 'input'
         ? `${targetRef}.isRight()`
         : capability.kind === 'drag'
@@ -1293,8 +1294,7 @@ export function collectHomeworkStandaloneInputJudgeTargets(page: SubPage): Eleme
 
   return page.elements.filter((element) => {
     if (element.type !== 'KlInputImage' && element.type !== 'FractionInput') return false;
-    const answer = String(element.props?._judgeAnswer ?? '');
-    return answer.trim() !== '' && !isInsideInputBox(element);
+    return getInputAnswerCandidates(element).length > 0 && !isInsideInputBox(element);
   });
 }
 
@@ -1307,9 +1307,9 @@ export function buildHomeworkStandaloneInputJudgeCode(
   let code = '';
   for (const element of collectHomeworkStandaloneInputJudgeTargets(page)) {
     const elementRef = `this.${getVar(element)}`;
-    const answer = JSON.stringify(String(element.props?._judgeAnswer ?? ''));
+    const answers = JSON.stringify(getInputAnswerCandidates(element));
     code += `        if (!${elementRef} || ${elementRef}.valueOrSkinIsNull) { ${resultCollection}.push(null); }\n`;
-    code += `        else if (String(${elementRef}.fontClipValue || "") === ${answer}) { ${resultCollection}.push(true); }\n`;
+    code += `        else if ((${answers}).indexOf(String(${elementRef}.fontClipValue || "")) >= 0) { ${resultCollection}.push(true); }\n`;
     code += `        else { ${resultCollection}.push(false); }\n`;
   }
   return code;
@@ -1365,7 +1365,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   let initCode = '';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildMathKeyboardInitCode(page, getVar);
-  initCode += buildFillAnswerSchemeInitCode(page, getVar);
+  initCode += buildInputRuleInitCode(page, getVar);
 
   // 口才反馈动画：如果有 onClickInitConfirmCH / *WithLock / onClickInitGameConfirmCH / *WithLock 或 playKcRightAni / playKcWrongAni，需要在类末尾追加 playRightAni/playWrongAni
   const hasCHConfirm = page.elements.some(el =>
@@ -1782,7 +1782,7 @@ function generateHomeworkSceneTs(
   let checkResultCode = '        var __forgeJudgeResults: any[] = [];\n';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildMathKeyboardInitCode(page, getVar);
-  initCode += buildFillAnswerSchemeInitCode(page, getVar);
+  initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
 
@@ -2591,11 +2591,11 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
   const dirPath = getCourseDirPath(course.id);
   if (!dirPath) throw new Error('未找到课件目录，请先保存课件');
 
-  const fillAnswerIssues = collectCourseFillAnswerSchemeIssues(course);
-  if (fillAnswerIssues.length > 0) {
-    const details = fillAnswerIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
-    const more = fillAnswerIssues.length > 8 ? `\n另有 ${fillAnswerIssues.length - 8} 项未显示` : '';
-    throw new Error(`填空题答案方案尚未完成，不能预览或发布：\n\n${details}${more}`);
+  const inputRuleIssues = collectCourseInputRuleIssues(course);
+  if (inputRuleIssues.length > 0) {
+    const details = inputRuleIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = inputRuleIssues.length > 8 ? `\n另有 ${inputRuleIssues.length - 8} 项未显示` : '';
+    throw new Error(`填空题判定规则尚未完成，不能预览或发布：\n\n${details}${more}`);
   }
 
   if (!options.skipSvn) {

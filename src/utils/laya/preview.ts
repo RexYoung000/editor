@@ -3,6 +3,7 @@ import { laya, clearAllObjects, setPreviewMode } from './core';
 import { createLayaComponent, applyKlProps } from './components';
 import { registerObject } from './core';
 import { objects } from './core';
+import { evaluateStructuredInputRuleState, getInputAnswerCandidates } from '../inputAnswerRules';
 import { getSdkJudgeCapability, SDK_JUDGE_EVENT, type JudgeCondition } from '../sdkJudge';
 
 let _previewPages: Page[] = [];
@@ -78,11 +79,24 @@ function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | nul
   const targetObject = target ? objects().get(target.id) : undefined;
   if (!target || !capability || !targetObject) return null;
 
+  const structuredInputState = capability.kind === 'input'
+    ? evaluateStructuredInputRuleState(target, page.elements, (input) => {
+        const inputObject = objects().get(input.id);
+        if (!inputObject) return undefined;
+        return {
+          value: String(inputObject.fontClipValue ?? ''),
+          isEmpty: Boolean(inputObject.valueOrSkinIsNull),
+        };
+      })
+    : undefined;
+
   const isRight = capability.kind === 'inputImage'
     ? !targetObject.valueOrSkinIsNull
-      && String(targetObject.fontClipValue ?? '') === String(target.props._judgeAnswer ?? '')
+      && getInputAnswerCandidates(target).includes(String(targetObject.fontClipValue ?? ''))
     : capability.kind === 'input'
-    ? Boolean(targetObject.isRight?.())
+    ? structuredInputState === undefined
+      ? Boolean(targetObject.isRight?.())
+      : structuredInputState === true
     : capability.kind === 'drag'
       ? Boolean(targetObject.dragsOnRightDrops?.())
       : capability.kind === 'matching'
@@ -93,6 +107,8 @@ function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | nul
 
   const isNull = capability.kind === 'inputImage'
     ? Boolean(targetObject.valueOrSkinIsNull)
+    : capability.kind === 'input' && structuredInputState !== undefined
+    ? structuredInputState === null
     : capability.kind === 'choice'
     ? Boolean(targetObject.isNull)
     : Boolean(targetObject.isNull?.());
