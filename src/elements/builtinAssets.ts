@@ -203,6 +203,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'okBtn.m_qddk_on', src: 'runtime/game/okBtn/m_qddk_on.png', exportPath: 'game/okBtn/m_qddk_on.png' },
   { id: 'okBtn.btn_dpon',  src: 'runtime/game/okBtn/btn_dpon.png',  exportPath: 'game/okBtn/btn_dpon.png' },
   { id: 'okBtn.btn_1',     src: 'runtime/game/okBtn/btn_1.png',     exportPath: 'game/okBtn/btn_1.png' },
+  { id: 'okBtn.quickTemplateYellowTraditional', src: 'runtime/game/okBtn/quick-template-yellow-traditional.png', exportPath: 'game/okBtn/quick-template-yellow-traditional.png' },
 
   // ─── 翻页组件资源 ───
   { id: 'pageTurn.btnLeft',       src: 'runtime/game/image/btn_return_new.png', exportPath: 'game/image/btn_return_new.png' },

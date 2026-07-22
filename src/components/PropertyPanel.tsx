@@ -32,6 +32,7 @@ import {
   getChoiceOptions,
   isChoiceOption,
 } from '../utils/choiceAnswerRules';
+import { isQuickTemplateConfirm } from '../utils/quickTemplateConfirm';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -855,12 +856,19 @@ export default function PropertyPanel() {
               )}
 
               {/* 确定按钮：替换资源按钮 */}
+              {single && isQuickTemplateConfirm(single) && (
+                <FieldRenderer
+                  field={{ key: 'skin', label: '按钮图片', type: 'file', fileType: 'image', group: '外观' }}
+                  elements={selectedElements}
+                  onChange={handleChange}
+                />
+              )}
               {single && single.type === 'ConfirmButton' && (
                 <button
                   onClick={() => setOkBtnPickerOpen(true)}
                   className="w-full mb-2 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors"
                 >
-                  {t('replaceResource')}
+                  {isQuickTemplateConfirm(single) ? '预设资源' : t('replaceResource')}
                 </button>
               )}
 

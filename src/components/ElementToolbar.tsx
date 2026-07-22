@@ -16,6 +16,7 @@ import type { Action, Element } from '../types';
 import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
 import { keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
 import { isInputRuleHost } from '../utils/inputAnswerRules';
+import { applyQuickTemplateConfirmDefaults } from '../utils/quickTemplateConfirm';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -408,6 +409,7 @@ export default function ElementToolbar() {
 
     // 正课：保留 ConfirmButton 原逻辑
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{
@@ -522,6 +524,7 @@ export default function ElementToolbar() {
 
     // 正课：创建确定按钮（顶级元素，与 KlInputBox 同级）
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{
@@ -615,6 +618,7 @@ export default function ElementToolbar() {
     // 7. 正课/预习：创建 ConfirmButton 并绑定 onClickInitGameConfirmWithLock
     if (!isFlat) {
       const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+      applyQuickTemplateConfirmDefaults(confirmBtn);
       confirmBtn.x = 1666;
       confirmBtn.y = 960;
       confirmBtn.actions = [{
@@ -690,6 +694,7 @@ export default function ElementToolbar() {
 
     // 正课/预习：创建 ConfirmButton，绑 onClickInitGameConfirmWithLock，target 指向 DragViewBox
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{

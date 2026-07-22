@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Action, Course, Element, SubPage } from '../src/types';
 import { assetExport } from '../src/elements/builtinAssets';
+import { elementMeta } from '../src/elements/elementMeta';
 import {
   CHOICE_CORRECT_OPTION_IDS_KEY,
   collectChoiceAnswerIssues,
@@ -23,6 +24,13 @@ import {
   normalCourseFixture,
   previewCourseFixture,
 } from './fixtures/export-courses';
+import {
+  applyQuickTemplateConfirmDefaults,
+  isQuickTemplateConfirm,
+  QUICK_TEMPLATE_CONFIRM_ASSET_ID,
+  QUICK_TEMPLATE_CONFIRM_MARKER,
+  QUICK_TEMPLATE_CONFIRM_SIZE,
+} from '../src/utils/quickTemplateConfirm';
 
 interface SceneNode {
   type?: string;
@@ -146,6 +154,24 @@ test('正确答案使用稳定选项 ID，并自动推导单选和多选', () =>
   });
   assert.equal('rightItemNames' in choice.props, false);
   assert.equal('upperLimit' in choice.props, false);
+});
+
+test('快捷题型确定按钮使用黄色繁体资源且不改变独立组件默认值', () => {
+  const confirm = element('quick-confirm', 'ConfirmButton', {
+    layaType: 'ScaleButton',
+    props: { ...elementMeta.ConfirmButton.defaultProps },
+  });
+
+  applyQuickTemplateConfirmDefaults(confirm);
+
+  assert.equal(confirm.props.skin, assetExport(QUICK_TEMPLATE_CONFIRM_ASSET_ID));
+  assert.deepEqual(
+    { width: confirm.width, height: confirm.height },
+    QUICK_TEMPLATE_CONFIRM_SIZE,
+  );
+  assert.equal(confirm.props[QUICK_TEMPLATE_CONFIRM_MARKER], true);
+  assert.equal(isQuickTemplateConfirm(confirm), true);
+  assert.equal(elementMeta.ConfirmButton.defaultProps.skin, assetExport('okBtn.m_qddk_on'));
 });
 
 test('删除、移出和复制选项时同步维护答案引用', () => {
