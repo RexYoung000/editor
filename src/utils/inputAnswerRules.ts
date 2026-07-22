@@ -329,3 +329,22 @@ export function buildInputRuleInitCode(page: SubPage, getVar: (element: Element)
   }
   return code;
 }
+
+export function buildInputRuleConfirmInitCode(
+  source: Element,
+  target: Element,
+  getVar: (element: Element) => string,
+  withLock: boolean,
+): string {
+  if (target.type !== 'ContainerBox' || !isInputRuleHost(target)) return '';
+  const sourceRef = `this.${getVar(source)}`;
+  const targetRef = `this.${getVar(target)}`;
+  const lockCode = withLock ? 'if (this._lockBox) this._lockBox.visible = true; ' : '';
+  return `        if (${sourceRef}) ${sourceRef}.on(Laya.Event.CLICK, this, function() {\n`
+    + `            var __target = ${targetRef};\n`
+    + `            if (!__target || typeof __target.isNull !== "function" || typeof __target.isRight !== "function") return;\n`
+    + `            if (__target.isNull()) { console.log('${getVar(target)} result:null'); return; }\n`
+    + `            if (__target.isRight()) { console.log('${getVar(target)} result:right'); ${lockCode}this.showAnswerFace(1); }\n`
+    + `            else { console.log('${getVar(target)} result:false'); this.showAnswerFace(2); }\n`
+    + `        });\n`;
+}

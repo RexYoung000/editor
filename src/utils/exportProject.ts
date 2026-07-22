@@ -16,8 +16,9 @@ import {
   compileInternalPagesCourse,
   internalPageActionBody,
 } from './internalPageCompiler';
-import { getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
+import { collectCourseConfirmTargetIssues, getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
 import {
+  buildInputRuleConfirmInitCode,
   buildInputRuleInitCode,
   collectCourseInputRuleIssues,
   findInputRuleHostAncestor,
@@ -1468,7 +1469,14 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
           const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
           const btnVar = getVar(el);
           const lockArg = rawEvent === 'onClickInitConfirmWithLock' ? ', null, this._lockBox' : '';
-          if (isInputRuleHost(targetEl)) {
+          if (targetEl?.type === 'ContainerBox' && isInputRuleHost(targetEl)) {
+            initCode += buildInputRuleConfirmInitCode(
+              el,
+              targetEl,
+              getVar,
+              rawEvent === 'onClickInitConfirmWithLock',
+            );
+          } else if (targetEl?.type === 'KlInputBox') {
             const inputBoxVar = getVar(targetEl);
             initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
           } else if (targetEl && targetEl.layaType === 'ChoiceBox') {
@@ -2583,6 +2591,13 @@ export async function extractZipFromServer(
 export async function exportProject(course: Course, options: { skipSvn?: boolean } = {}): Promise<{ svnSubmitted: boolean }> {
   const dirPath = getCourseDirPath(course.id);
   if (!dirPath) throw new Error('未找到课件目录，请先保存课件');
+
+  const confirmTargetIssues = collectCourseConfirmTargetIssues(course);
+  if (confirmTargetIssues.length > 0) {
+    const details = confirmTargetIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = confirmTargetIssues.length > 8 ? `\n另有 ${confirmTargetIssues.length - 8} 项未显示` : '';
+    throw new Error(`确定按钮判定目标尚未完成，不能预览或发布：\n\n${details}${more}`);
+  }
 
   const inputRuleIssues = collectCourseInputRuleIssues(course);
   if (inputRuleIssues.length > 0) {

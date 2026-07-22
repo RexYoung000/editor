@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { Course, Element, SubPage } from '../src/types';
 import {
   buildInputRuleInitCode,
+  buildInputRuleConfirmInitCode,
   collectInputRuleIssues,
   createInputRelation,
   evaluateStructuredInputRuleState,
@@ -171,6 +172,47 @@ test('嵌套答题容器只收集离输入框最近的一组', () => {
   assert.equal(findInputRuleHostAncestor(innerInput, elements)?.id, outer.id);
 });
 
+test('ContainerBox 确定按钮使用通用三态判定而不调用 KlInputBox 专用方法', () => {
+  const button = element('confirm-button', 'ConfirmButton');
+  const target = element('answer-box', 'ContainerBox', {
+    props: { [INPUT_RULE_ENABLED_KEY]: true },
+  });
+  const code = buildInputRuleConfirmInitCode(button, target, (item) => item.name ?? item.id, true);
+  let clickHandler: (() => void) | undefined;
+  const faces: number[] = [];
+  let state: boolean | null = null;
+  const context = {
+    confirm_button: {
+      on: (_event: string, caller: unknown, handler: () => void) => {
+        clickHandler = handler.bind(caller);
+      },
+    },
+    answer_box: {
+      isNull: () => state === null,
+      isRight: () => state === true,
+    },
+    _lockBox: { visible: false },
+    showAnswerFace: (face: number) => faces.push(face),
+  };
+  Function('context', 'Laya', `return (function() { ${code} }).call(context);`)(context, { Event: { CLICK: 'click' } });
+  assert.ok(clickHandler);
+
+  clickHandler?.();
+  assert.deepEqual(faces, []);
+  assert.equal(context._lockBox.visible, false);
+
+  state = false;
+  clickHandler?.();
+  assert.deepEqual(faces, [2]);
+  assert.equal(context._lockBox.visible, false);
+
+  state = true;
+  clickHandler?.();
+  assert.deepEqual(faces, [2, 1]);
+  assert.equal(context._lockBox.visible, true);
+  assert.doesNotMatch(code, /GameUtils\.initConfirm|getWrongIdx|showWrongTips/);
+});
+
 test('数值解析支持小数、简单分数和带整数部分的结构化分数', () => {
   assert.equal(parseRuleNumber('0.5'), 0.5);
   assert.equal(parseRuleNumber('1/2'), 0.5);
@@ -284,6 +326,46 @@ test('正常、作业和预习导出注入同一关系判定并剥离编辑器�
   const preview = previewCourseFixture();
   addQuestion(activePage(preview, true));
   assert.match(buildPreviewExportRegressionArtifacts(preview, regressionImageSizes('game_preview')).scenes[0].source, /__target\.isRight = function\(\)/);
+});
+
+test('正常与预习导出为 ContainerBox 确定按钮生成通用点击监听', () => {
+  const addQuestion = (page: SubPage) => {
+    const target = element('container-answer-box', 'ContainerBox', {
+      props: { [INPUT_RULE_ENABLED_KEY]: true },
+    });
+    const left = element('container-left', 'KlInputImage', {
+      parentId: target.id,
+      props: { [INPUT_ANSWER_CANDIDATES_KEY]: ['1'] },
+    });
+    const right = element('container-right', 'KlInputImage', {
+      parentId: target.id,
+      props: { [INPUT_ANSWER_CANDIDATES_KEY]: ['6'] },
+    });
+    target.props[INPUT_RELATIONS_KEY] = [createInputRelation(left.id, right.id, 'multiply', '6')];
+    const button = element('container-confirm', 'ConfirmButton', {
+      actions: [{
+        id: 'container-confirm-action',
+        event: 'onClickInitConfirmWithLock',
+        targetId: target.id,
+        targetNameSnapshot: target.name,
+        actionType: 'toggleVisible',
+      }],
+    });
+    page.elements.push(target, left, right, button);
+  };
+
+  const normal = normalCourseFixture();
+  addQuestion(activePage(normal));
+  const normalSource = buildExportRegressionArtifacts(normal, regressionImageSizes('game_lt')).scenes[0].source;
+  assert.match(normalSource, /this\.container_confirm\.on\(Laya\.Event\.CLICK/);
+  assert.match(normalSource, /this\.container_answer_box/);
+  assert.doesNotMatch(normalSource, /GameUtils\.initConfirm\(this, this\.container_confirm/);
+
+  const preview = previewCourseFixture();
+  addQuestion(activePage(preview, true));
+  const previewSource = buildPreviewExportRegressionArtifacts(preview, regressionImageSizes('game_preview')).scenes[0].source;
+  assert.match(previewSource, /this\.container_confirm\.on\(Laya\.Event\.CLICK/);
+  assert.doesNotMatch(previewSource, /GameUtils\.initConfirm\(this, this\.container_confirm/);
 });
 
 test('没有新候选或关系的历史填空题继续使用原 answer 判定', () => {

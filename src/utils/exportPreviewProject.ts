@@ -24,7 +24,7 @@ import {
   compileInternalPagesCourse,
   internalPageActionBody,
 } from './internalPageCompiler';
-import { buildInputRuleInitCode, isInputRuleHost } from './inputAnswerRules';
+import { buildInputRuleConfirmInitCode, buildInputRuleInitCode, isInputRuleHost } from './inputAnswerRules';
 
 // ─── 预习场景差异 ───
 
@@ -81,7 +81,16 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
       const btnVar = getVar(el);
       const inputBoxVar = getVar(targetEl);
       const lockArg = action.event === 'onClickInitConfirmWithLock' ? ', null, this._lockBox' : '';
-      initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
+      if (targetEl.type === 'ContainerBox') {
+        initCode += buildInputRuleConfirmInitCode(
+          el,
+          targetEl,
+          getVar,
+          action.event === 'onClickInitConfirmWithLock',
+        );
+      } else {
+        initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
+      }
     }
   }
 

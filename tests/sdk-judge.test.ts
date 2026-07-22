@@ -10,6 +10,7 @@ import {
 } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
 import {
+  collectConfirmTargetIssues,
   getSdkJudgeCapability,
   isSdkJudgeTarget,
   SDK_JUDGE_EVENT,
@@ -102,6 +103,29 @@ test('SDK 判定目标矩阵只接受现有题型组件并返回真实结果能�
   assert.equal(getSdkJudgeCapability(answerContainer)?.kind, 'input');
   assert.equal(isSdkJudgeTarget(layoutContainer), false);
   assert.equal(isSdkJudgeTarget(image), false);
+});
+
+test('确定按钮目标失效或停用时明确阻止判定而不静默回退', () => {
+  const target = element('answer-container', 'ContainerBox', { props: { _inputRuleEnabled: true } });
+  const button = element('confirm', 'ConfirmButton', {
+    actions: [{
+      id: 'confirm-action',
+      event: 'onClickInitConfirmWithLock',
+      targetId: target.id,
+      targetNameSnapshot: '原答题容器',
+      actionType: 'toggleVisible',
+    }],
+  });
+  const page: SubPage = { id: 'page', name: '页面', elements: [target, button] };
+  assert.deepEqual(collectConfirmTargetIssues(page), []);
+
+  target.props._inputRuleEnabled = false;
+  assert.equal(collectConfirmTargetIssues(page)[0]?.code, 'invalid-target');
+
+  page.elements = [button];
+  const issue = collectConfirmTargetIssues(page)[0];
+  assert.equal(issue?.code, 'missing-target');
+  assert.match(issue?.message ?? '', /原答题容器.*已失效/);
 });
 
 test('独立输入格使用多个候选答案生成正确、错误和未完成判定', () => {

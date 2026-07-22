@@ -406,6 +406,7 @@ export default function ElementToolbar() {
       id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       event: 'onClickInitConfirmWithLock',
       targetId: choiceBox.id,
+      targetNameSnapshot: choiceBox.name,
       actionType: 'toggleVisible',
       groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     }];
@@ -519,6 +520,7 @@ export default function ElementToolbar() {
       id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       event: 'onClickInitConfirmWithLock',
       targetId: inputBox.id,
+      targetNameSnapshot: inputBox.name,
       actionType: 'toggleVisible',
       groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     }];
@@ -754,6 +756,7 @@ export default function ElementToolbar() {
             id: makeId('action'),
             event: isGame ? 'onClickInitGameConfirmWithLock' : 'onClickInitConfirmWithLock',
             targetId: target.id,
+            targetNameSnapshot: target.name,
             actionType: 'toggleVisible',
             groupId: makeId('group'),
           }];

@@ -186,6 +186,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 配置了多候选答案或 `_inputRelations` 的 `KlInputBox`，以及显式开启“启用答题判定”的 `ContainerBox`，会在正常、作业和预习场景的 `initView()` 中注入实例级判定：`isNull()` 统一检查该组全部输入格，`isRight()` 将未关联空位的候选答案判断与两框算式关系判断做 AND 聚合。输入格只归属最近的答题判定容器，嵌套容器不会重复收集。关系支持加、减、乘、除和相等，小数使用稳定容差，简单分数转换为数值后参与计算。被引用输入格会强制生成 scene `var`，编辑器专用候选、关系和容器开关字段仍从 scene 剥离。这样通用点击判定、`GameUtils.initConfirm` 和作业 `checkResult()` 无需建立平行入口即可得到同一结果；失效引用、重复占用、无效目标或无规则空位会在预览与发布前中止并返回可修复信息。
 
+快捷确定按钮引用 `KlInputBox` 时继续生成 `GameUtils.initConfirm`；引用启用答题判定的 `ContainerBox` 时改为生成通用三态点击监听，直接调用容器已注入的 `isNull()` / `isRight()`，并按事件配置执行默认正确、错误反馈和锁屏。失效的确认目标在工程生成前统一校验并阻止继续，不能静默跳过监听代码。
+
 ### 4.10 `finalConfig.json`
 
 `buildConfigJson`（normal）/ `buildHomeworkConfigJson`（homework）。Normal 顶层：`{ release: 'dev', feedback: 'spirit', noVideoMystery: 1, pages: [...] }`；homework 加 `classify: 'homeworkOnline'`、`newEva: 1`、`isSound: false`。
