@@ -129,7 +129,11 @@
 
 `KlInputImage` 没有 `isRight()`、`isNull()` 或 SDK `answer` 属性。forge 允许独立输入格作为判定目标：正确答案保存在编辑器专用 `_judgeAnswer`，导出时比较 `fontClipValue`，并用 `valueOrSkinIsNull` 区分未完成；`_judgeAnswer` 不写入运行时 scene。
 
+在作业和专题测评中，未嵌套于 `KlInputBox` 的 `KlInputImage` 只要配置了非空 `_judgeAnswer`，就会自动参与运行时预设“完成”判定，不要求额外添加确认按钮或 `onClickSdkJudge`。同页多个独立输入控件按“任一未填为未作答、全部填写且全对为正确、全部填写但任一错误为错误”聚合；嵌套输入格仍由 `KlInputBox` 题型规则负责，避免快捷模板被重复判定。
+
 `FractionInput` 使用 `img_w2Input.png` 的 29 格位图字体，字符表固定为 `0123456789+-×÷=()><.tabcdxyπ²`。字符表数量必须与素材切片数量一致，否则单次输入会显示相邻的整段美术资源，并导致内容宽度计算错误。普通字符按字体实际缩放后的 advance width（字符格宽度与字间距的合计）参与布局，分数结构和普通字符之间的间距也必须计入；外框内容按真实字符宽度自适应缩放，不允许溢出九宫格外框。每个普通分数结构占 3 个逻辑字符位，分子和分母各最多 4 位数字，子输入格不允许再次插入分数结构。
+
+`FractionInput` 沿用与独立 `KlInputImage` 相同的作业预设完成规则，并按当前结构化字符串精确比较 `_judgeAnswer` 与 `fontClipValue`；本能力不自动约分或换算数学等值分数。
 
 ### KlTextInput
 

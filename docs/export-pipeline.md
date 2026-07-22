@@ -182,7 +182,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 | `animate`（Spine 目标）| `t.play(value, loop)`，`spineLoop !== 'false'` 时循环 |
 | `animate`（其他目标）| `t.play(value ?? 'shan')` |
 
-**Homework 模板** `generateHomeworkSceneTs`：极简，只有 `super.initView(byReset)` 和占位的 `_result` / `checkResult` getter/setter，没有任何 action / 翻页逻辑（作业模式由 sdk_baiya 的作业题型类自行处理交互）。
+**Homework 模板** `generateHomeworkSceneTs`：继承 `ui.game_hw` 并保留 `_result` / `checkResult` getter/setter。题型组件继续通过 `onChoiceJudge`、`onInputJudge`、`onDragJudge`、`onMatchingJudge` 接入结果；显式 `onClickSdkJudge` 继续生成点击监听。除此之外，导出器会收集未嵌套在 `KlInputBox` 内且配置了非空 `_judgeAnswer` 的 `KlInputImage` / `FractionInput`，在 `checkResult()` 中按“任一未填为 `null`、全部填写且全对为 `true`、全部填写但任一错误为 `false`”聚合。未配置答案的普通输入控件不会进入判定，编辑器专用 `_judgeAnswer` 仍不写入 scene。
 
 ### 4.10 `finalConfig.json`
 
