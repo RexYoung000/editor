@@ -28279,6 +28279,7 @@ var FeedbackView=(function(_super){
 		this.EVENT_WILL_SHOW_ANSWER_FACE="willShowAnswerFace";
 		/**笑脸对应数据 */
 		this._ANSWER_FACE_DATA=[{name:"ok",sound:"share/sound/anwser_right.wav"},{name:"no",sound:"share/sound/anwser_wrong.wav"},{name:"impotence",sound:"share/sound/anwser_wrong.wav"},{name:"bear_happy1",sound:"share/sound/woxdmx.wav"},{name:"bear_happy1",sound:"share/sound/woxdmx.wav"},{name:"bear_baye",sound:"share/sound/slyx.wav"},{name:"xx",sound:"share/sound/nzstbl.wav"},{name:"xxx",sound:"share/sound/oywcl.wav"},{name:"lediAuthor"},];
+		this.WAN_DOU_ANSWER_FACE_ARR=["share/animation/yee_WAV.wav","share/animation/zaixiangxiang.wav","share/animation/taikexi.wav"];
 		this.MINORTYPE_TO_ANINAME={enqueue:[{ske:"mimimao",name:"speak"},{ske:"pph",name:"speak"},{ske:"cml",name:"speak"},{ske:"dlxf",name:"speak"},{ske:"syls45",name:"speak"},{ske:"hmf",name:"speak"}],showTrophyAni:{ske:"jiangbei",name:"chuxian"}
 		};
 		this._ascendV3Init=null;
@@ -28440,6 +28441,9 @@ var FeedbackView=(function(_super){
 		var fdata={};
 		if (isStepFourToSix || isEditorStepFourToEight || isUpgrade){
 			skeName=type==1 ? "right" :(isUpgrade ? "wrong2" :"wrong");
+			if (dotSK=="wandou"){
+				fdata["sound"]=this.WAN_DOU_ANSWER_FACE_ARR[idx];
+			}
 			}else if (this.isUseNewLdRight && type==1){
 			skeName="tbl";
 		}else if (this.isUseNewLdWrong && type==2)
@@ -28454,23 +28458,25 @@ var FeedbackView=(function(_super){
 		this.PLAYING=true;
 		this.delayCheckObstacleViewStatus();
 		if (fdata.sound){
-			this.frameOnce(3,this,function(s){
-				var v=VipThink.viewMgr.currPage.currView;
-				if (v){
-					if (type==1){
-						var rightSound=v.LEDI_RIGHT_SOUND;
-						if (rightSound)
-							s=rightSound;
-						}else if (type==2){
-						var wrongSound=v.LEDI_WRONG_SOUND;
-						if (wrongSound)
-							s=wrongSound;
+			this.frameOnce(3,this,function(s,skName){
+				if (skName !="wandou"){
+					var v=VipThink.viewMgr.currPage.currView;
+					if (v){
+						if (type==1){
+							var rightSound=v.LEDI_RIGHT_SOUND;
+							if (rightSound)
+								s=rightSound;
+							}else if (type==2){
+							var wrongSound=v.LEDI_WRONG_SOUND;
+							if (wrongSound)
+								s=wrongSound;
+						}
 					}
 				}
 				if (VipThink.OPEN_PLAY_BACK)
 					return;
 				KlSoundManager.playSoundUnSync(s);
-			},[fdata.sound])
+			},[fdata.sound,dotSK])
 		}
 		if (this._hdrAnswerFace)
 			this._hdrAnswerFace.recover();
