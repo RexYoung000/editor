@@ -7,6 +7,7 @@ import {
   findInputBoxAncestor,
   getFillAnswerInputs,
   getInputAnswerCandidates,
+  getInputRuleDisplayName,
   hasStructuredInputRules,
   INPUT_ANSWER_CANDIDATES_KEY,
   INPUT_RELATIONS_KEY,
@@ -28,7 +29,6 @@ const OPERATOR_OPTIONS: Array<{ value: InputRelationOperator; label: string }> =
 ];
 
 const operatorLabel = (operator: InputRelationOperator) => OPERATOR_OPTIONS.find((item) => item.value === operator)?.label ?? '?';
-const inputLabel = (input: Element | undefined) => input?.name ?? input?.id ?? '失效输入框';
 
 interface SharedProps {
   elements: Element[];
@@ -77,7 +77,7 @@ function RelationBuilder({
             onChange={(event) => setOtherId(event.target.value)}
             className="w-full rounded border border-slate-600 bg-slate-700 px-2 py-1 text-xs text-slate-100"
           >
-            {available.map((input) => <option key={input.id} value={input.id}>{inputLabel(input)}</option>)}
+            {available.map((input) => <option key={input.id} value={input.id}>{getInputRuleDisplayName(input)}</option>)}
           </select>
           <div className="grid grid-cols-[64px_1fr] gap-2">
             <select
@@ -145,8 +145,8 @@ function RelationCard({
   return (
     <div className="rounded border border-blue-600/50 bg-blue-950/20 p-2">
       <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-blue-200"><Link2 size={12} /> 由算式关系判定</div>
-      <div className="mb-2 truncate text-xs text-slate-200" title={`${inputLabel(left)} ${operatorLabel(relation.operator)} ${inputLabel(right)}`}>
-        {inputLabel(left)} {operatorLabel(relation.operator)} {inputLabel(right)}{relation.operator === 'equal' ? '' : ` = ${relation.target || '未设置'}`}
+      <div className="mb-2 truncate text-xs text-slate-200" title={`${getInputRuleDisplayName(left)} ${operatorLabel(relation.operator)} ${getInputRuleDisplayName(right)}`}>
+        {getInputRuleDisplayName(left)} {operatorLabel(relation.operator)} {getInputRuleDisplayName(right)}{relation.operator === 'equal' ? '' : ` = ${relation.target || '未设置'}`}
       </div>
       <div className="grid grid-cols-[64px_1fr] gap-2">
         <select
@@ -368,7 +368,7 @@ export function InputRulesOverview({ target, ...shared }: SharedProps & { target
                 onChange={(event) => setSourceId(event.target.value)}
                 className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-700 px-2 py-1 text-xs text-slate-100"
               >
-                {freeInputs.map((input) => <option key={input.id} value={input.id}>{inputLabel(input)}</option>)}
+                {freeInputs.map((input) => <option key={input.id} value={input.id}>{getInputRuleDisplayName(input)}</option>)}
               </select>
             </label>
             <RelationBuilder key={source.id} source={source} target={target} onCancel={() => setSourceId('')} {...shared} />
@@ -380,7 +380,7 @@ export function InputRulesOverview({ target, ...shared }: SharedProps & { target
           const answers = getInputAnswerCandidates(input);
           return (
             <button key={input.id} type="button" onClick={() => shared.onSelectElement(input.id)} className="flex w-full items-center justify-between rounded bg-slate-800/50 px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-700">
-              <span className="truncate">{inputLabel(input)}</span>
+              <span className="truncate">{getInputRuleDisplayName(input)}</span>
               <span className={answers.length > 0 ? 'text-blue-300' : 'text-amber-300'}>{answers.length > 0 ? `${answers.length} 个候选答案` : '未配置答案'}</span>
             </button>
           );

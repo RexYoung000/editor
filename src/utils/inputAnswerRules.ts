@@ -1,4 +1,5 @@
 import type { Course, Element, SubPage } from '../types';
+import { getLayerDisplayName } from './layerPresentation';
 
 export const INPUT_ANSWER_CANDIDATES_KEY = '_judgeAnswers';
 export const INPUT_RELATIONS_KEY = '_inputRelations';
@@ -28,6 +29,10 @@ function makeRuleId(): string {
 
 export function isAnswerInput(element: Element | undefined): element is Element {
   return element?.type === 'KlInputImage' || element?.type === 'FractionInput';
+}
+
+export function getInputRuleDisplayName(element: Element | undefined): string {
+  return element ? getLayerDisplayName(element) : '失效输入框';
 }
 
 export function splitAnswerCandidates(value: string): string[] {
@@ -188,7 +193,7 @@ export function evaluateStructuredInputRuleState(
 
 export function collectInputRuleIssues(target: Element, elements: Element[]): InputRuleIssue[] {
   if (!hasStructuredInputRules(target, elements)) return [];
-  const targetLabel = target.name ?? target.id;
+  const targetLabel = getInputRuleDisplayName(target);
   const raw = target.props?.[INPUT_RELATIONS_KEY];
   const relations = readInputRelations(target);
   if (raw !== undefined && (!Array.isArray(raw) || relations.length !== raw.length)) {
@@ -225,7 +230,7 @@ export function collectInputRuleIssues(target: Element, elements: Element[]): In
   });
   inputs.forEach((input) => {
     if (!usedInputIds.has(input.id) && getInputAnswerCandidates(input).length === 0) {
-      issues.push({ code: 'missing-answer', targetId: target.id, message: `填空题“${targetLabel}”的空位“${input.name ?? input.id}”尚未配置候选答案或算式关系` });
+      issues.push({ code: 'missing-answer', targetId: target.id, message: `填空题“${targetLabel}”的空位“${getInputRuleDisplayName(input)}”尚未配置候选答案或算式关系` });
     }
   });
   return issues;

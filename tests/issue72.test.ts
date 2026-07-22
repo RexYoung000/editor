@@ -8,6 +8,7 @@ import {
   evaluateStructuredInputRuleState,
   evaluateInputRelation,
   getInputAnswerCandidates,
+  getInputRuleDisplayName,
   hasStructuredInputRules,
   INPUT_ANSWER_CANDIDATES_KEY,
   INPUT_RELATIONS_KEY,
@@ -18,6 +19,7 @@ import {
 } from '../src/utils/inputAnswerRules';
 import { buildExportRegressionArtifacts, collectElementsNeedingVar } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
+import { withLayerLabel } from '../src/utils/layerPresentation';
 import {
   homeworkCourseFixture,
   normalCourseFixture,
@@ -97,6 +99,15 @@ test('普通输入框支持逗号、分号和回车分隔多个候选答案', ()
   assert.deepEqual(getInputAnswerCandidates(input), ['甲', '乙', '丙']);
   input.props[INPUT_ANSWER_CANDIDATES_KEY] = ['新答案', '另一个'];
   assert.deepEqual(getInputAnswerCandidates(input), ['新答案', '另一个']);
+});
+
+test('关系配置显示用户图层名称，并在重命名后立即读取新名称', () => {
+  const input = element('input', 'KlInputImage', { name: 'KlInputImage_1' });
+  input.props = withLayerLabel(input.props, '左因数');
+  assert.equal(getInputRuleDisplayName(input), '左因数');
+  input.props = withLayerLabel(input.props, '新的左因数');
+  assert.equal(getInputRuleDisplayName(input), '新的左因数');
+  assert.equal(input.name, 'KlInputImage_1');
 });
 
 test('数值解析支持小数、简单分数和带整数部分的结构化分数', () => {
