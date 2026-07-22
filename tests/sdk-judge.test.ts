@@ -97,7 +97,7 @@ test('SDK 判定目标矩阵只接受现有题型组件并返回真实结果能�
   assert.deepEqual(getSdkJudgeCapability(input)?.conditions, ['right', 'wrong', 'null']);
   assert.equal(getSdkJudgeCapability(input)?.answerKey, 'answer');
   assert.deepEqual(getSdkJudgeCapability(choice)?.conditions, ['right', 'wrong', 'null']);
-  assert.equal(getSdkJudgeCapability(choice)?.answerKey, 'rightItemNames');
+  assert.equal(getSdkJudgeCapability(choice)?.answerKey, undefined);
   assert.deepEqual(getSdkJudgeCapability(drag)?.conditions, ['right', 'wrong']);
   assert.deepEqual(getSdkJudgeCapability(matching)?.conditions, ['right', 'wrong', 'null']);
   assert.equal(getSdkJudgeCapability(answerContainer)?.kind, 'input');

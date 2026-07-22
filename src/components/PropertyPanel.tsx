@@ -26,6 +26,12 @@ import { createElementMap, getElementLayerState } from '../utils/layerState';
 import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
 import { keyboardBindingInfo, keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
 import { INPUT_RULE_ENABLED_KEY } from '../utils/inputAnswerRules';
+import {
+  getChoiceAnswerMode,
+  getChoiceCorrectOptionIds,
+  getChoiceOptions,
+  isChoiceOption,
+} from '../utils/choiceAnswerRules';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -189,6 +195,7 @@ export default function PropertyPanel() {
   const reorderEditorLayerGroup = useEditorStore((s) => s.reorderEditorLayerGroup);
   const addChoiceOption = useEditorStore((s) => s.addChoiceOption);
   const removeChoiceOption = useEditorStore((s) => s.removeChoiceOption);
+  const setChoiceCorrectOptionIds = useEditorStore((s) => s.setChoiceCorrectOptionIds);
   const addFillBlankInput = useEditorStore((s) => s.addFillBlankInput);
   const removeFillBlankInput = useEditorStore((s) => s.removeFillBlankInput);
   const addMatchingPair = useEditorStore((s) => s.addMatchingPair);
@@ -507,7 +514,7 @@ export default function PropertyPanel() {
       return;
     }
     selectedElements.forEach((el) => {
-      if (el.type === 'SpeechSelectableObj' && (key === '_foregroundSkin' || key === '_bgSkin')) {
+      if (el.type === 'SpeechSelectableObj' && ['_foregroundSkin', '_pressedSkin', '_bgSkin', '_correctSkin', '_wrongSkin'].includes(key)) {
         // 选项卡片：更新皮肤时同步画布 Laya 节点（通过 syncProps 触发 applyKlProps 含皮肤预加载）
         const newProps: Record<string, unknown> = { ...el.props, [key]: value };
         updateElement(el.id, { props: newProps } as Partial<Element>);
@@ -864,23 +871,80 @@ export default function PropertyPanel() {
 
               {/* 口才课选择题：选项管理 */}
               {single && single.type === 'ChoiceBox' && (() => {
-                const hasOptionChildren = currentPage?.elements.some(e => e.parentId === single.id && e.type === 'SpeechSelectableObj');
+                const choiceOptions = getChoiceOptions(single, elements);
+                const correctOptionIds = getChoiceCorrectOptionIds(single);
+                const selectedAnswers = new Set(correctOptionIds);
+                const mode = getChoiceAnswerMode(single);
+                const modeLabel = mode === 'single' ? '单选题' : mode === 'multiple' ? '多选题' : '尚未配置';
+                const updateAnswers = (optionIds: string[]) => {
+                  setChoiceCorrectOptionIds(single.id, optionIds);
+                };
                 return (
                   <div className="mb-2 pb-2 border-b border-slate-700">
-                    <div className="text-xs text-slate-500 mb-1.5">{t('optionManagement') || '选项管理'}</div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs text-slate-500">正确答案</div>
+                      <span className={`text-[10px] ${mode === 'unconfigured' ? 'text-amber-300' : 'text-emerald-300'}`}>{modeLabel}</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {correctOptionIds.map((optionId, index) => {
+                        const selectableOptions = choiceOptions.filter((option) => option.id === optionId || !selectedAnswers.has(option.id));
+                        return (
+                          <div key={`${optionId}-${index}`} className="flex items-center gap-1.5">
+                            <select
+                              value={optionId}
+                              onChange={(event) => {
+                                const next = [...correctOptionIds];
+                                next[index] = event.target.value;
+                                updateAnswers(next);
+                              }}
+                              className="min-w-0 flex-1 border border-slate-600 bg-slate-700 px-1.5 py-1 text-xs text-white focus:border-blue-500 focus:outline-none"
+                            >
+                              {selectableOptions.map((option) => (
+                                <option key={option.id} value={option.id}>{getLayerDisplayName(option, elementMeta[option.type]?.label)}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => updateAnswers(correctOptionIds.filter((_, answerIndex) => answerIndex !== index))}
+                              className="p-1 text-red-400 hover:bg-red-900/50 hover:text-red-200"
+                              title="删除正确答案"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {correctOptionIds.length === 0 && (
+                        <div className="text-[10px] text-amber-300">尚未配置正确答案</div>
+                      )}
+                    </div>
                     <div className="flex gap-1">
+                      <button
+                        type="button"
+                        disabled={choiceOptions.every((option) => selectedAnswers.has(option.id))}
+                        onClick={() => {
+                          const nextOption = choiceOptions.find((option) => !selectedAnswers.has(option.id));
+                          if (nextOption) updateAnswers([...correctOptionIds, nextOption.id]);
+                        }}
+                        className="mt-2 flex flex-1 items-center justify-center gap-1 border border-slate-600 bg-slate-700 py-1.5 text-xs text-slate-300 hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Plus size={12} /> 添加答案
+                      </button>
+                    </div>
+                    <div className="mt-3 text-xs text-slate-500">选项</div>
+                    <div className="mt-1.5 flex gap-1">
                       <button onClick={() => addChoiceOption(single.id)} className="flex items-center gap-1 flex-1 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
                         <Plus size={12} /> {t('addOption') || '添加选项'}
                       </button>
                       <button
-                        disabled={!hasOptionChildren}
+                        disabled={choiceOptions.length === 0}
                         onClick={() => removeChoiceOption(single.id)}
                         className={`flex items-center gap-1 py-1.5 px-2 text-xs border rounded transition-colors ${
-                          hasOptionChildren
+                          choiceOptions.length > 0
                             ? 'bg-red-900/40 hover:bg-red-900/70 border-red-800/50 text-red-400 cursor-pointer'
                             : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
                         }`}
-                        title={hasOptionChildren ? '删除最后一个选项' : '没有可删除的选项'}
+                        title={choiceOptions.length > 0 ? '删除最后一个选项' : '没有可删除的选项'}
                       >
                         <Trash2 size={12} />
                       </button>
@@ -1078,7 +1142,9 @@ export default function PropertyPanel() {
               <div className="mb-2 pb-2 border-b border-slate-700">
                 <div className="text-xs text-slate-500 mb-1.5">{t('transform')}</div>
                 <div className="grid grid-cols-2 gap-1">
-                  {transformFields.slice(0, 4).map((f) => {
+                  {transformFields.slice(0, 4).filter((field) => !(
+                    field.key === 'height' && single && isChoiceOption(single, elements)
+                  )).map((f) => {
                     const val = single ? (single as unknown as Record<string, unknown>)[f.key] : undefined;
                     const isSize = f.key === 'width' || f.key === 'height';
                     const defaultSizeVal = single && isSize ? elementMeta[single.type]?.defaultSize?.[f.key as 'width' | 'height'] : undefined;

@@ -7,6 +7,7 @@ import { getApiBaseUrl } from './apiConfig';
 import { collectImageSizes, isLargeImage } from './imageSize';
 import {
   buildScene,
+  buildChoiceVisualInitCode,
   buildSdkJudgeClickInitCode,
   buildMathKeyboardInitCode,
   collectGameZipFiles,
@@ -71,25 +72,27 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
   initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
-  // onClickInitConfirm / onClickInitConfirmWithLock 事件：在 initView 注入 GameUtils.initConfirm
+  // onClickInitConfirm / onClickInitConfirmWithLock 事件：按判定目标注入对应确认逻辑。
   for (const el of page.elements) {
     if (!el.actions?.length) continue;
     for (const action of el.actions) {
       if (action.event !== 'onClickInitConfirm' && action.event !== 'onClickInitConfirmWithLock') continue;
       const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
-      if (!isInputRuleHost(targetEl)) continue;
+      if (!targetEl) continue;
       const btnVar = getVar(el);
-      const inputBoxVar = getVar(targetEl);
       const lockArg = action.event === 'onClickInitConfirmWithLock' ? ', null, this._lockBox' : '';
-      if (targetEl.type === 'ContainerBox') {
+      if (targetEl.type === 'ContainerBox' && isInputRuleHost(targetEl)) {
         initCode += buildInputRuleConfirmInitCode(
           el,
           targetEl,
           getVar,
           action.event === 'onClickInitConfirmWithLock',
         );
-      } else {
+      } else if (targetEl.type === 'KlInputBox') {
+        const inputBoxVar = getVar(targetEl);
         initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
+      } else if (targetEl.layaType === 'ChoiceBox') {
+        initCode += `        GameUtils.initChoiceBoxConfirm(this, this.${btnVar}, this.${getVar(targetEl)}${lockArg});\n`;
       }
     }
   }
@@ -259,6 +262,7 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     initCode += `        GameUtils.initDraw(this, this.${drawVar}, this.${clearVar}, this.${brushVar});\n`;
   }
 
+  initCode += buildChoiceVisualInitCode(page, getVar);
   // 页面首次显示动作最后执行，确保输入、拖拽、翻页等组件已完成初始化。
   initCode += internalRuntime.initCode;
   const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
@@ -379,10 +383,10 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
               }
             }
           }
-          // 选项卡片：_foregroundSkin/_bgSkin/_wrongSkin 被主循环跳过，需显式收集
+          // 选项卡片状态皮肤被主循环跳过，需显式收集
           if (el.type === 'SpeechSelectableObj') {
-            const sMerged = merged as { _foregroundSkin?: string; _bgSkin?: string; _wrongSkin?: string };
-            for (const skinVal of [sMerged._foregroundSkin, sMerged._bgSkin, sMerged._wrongSkin]) {
+            const sMerged = merged as { _foregroundSkin?: string; _pressedSkin?: string; _bgSkin?: string; _correctSkin?: string; _wrongSkin?: string };
+            for (const skinVal of [sMerged._foregroundSkin, sMerged._pressedSkin, sMerged._bgSkin, sMerged._correctSkin, sMerged._wrongSkin]) {
               if (!skinVal) continue;
               const mapped = resourceMap.get(skinVal);
               if (!mapped) continue;

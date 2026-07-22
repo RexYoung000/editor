@@ -359,7 +359,6 @@ export default function ElementToolbar() {
     const choiceBox = createDefaultElement('ChoiceBox', subPageId);
 
     const optionNames = ['a', 'b', 'c', 'd'];
-    const optionFgSkins = ['selectableObj.btn1', 'selectableObj.btn2', 'selectableObj.btn3', 'selectableObj.btn4'];
     const positions = [
       { x: 343, y: 938 }, { x: 714, y: 938 },
       { x: 1085, y: 938 }, { x: 1456, y: 938 },
@@ -369,8 +368,17 @@ export default function ElementToolbar() {
       opt.name = name;
       opt.x = positions[i].x;
       opt.y = positions[i].y;
+      opt.width = 237;
+      opt.height = 77;
       opt.parentId = choiceBox.id;
-      opt.props = { ...opt.props, _foregroundSkin: assetExport(optionFgSkins[i]) };
+      opt.props = {
+        ...opt.props,
+        _foregroundSkin: assetExport('choiceOption.normal'),
+        _pressedSkin: assetExport('choiceOption.pressed'),
+        _bgSkin: assetExport('choiceOption.selected'),
+        _correctSkin: assetExport('choiceOption.correct'),
+        _wrongSkin: assetExport('choiceOption.wrong'),
+      };
       return opt;
     });
 

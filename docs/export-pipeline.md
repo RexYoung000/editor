@@ -126,12 +126,14 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程统一从 `buildScene` 进入，复用变量分配、包装节点和特殊组件子节点规则；课程类型只传入不同 `viewDir` 和场景名。节点构建遍历元素树产出 LayaAir Designer 风格结构（`{x, type, searchKey, label, compId, nodeParent, props, child}`）。特殊行为：
 
 - **DragObj/DropObj 锚点 0.5 补偿**：sdk_baiya 运行时构造函数强制 `anchorX=0.5, anchorY=0.5`（中心锚点），编辑器 `element.x/y` 是左上角。导出时 `props.x = element.x + element.width / 2`、y 同理，让 Laya 可见左上角与编辑器一致
-- **SelectableObj 双 skin 拆子节点**：`_foregroundSkin` 和 `_bgSkin` 拆成两个 Image 子节点（`name='img'` / `name='bg'`），用 `left/top/right/bottom = 0` 撑满
+- **选择题 SelectableObj 五态拆子节点**：`_foregroundSkin`、`_pressedSkin`、`_bgSkin`、`_correctSkin`、`_wrongSkin` 分别生成通常、按压、选中、正确、错误图层；状态图层互斥，底框和描边使用九宫格横向拉伸
 - **DragObj `dropSkin` → 第二个 Image 子节点**：`visible: false`，`anchorX/Y = 0.5`，运行时由 `EVENT_SUCCESS` 切换显隐
 - **DropObj `tipSkin` → name=tip Image 子节点**：同时设置 `props.isNeedTip = true`；没有 tipSkin 时显式 `isNeedTip = false`
 - **`exportChildren` 注入**：从 `elementMeta.exportChildren` 或 `_keyboardPreset.children` 读固定子节点（如 KlInputImage 的三层皮肤），递归 `cloneFixed` 克隆
 - **`_` 前缀 props 一律剥掉**（编辑器专用）；`runtime` / `hidden` / `blockThrough` 不写入 scene
 - **ChoiceBox 的 `mouseEnabled` 不导出**，由 runtime 内部控制
+- **ChoiceBox 答案转换**：编辑器 `_correctOptionIds` 不进入 scene；导出时按直属选项当前名称生成 `rightItemNames`，并按答案数量生成 `upperLimit`（1 个为单选，2 个及以上为不限数量多选）
+- **选项文字点击穿透**：选择题选项内部 Label 强制 `mouseEnabled=false, mouseThrough=true`，点击文字区域仍由选项元素接收
 - **`var` 缺失时自动用 `name`** 补齐
 - 子节点顺序：`selectableObjChildren + dragSkinChildren + fixedChildren + userChildren`
 
@@ -155,8 +157,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 [exportProject.ts:639-853](../src/utils/exportProject.ts#L639-L853)。`generateSceneTs(sceneName, flags, page, resourceMap, uiNamespace='game_lt')` 产出每个场景对应的 ts 文件，模板继承 `ui.<viewDir>.<sceneName>UI`，在 `initView(byReset)` 内拼装：
 
-1. **`GameUtils.initConfirm`**：当 `flags.hasBtnConfirm && hasKlInputBox` 时插入，把 `_btnConfirm` / `_klInputBox` / `_lockBox` 串起来
-2. **`btn_ok` + `choiceBox` 对错音效**（`hasBtnOk && hasChoiceBox`）：点击 `btn_ok` 时根据 `choiceBox.isRight` 播 `<viewDir>/sound/right.mp3` 或 `wrong.mp3`，错时还调 `cancelAllSel()` 取消选中
+1. **确认判定初始化**：根据确认按钮指向的目标生成 `GameUtils.initConfirm`、`GameUtils.initChoiceBoxConfirm` 或结构化填空判定；正课与预习共用同一目标规则
+2. **ChoiceBox 五态运行时**：选项点击只更新选择与黄色描边；确认后用绿/红描边替换。正确后锁定，错误后下一次修改清除结果；作业和专题测评只在通用提交读取 `result` 时应用结果
 3. **`PageTurnBox` 翻页 JS**：每个翻页组生成 `var _ptPages_<gid> = [...]; var _ptIndex_<gid> = ...; var _ptTotal_<gid> = ...;` + 左右按钮的 `Event.CLICK` 切换 visible
 4. **`DragObj` 带 `dropSkin` 的 `EVENT_SUCCESS / EVENT_FAILD` 监听**：找最近的 `DragViewBox` 祖先节点，挂事件——成功时切换 `slcDragObj.getChildAt(0/1)` 的 visible 实现 dropSkin 切换，失败时回滚
 5. **用户 Action 映射表 + `buildActionBody`**：

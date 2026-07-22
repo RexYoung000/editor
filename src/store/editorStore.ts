@@ -37,6 +37,13 @@ import {
   validInternalPageGroupId,
 } from '../utils/internalPages';
 import { remapInputRelationRefs } from '../utils/inputAnswerRules';
+import {
+  isChoiceOption,
+  remapChoiceAnswerRefs,
+  removeChoiceAnswerRefs,
+  setChoiceCorrectOptionIds as applyChoiceCorrectOptionIds,
+} from '../utils/choiceAnswerRules';
+import { assetExport } from '../elements/builtinAssets';
 
 type InternalPagePlacement = { pageGroupId?: string; afterPageId?: string };
 
@@ -187,6 +194,7 @@ interface EditorState {
 
   addChoiceOption: (choiceBoxId: string) => void;
   removeChoiceOption: (choiceBoxId: string) => void;
+  setChoiceCorrectOptionIds: (choiceBoxId: string, optionIds: string[]) => void;
 
   addFillBlankInput: (klInputBoxId: string) => void;
   removeFillBlankInput: (klInputBoxId: string) => void;
@@ -257,6 +265,7 @@ function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[
       }
     }
     remapInputRelationRefs(el, idMap, genId);
+    remapChoiceAnswerRefs(el, idMap);
   }
   return cloned;
 }
@@ -1455,6 +1464,7 @@ export const useEditorStore = create<EditorState>()(
         const { props: _p, ...rest } = updates;
         const previousGroupId = element.groupId;
         Object.assign(element, rest);
+        if (isChoiceOption(element, page.elements)) element.height = 77;
         if ('parentId' in rest && element.groupId) {
           const editorGroup = page.editorLayerGroups?.find((group) => group.id === element.groupId);
           if (editorGroup && editorGroup.runtimeParentId !== element.parentId) delete element.groupId;
@@ -1751,7 +1761,9 @@ export const useEditorStore = create<EditorState>()(
       return result;
     },
 
-    deleteElement: (id) =>
+    deleteElement: (id) => {
+      let changed = false;
+      let removedChoiceAnswers = 0;
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
@@ -1766,21 +1778,33 @@ export const useEditorStore = create<EditorState>()(
         if (el?.groupId && !explicitGroupIds.has(el.groupId)) {
           page.elements.forEach((e) => { if (e.groupId === el.groupId) toDelete.add(e.id); });
         }
-        let changed = true;
-        while (changed) {
-          changed = false;
+        let expanded = true;
+        while (expanded) {
+          expanded = false;
           page.elements.forEach((e) => {
             if (e.parentId && toDelete.has(e.parentId) && !toDelete.has(e.id)) {
               toDelete.add(e.id);
-              changed = true;
+              expanded = true;
             }
           });
         }
+        removedChoiceAnswers = removeChoiceAnswerRefs(page.elements, toDelete);
         page.elements = page.elements.filter((e) => !toDelete.has(e.id));
         releaseEmptyEditorLayerGroup(page, el?.groupId);
         state.selectedElementIds = state.selectedElementIds.filter((eid) => !toDelete.has(eid));
-        get().saveHistory();
-      }),
+        changed = true;
+      });
+      if (!changed) return;
+      get().saveHistory();
+      if (removedChoiceAnswers > 0 && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('forge:toast', {
+          detail: {
+            message: '已删除正确选项，答案配置已同步更新，可撤销恢复',
+            type: 'warning',
+          },
+        }));
+      }
+    },
 
     reorderElement: (id, newIndex, saveToHistory = true) => {
       let changed = false;
@@ -1833,6 +1857,7 @@ export const useEditorStore = create<EditorState>()(
 
     setElementParent: (id, newParentId, saveToHistory = true) => {
       let changed = false;
+      let removedChoiceAnswers = 0;
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
@@ -1860,7 +1885,8 @@ export const useEditorStore = create<EditorState>()(
           }
           return { ax, ay };
         };
-        const oldOff = getAncestorOffset(element.parentId);
+        const previousParentId = element.parentId;
+        const oldOff = getAncestorOffset(previousParentId);
         const newOff = getAncestorOffset(newParentId);
         element.x += oldOff.ax - newOff.ax;
         element.y += oldOff.ay - newOff.ay;
@@ -1871,6 +1897,12 @@ export const useEditorStore = create<EditorState>()(
           if (editorGroup && editorGroup.runtimeParentId !== element.parentId) delete element.groupId;
         }
         releaseEmptyEditorLayerGroup(page, previousGroupId);
+        const previousParent = previousParentId
+          ? page.elements.find((candidate) => candidate.id === previousParentId)
+          : undefined;
+        if (element.type === 'SpeechSelectableObj' && previousParent?.type === 'ChoiceBox' && previousParentId !== newParentId) {
+          removedChoiceAnswers = removeChoiceAnswerRefs(page.elements, new Set([element.id]));
+        }
 
         // [新增] 调整数组位置：子元素排在父容器所有现有子元素之后
         if (newParentId) {
@@ -1904,6 +1936,14 @@ export const useEditorStore = create<EditorState>()(
         changed = true;
       });
       if (changed && saveToHistory) get().saveHistory();
+      if (removedChoiceAnswers > 0 && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('forge:toast', {
+          detail: {
+            message: '选项已移出原选择题，正确答案配置已同步更新，可撤销恢复',
+            type: 'warning',
+          },
+        }));
+      }
     },
 
     selectElement: (id, multi = false) =>
@@ -2061,6 +2101,7 @@ export const useEditorStore = create<EditorState>()(
             });
           }
           remapInputRelationRefs(newEl, idMap, genId);
+          remapChoiceAnswerRefs(newEl, idMap);
 
           // 生成唯一的 name
           if (FIXED_NAME_TYPES.has(newEl.type)) {
@@ -2169,7 +2210,7 @@ export const useEditorStore = create<EditorState>()(
           element.x = update.x;
           element.y = update.y;
           element.width = update.width;
-          element.height = update.height;
+          element.height = isChoiceOption(element, page.elements) ? 77 : update.height;
           element.rotation = update.rotation;
         }
       }),
@@ -2745,6 +2786,16 @@ export const useEditorStore = create<EditorState>()(
         const newOpt = createDefaultElement('SpeechSelectableObj', subPageId ?? undefined);
         newOpt.name = nextName;
         newOpt.parentId = choiceBoxId;
+        newOpt.width = 237;
+        newOpt.height = 77;
+        newOpt.props = {
+          ...newOpt.props,
+          _foregroundSkin: assetExport('choiceOption.normal'),
+          _pressedSkin: assetExport('choiceOption.pressed'),
+          _bgSkin: assetExport('choiceOption.selected'),
+          _correctSkin: assetExport('choiceOption.correct'),
+          _wrongSkin: assetExport('choiceOption.wrong'),
+        };
         // 横向追加：上一个选项右侧 +10；与一键创建的横向布局一致
         newOpt.x = lastOpt ? lastOpt.x + lastOpt.width + 10 : 50;
         newOpt.y = lastOpt ? lastOpt.y : 50;
@@ -2756,6 +2807,7 @@ export const useEditorStore = create<EditorState>()(
         });
         const obj = createLayaComponent(newOpt, getObject(choiceBoxId));
         if (obj) registerObject(newOpt.id, obj);
+        get().saveHistory();
       },
 
       /** 口才课选择题：删除最后一个选项 */
@@ -2769,6 +2821,18 @@ export const useEditorStore = create<EditorState>()(
         if (existingOptions.length === 0) return;
         const lastOpt = existingOptions[existingOptions.length - 1];
         get().deleteElement(lastOpt.id);
+      },
+
+      setChoiceCorrectOptionIds: (choiceBoxId: string, optionIds: string[]) => {
+        let changed = false;
+        set((state) => {
+          const page = findCurrentSubPage(state);
+          const choiceBox = page?.elements.find((element) => element.id === choiceBoxId && element.type === 'ChoiceBox');
+          if (!choiceBox) return;
+          applyChoiceCorrectOptionIds(choiceBox, optionIds);
+          changed = true;
+        });
+        if (changed) get().saveHistory();
       },
 
       /** 填空题：添加输入格 */

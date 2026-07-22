@@ -218,6 +218,11 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'selectableObj.btn2', src: 'runtime/game/selectableObj/btn_2.png', exportPath: 'game/selectableObj/btn_2.png' },
   { id: 'selectableObj.btn3', src: 'runtime/game/selectableObj/btn_3.png', exportPath: 'game/selectableObj/btn_3.png' },
   { id: 'selectableObj.btn4', src: 'runtime/game/selectableObj/btn_4.png', exportPath: 'game/selectableObj/btn_4.png' },
+  { id: 'choiceOption.normal', src: 'runtime/game/choiceOption/normal.png', exportPath: 'game/choiceOption/normal.png' },
+  { id: 'choiceOption.pressed', src: 'runtime/game/choiceOption/pressed.png', exportPath: 'game/choiceOption/pressed.png' },
+  { id: 'choiceOption.selected', src: 'runtime/game/choiceOption/selected.png', exportPath: 'game/choiceOption/selected.png' },
+  { id: 'choiceOption.correct', src: 'runtime/game/choiceOption/correct.png', exportPath: 'game/choiceOption/correct.png' },
+  { id: 'choiceOption.wrong', src: 'runtime/game/choiceOption/wrong.png', exportPath: 'game/choiceOption/wrong.png' },
   // ─── 口才课选择题：选择题容器透明占位图 ───
   { id: 'choiceBox.placeholder', src: 'editor/choicebox-placeholder.png' },
   // ─── 容器Box透明占位图 ───

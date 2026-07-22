@@ -10,7 +10,7 @@ export type SdkJudgeTargetKind = 'inputImage' | 'input' | 'choice' | 'drag' | 'm
 export interface SdkJudgeCapability {
   kind: SdkJudgeTargetKind;
   conditions: JudgeCondition[];
-  answerKey?: '_judgeAnswer' | 'answer' | 'rightItemNames';
+  answerKey?: '_judgeAnswer' | 'answer';
   answerLabel?: string;
   emptyLabel?: string;
 }
@@ -48,7 +48,6 @@ export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCap
     return {
       kind: 'choice',
       conditions: THREE_STATE,
-      answerKey: 'rightItemNames',
       answerLabel: '正确选项',
       emptyLabel: '还没有选择',
     };
