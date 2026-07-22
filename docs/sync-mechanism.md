@@ -355,3 +355,5 @@ forge 编辑器的 Action 系统是对这些模式的可视化抽象。
 
 这个方案的优点是只影响 forge 预览环境，能快速对齐完整 SDK 行为，不会把临时 cursor 修补长期留在 base 版运行时里。
 
+`sdk=full` 同时意味着 GameLoader 不再加载 `sdk_baiya_math.js`。因此，数学 SDK 中与完整 SDK 重叠的运行行为必须显式保持一致；当前豌豆精灵反馈的胜利、失败和遗憾音效已经同步到 `sdk_baiya.js`。不能为了恢复学科反馈直接移除 `sdk=full`，否则 cursor 接收事务会再次缺失。
+

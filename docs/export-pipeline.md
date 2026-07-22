@@ -72,6 +72,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
    - `cn` = `test_<teacherId>_<courseId>`（无 teacherId 时退化成 `test_<courseId>`）
    - `previewMode=true` 时在 `cn` 后追加 `_preview` 后缀，URL 指向 `Game1_PREVIEW` 工程
    - URL 拼接前对 `forge_server_url` 做 `.replace(/\/+$/, '')` 去尾斜杠，避免双斜杠破坏 middleware 匹配
+   - `sdk=full` 保留完整 cursor 同步链路；该模式不会再加载数学学科 SDK，因此豌豆精灵通用反馈的胜利、失败和遗憾音效由 `share/sdk/sdk_baiya.js` 自身绑定
+   - 动作和场景导出只触发 SDK 通用反馈，不重复注入正确或错误音效
 
 > **预习关卡选择对话框**：当课件有 `previewStages.length > 0` 时，预览按钮先弹「预习关卡 / 正常关卡」二选一，**只决定 URL 后缀**，不影响 `exportProject` 导出哪几个工程（永远全导）。
 
