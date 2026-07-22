@@ -14,6 +14,7 @@ import {
   SDK_JUDGE_EVENT,
   type JudgeCondition,
 } from '../utils/sdkJudge';
+import { isInputRuleHost } from '../utils/inputAnswerRules';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -65,7 +66,7 @@ export default function ActionEditor({
   const isImage = element.type === 'NewImage';
   const isConfirmButton = element.type === 'ConfirmButton';
   const isChoiceBox = element.layaType === 'ChoiceBox';
-  const isKlInputBox = element.type === 'KlInputBox';
+  const isInputRuleTarget = isInputRuleHost(element);
   const isMatchingGame = element.layaType === 'MatchingGame';
   const isNewBrushSprite = element.type === 'NewBrushSprite';
   const hideAddButton = element.type === 'DropObj' || element.type === 'DragObj';
@@ -94,8 +95,8 @@ export default function ActionEditor({
 
   // 画布上是否存在 DragViewBox / MatchingGame（决定 ConfirmButton 的"点击+游戏判断"事件是否可见）
   const hasGameTarget = allElements.some((e) => e.type === 'DragViewBox' || e.type === 'MatchingGame');
-  // 画布上是否存在 ChoiceBox 或 KlInputBox（决定 ConfirmButton 的"点击+SDK通用判断"事件是否可见）
-  const hasChoiceOrInput = allElements.some((e) => e.type === 'KlInputBox' || e.layaType === 'ChoiceBox');
+  // 画布上是否存在选择题或答题判定容器（决定 ConfirmButton 的“点击+SDK通用判断”事件是否可见）
+  const hasChoiceOrInput = allElements.some((e) => isInputRuleHost(e) || e.layaType === 'ChoiceBox');
 
   const EVENT_OPTS = [
     ...(isImage ? [
@@ -134,7 +135,7 @@ export default function ActionEditor({
     ...(isChoiceBox ? [
       { value: 'onChoiceJudge', label: '自动判定是否全对' },
     ] : []),
-    ...(isKlInputBox ? [
+    ...(isInputRuleTarget ? [
       { value: 'onInputJudge', label: '自动判定是否全对' },
     ] : []),
     ...(isMatchingGame ? [
@@ -204,6 +205,7 @@ export default function ActionEditor({
       id: generateId(),
       event,
       targetId,
+      targetNameSnapshot: targetId ? allElements.find((item) => item.id === targetId)?.name : undefined,
       actionType: 'toggleVisible',
       groupId: groupId ?? generateId(),
       judgeTargetId: judgeTarget?.id,
@@ -215,6 +217,7 @@ export default function ActionEditor({
   type Group = {
     event: string;
     targetId: string | undefined;
+    targetNameSnapshot: string | undefined;
     judgeTargetId: string | undefined;
     judgeTargetNameSnapshot: string | undefined;
     indices: number[];
@@ -232,6 +235,7 @@ export default function ActionEditor({
         groups.push({
           event: a.event,
           targetId: a.targetId,
+          targetNameSnapshot: a.targetNameSnapshot,
           judgeTargetId: a.judgeTargetId,
           judgeTargetNameSnapshot: a.judgeTargetNameSnapshot,
           indices: [],
@@ -469,13 +473,14 @@ export default function ActionEditor({
                   return;
                 }
                 const patch: Partial<Action> = { event: nextEvent };
-                // 切到 onClickInitConfirm*：如果当前 target 不是 KlInputBox / ChoiceBox，默认选画布上第一个 ChoiceBox 或 KlInputBox
+                // 切到 onClickInitConfirm*：如果当前 target 不是答题判定容器 / ChoiceBox，默认选择第一个有效目标
                 if (nextEvent === 'onClickInitConfirm' || nextEvent === 'onClickInitConfirmWithLock') {
                   const currentTarget = group.targetId ? allElements.find((el) => el.id === group.targetId) : null;
-                  const isValid = currentTarget && (currentTarget.type === 'KlInputBox' || currentTarget.layaType === 'ChoiceBox');
+                  const isValid = currentTarget && (isInputRuleHost(currentTarget) || currentTarget.layaType === 'ChoiceBox');
                   if (!isValid) {
-                    const firstValid = allElements.find((el) => el.type === 'KlInputBox' || el.layaType === 'ChoiceBox');
+                    const firstValid = allElements.find((el) => isInputRuleHost(el) || el.layaType === 'ChoiceBox');
                     patch.targetId = firstValid?.id;
+                    patch.targetNameSnapshot = firstValid?.name;
                   }
                 }
                 // 切到 onClickInitGameConfirm*：如果当前 target 不是 DragViewBox 或 MatchingGame，默认选画布上第一个
@@ -574,7 +579,13 @@ export default function ActionEditor({
                         <Crosshair size={11} /> 编辑目标
                       </button>
                     </div>
-                    {capability.answerKey ? (
+                    {capability.kind === 'input' || capability.kind === 'inputImage' ? (
+                      <div className="text-[10px] text-slate-500">
+                        {capability.kind === 'input'
+                          ? '请进入目标组件配置空位候选答案或两框算式关系。'
+                          : '请进入目标组件配置候选正确答案。'}
+                      </div>
+                    ) : capability.answerKey ? (
                       <label className="flex items-center gap-1 text-[10px] text-slate-400">
                         <span className="w-14 shrink-0">{capability.answerLabel}</span>
                         <input
@@ -622,27 +633,44 @@ export default function ActionEditor({
             const isInitConfirm = group.event === 'onClickInitConfirm' || group.event === 'onClickInitConfirmWithLock';
             const isInitGameConfirm = group.event === 'onClickInitGameConfirm' || group.event === 'onClickInitGameConfirmWithLock'
               || group.event === 'onClickInitGameConfirmCH' || group.event === 'onClickInitGameConfirmCHWithLock';
+            const currentTarget = group.targetId ? allElements.find((item) => item.id === group.targetId) : undefined;
+            const targetMissing = Boolean(group.targetId && (
+              (isInitConfirm && (!currentTarget || (!isInputRuleHost(currentTarget) && currentTarget.layaType !== 'ChoiceBox')))
+              || (isInitGameConfirm && (!currentTarget || (currentTarget.type !== 'DragViewBox' && currentTarget.type !== 'MatchingGame')))
+            ));
             return (
-              <div className="flex items-center gap-1 mb-1">
-                <span className="text-slate-500 w-7 shrink-0">{t('target')}</span>
-                <select
-                  value={group.targetId ?? ''}
-                  onChange={(e) => updateGroup(group, { targetId: e.target.value || undefined })}
-                  className="flex-1 min-w-0 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
-                >
-                  {/* onClickInitConfirm* / onClickInitGameConfirm* 事件不允许指向自身 */}
-                  {!isInitConfirm && !isInitGameConfirm && <option value="">{t('self')}</option>}
-                  {isInitConfirm && !group.targetId && <option value="">请选择输入框容器或选择题容器</option>}
-                  {isInitGameConfirm && !group.targetId && <option value="">请选择拖拽容器或连线游戏</option>}
-                  {allElements.filter((el) => {
-                    if (el.id === element.id) return false;
-                    if (isInitConfirm) return el.type === 'KlInputBox' || el.layaType === 'ChoiceBox';
-                    if (isInitGameConfirm) return el.type === 'DragViewBox' || el.type === 'MatchingGame';
-                    return true;
-                  }).map((el) => (
-                    <option key={el.id} value={el.id}>{el.name ?? el.id} ({elementMeta[el.type]?.label ?? el.type})</option>
-                  ))}
-                </select>
+              <div className="mb-1 space-y-1">
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 w-7 shrink-0">{t('target')}</span>
+                  <select
+                    value={group.targetId ?? ''}
+                    onChange={(e) => {
+                      const nextTarget = allElements.find((item) => item.id === e.target.value);
+                      updateGroup(group, {
+                        targetId: nextTarget?.id,
+                        targetNameSnapshot: nextTarget?.name,
+                      });
+                    }}
+                    className={`flex-1 min-w-0 border rounded px-1 py-0.5 ${targetMissing ? 'bg-red-950/50 border-red-700 text-red-200' : 'bg-slate-700 border-slate-600 text-slate-200'}`}
+                  >
+                    {/* onClickInitConfirm* / onClickInitGameConfirm* 事件不允许指向自身 */}
+                    {!isInitConfirm && !isInitGameConfirm && <option value="">{t('self')}</option>}
+                    {isInitConfirm && !group.targetId && <option value="">请选择输入框容器或选择题容器</option>}
+                    {isInitGameConfirm && !group.targetId && <option value="">请选择拖拽容器或连线游戏</option>}
+                    {targetMissing && (
+                      <option value={group.targetId}>目标已失效：{group.targetNameSnapshot ?? group.targetId}</option>
+                    )}
+                    {allElements.filter((el) => {
+                      if (el.id === element.id) return false;
+                      if (isInitConfirm) return isInputRuleHost(el) || el.layaType === 'ChoiceBox';
+                      if (isInitGameConfirm) return el.type === 'DragViewBox' || el.type === 'MatchingGame';
+                      return true;
+                    }).map((el) => (
+                      <option key={el.id} value={el.id}>{el.name ?? el.id} ({elementMeta[el.type]?.label ?? el.type})</option>
+                    ))}
+                  </select>
+                </div>
+                {targetMissing && <div className="pl-8 text-[10px] text-red-300">判定目标已删除或不再兼容，请重新选择。</div>}
               </div>
             );
           })()}

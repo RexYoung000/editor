@@ -15,6 +15,7 @@ import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './Qui
 import type { Action, Element } from '../types';
 import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
 import { keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
+import { isInputRuleHost } from '../utils/inputAnswerRules';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -405,6 +406,7 @@ export default function ElementToolbar() {
       id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       event: 'onClickInitConfirmWithLock',
       targetId: choiceBox.id,
+      targetNameSnapshot: choiceBox.name,
       actionType: 'toggleVisible',
       groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     }];
@@ -518,6 +520,7 @@ export default function ElementToolbar() {
       id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       event: 'onClickInitConfirmWithLock',
       targetId: inputBox.id,
+      targetNameSnapshot: inputBox.name,
       actionType: 'toggleVisible',
       groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     }];
@@ -745,7 +748,7 @@ export default function ElementToolbar() {
       if (kind === 'confirm') {
         const element = createDefaultElement('ConfirmButton', subPageId);
         await applyPresetImage(element, courseId, preset, 'skin');
-        const target = pageContext.elements.find((item) => item.type === 'KlInputBox' || item.layaType === 'ChoiceBox')
+        const target = pageContext.elements.find((item) => isInputRuleHost(item) || item.layaType === 'ChoiceBox')
           ?? pageContext.elements.find((item) => item.type === 'DragViewBox' || item.type === 'MatchingGame');
         if (target) {
           const isGame = target.type === 'DragViewBox' || target.type === 'MatchingGame';
@@ -753,6 +756,7 @@ export default function ElementToolbar() {
             id: makeId('action'),
             event: isGame ? 'onClickInitGameConfirmWithLock' : 'onClickInitConfirmWithLock',
             targetId: target.id,
+            targetNameSnapshot: target.name,
             actionType: 'toggleVisible',
             groupId: makeId('group'),
           }];

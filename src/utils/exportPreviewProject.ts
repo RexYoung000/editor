@@ -24,6 +24,7 @@ import {
   compileInternalPagesCourse,
   internalPageActionBody,
 } from './internalPageCompiler';
+import { buildInputRuleConfirmInitCode, buildInputRuleInitCode, isInputRuleHost } from './inputAnswerRules';
 
 // ─── 预习场景差异 ───
 
@@ -67,6 +68,7 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
   };
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildMathKeyboardInitCode(page, getVar);
+  initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
   // onClickInitConfirm / onClickInitConfirmWithLock 事件：在 initView 注入 GameUtils.initConfirm
@@ -75,11 +77,20 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     for (const action of el.actions) {
       if (action.event !== 'onClickInitConfirm' && action.event !== 'onClickInitConfirmWithLock') continue;
       const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
-      if (!targetEl || targetEl.type !== 'KlInputBox') continue;
+      if (!isInputRuleHost(targetEl)) continue;
       const btnVar = getVar(el);
       const inputBoxVar = getVar(targetEl);
       const lockArg = action.event === 'onClickInitConfirmWithLock' ? ', null, this._lockBox' : '';
-      initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
+      if (targetEl.type === 'ContainerBox') {
+        initCode += buildInputRuleConfirmInitCode(
+          el,
+          targetEl,
+          getVar,
+          action.event === 'onClickInitConfirmWithLock',
+        );
+      } else {
+        initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
+      }
     }
   }
 

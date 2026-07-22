@@ -7,7 +7,7 @@ import FieldRenderer from './FieldRenderer';
 import SkinEditor from './SkinEditor';
 import ActionEditor from './ActionEditor';
 import BindKeyboardModal from './BindKeyboardModal';
-import FractionAnswerEditorModal from './FractionAnswerEditorModal';
+import { InputRuleEditor, InputRulesOverview } from './InputAnswerRulesEditor';
 import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import PageTurnPageList from './PageTurnPageList';
@@ -24,8 +24,8 @@ import { getElementParentContainment } from '../utils/canvasGeometry';
 import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../utils/layerPresentation';
 import { createElementMap, getElementLayerState } from '../utils/layerState';
 import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
-import { fractionInputSummary, parseFractionInput } from '../utils/mathInput';
 import { keyboardBindingInfo, keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
+import { INPUT_RULE_ENABLED_KEY } from '../utils/inputAnswerRules';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -176,6 +176,7 @@ export default function PropertyPanel() {
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectedEditorLayerGroupId = useEditorStore((s) => s.selectedEditorLayerGroupId);
   const updateElement = useEditorStore((s) => s.updateElement);
+  const selectElement = useEditorStore((s) => s.selectElement);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const moveElementIntoParent = useEditorStore((s) => s.moveElementIntoParent);
   const fitContainerToChildren = useEditorStore((s) => s.fitContainerToChildren);
@@ -211,7 +212,6 @@ export default function PropertyPanel() {
   const [editingValues, setEditingValues] = useState<Record<string, string>>({});
   const [skinEditorOpen, setSkinEditorOpen] = useState(false);
   const [bindKeyboardOpen, setBindKeyboardOpen] = useState(false);
-  const [fractionAnswerEditorOpen, setFractionAnswerEditorOpen] = useState(false);
   const [tabImgPickerOpen, setTabImgPickerOpen] = useState(false);
   const [okBtnPickerOpen, setOkBtnPickerOpen] = useState(false);
 
@@ -220,7 +220,6 @@ export default function PropertyPanel() {
       setEditingValues({});
       setSkinEditorOpen(false);
       setBindKeyboardOpen(false);
-      setFractionAnswerEditorOpen(false);
       setTabImgPickerOpen(false);
       setOkBtnPickerOpen(false);
     });
@@ -894,28 +893,54 @@ export default function PropertyPanel() {
               {single && single.type === 'KlInputBox' && (() => {
                 const hasInputChildren = currentPage?.elements.some(e => e.parentId === single.id && e.type === 'KlInputImage');
                 return (
-                  <div className="mb-2 pb-2 border-b border-slate-700">
-                    <div className="text-xs text-slate-500 mb-1.5">填空管理</div>
-                    <div className="flex gap-1">
-                      <button onClick={() => addFillBlankInput(single.id)} className="flex items-center gap-1 flex-1 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
-                        <Plus size={12} /> 添加选项
-                      </button>
-                      <button
-                        disabled={!hasInputChildren}
-                        onClick={() => removeFillBlankInput(single.id)}
-                        className={`flex items-center gap-1 py-1.5 px-2 text-xs border rounded transition-colors ${
-                          hasInputChildren
-                            ? 'bg-red-900/40 hover:bg-red-900/70 border-red-800/50 text-red-400 cursor-pointer'
-                            : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
-                        }`}
-                        title={hasInputChildren ? '删除最后一个输入框' : '没有可删除的输入框'}
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                  <>
+                    <div className="mb-2 pb-2 border-b border-slate-700">
+                      <div className="text-xs text-slate-500 mb-1.5">填空管理</div>
+                      <div className="flex gap-1">
+                        <button onClick={() => addFillBlankInput(single.id)} className="flex items-center gap-1 flex-1 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
+                          <Plus size={12} /> 添加普通空位
+                        </button>
+                        <button
+                          disabled={!hasInputChildren}
+                          onClick={() => removeFillBlankInput(single.id)}
+                          className={`flex items-center gap-1 py-1.5 px-2 text-xs border rounded transition-colors ${
+                            hasInputChildren
+                              ? 'bg-red-900/40 hover:bg-red-900/70 border-red-800/50 text-red-400 cursor-pointer'
+                              : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+                          }`}
+                          title={hasInputChildren ? '删除最后一个普通输入框' : '没有可删除的普通输入框'}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                      <div className="mt-1 text-[10px] text-slate-500">分数输入框可从组件栏添加后，将父容器设为当前填空题。</div>
                     </div>
-                  </div>
+                    <InputRulesOverview
+                      target={single}
+                      elements={currentPage?.elements ?? []}
+                      disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                      onUpdateProps={(elementId, props) => updateElement(elementId, { props })}
+                      onCommit={saveHistory}
+                      onSelectElement={(elementId) => selectElement(elementId, false)}
+                    />
+                  </>
                 );
               })()}
+
+              {/* 通用容器：显式开启后作为答题判定容器 */}
+              {single
+                && single.type === 'ContainerBox'
+                && single.props?.[INPUT_RULE_ENABLED_KEY] === true
+                && (
+                  <InputRulesOverview
+                    target={single}
+                    elements={currentPage?.elements ?? []}
+                    disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                    onUpdateProps={(elementId, props) => updateElement(elementId, { props })}
+                    onCommit={saveHistory}
+                    onSelectElement={(elementId) => selectElement(elementId, false)}
+                  />
+                )}
 
               {/* 连线题：连线项管理（一次添加/删除一对：左 camp1 + 右 camp2） */}
               {single && single.type === 'MatchingGame' && (() => {
@@ -1191,22 +1216,17 @@ export default function PropertyPanel() {
                 const renderField = (field: PropertyDef) => {
                   const propDefault = single ? (elementMeta[single.type]?.defaultProps as Record<string, unknown> | undefined)?.[field.key] : undefined;
                   const numDefault = typeof propDefault === 'number' ? propDefault : undefined;
-                  if (single?.type === 'FractionInput' && field.key === '_judgeAnswer') {
-                    const answer = String((single.props as Record<string, unknown> | undefined)?._judgeAnswer ?? '');
+                  if ((single?.type === 'KlInputImage' || single?.type === 'FractionInput') && field.key === '_judgeAnswer') {
                     return (
-                      <div key={field.key} className="mb-2 rounded border border-slate-700 bg-slate-800/60 p-2">
-                        <div className="mb-1 text-[10px] text-slate-500">正确答案</div>
-                        <div className="mb-2 break-words text-xs text-slate-200">
-                          {fractionInputSummary(parseFractionInput(answer))}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setFractionAnswerEditorOpen(true)}
-                          className="w-full rounded border border-blue-500/50 bg-blue-600/30 py-1.5 text-xs text-blue-200 hover:bg-blue-600/50"
-                        >
-                          设置正确答案
-                        </button>
-                      </div>
+                      <InputRuleEditor
+                        key={field.key}
+                        input={single}
+                        elements={currentPage?.elements ?? []}
+                        disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                        onUpdateProps={(elementId, props) => updateElement(elementId, { props })}
+                        onCommit={saveHistory}
+                        onSelectElement={(elementId) => selectElement(elementId, false)}
+                      />
                     );
                   }
                   const fieldEl = <FieldRenderer key={field.key} field={field} elements={selectedElements} onChange={handleChange} propDefault={numDefault} />;
@@ -1339,18 +1359,6 @@ export default function PropertyPanel() {
           setBindKeyboardOpen(false);
         }}
         onClose={() => setBindKeyboardOpen(false)}
-      />
-    )}
-
-    {fractionAnswerEditorOpen && single?.type === 'FractionInput' && (
-      <FractionAnswerEditorModal
-        value={String((single.props as Record<string, unknown> | undefined)?._judgeAnswer ?? '')}
-        maxLength={Number((single.props as Record<string, unknown> | undefined)?.place ?? 11)}
-        onSave={(value) => {
-          handleChange('_judgeAnswer', value);
-          setFractionAnswerEditorOpen(false);
-        }}
-        onClose={() => setFractionAnswerEditorOpen(false)}
       />
     )}
 

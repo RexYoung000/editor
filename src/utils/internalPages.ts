@@ -1,6 +1,7 @@
 import type { Action, Course, EditorLayerGroup, Element, InternalPage, InternalPageGroup, InternalPageKind, Stage, SubPage } from '../types';
 import { findSubPage } from './findSubPage';
 import { EDITOR_CANVAS_FILL_COLOR_PROP, EDITOR_CANVAS_HIT_THROUGH_PROP } from './canvasComposite';
+import { remapInputRelationRefs } from './inputAnswerRules';
 
 export const INTERNAL_PAGES_TEMPLATE_ID = 'internal-pages-v1' as const;
 export const INTERNAL_PAGES_MIN_VERSION = '1.1.0';
@@ -182,6 +183,7 @@ function remapElements(
       if (action.targetId && idMap.has(action.targetId)) action.targetId = idMap.get(action.targetId);
       if (action.judgeTargetId && idMap.has(action.judgeTargetId)) action.judgeTargetId = idMap.get(action.judgeTargetId);
     }
+    remapInputRelationRefs(el, idMap, makeId);
   }
   return cloned;
 }
