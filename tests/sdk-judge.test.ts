@@ -3,8 +3,10 @@ import test from 'node:test';
 import type { Action, Course, Element, SubPage } from '../src/types';
 import {
   buildExportRegressionArtifacts,
+  buildHomeworkStandaloneInputJudgeCode,
   buildSdkJudgeClickInitCode,
   collectElementsNeedingVar,
+  collectHomeworkStandaloneInputJudgeTargets,
 } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
 import {
@@ -13,6 +15,7 @@ import {
   SDK_JUDGE_EVENT,
 } from '../src/utils/sdkJudge';
 import {
+  evaluationCourseFixture,
   homeworkCourseFixture,
   normalCourseFixture,
   previewCourseFixture,
@@ -115,6 +118,80 @@ test('独立输入格使用编辑器答案生成正确、错误和未完成判�
   assert.match(code, /this\.result = false/);
   assert.match(code, /this\.result = null/);
   assert.doesNotMatch(code, /\.isRight\(\)/);
+});
+
+test('作业预设完成只收集配置答案的独立输入控件', () => {
+  const inputBox = element('input-box', 'KlInputBox');
+  const standaloneInput = element('standalone-input', 'KlInputImage', {
+    props: { _judgeAnswer: '12.5' },
+  });
+  const standaloneFraction = element('standalone-fraction', 'FractionInput', {
+    props: { _judgeAnswer: '12<3_4>' },
+  });
+  const plainInput = element('plain-input', 'KlInputImage', {
+    props: { _judgeAnswer: '' },
+  });
+  const nestedInput = element('nested-input', 'KlInputImage', {
+    parentId: inputBox.id,
+    props: { _judgeAnswer: '8' },
+  });
+  const page: SubPage = {
+    id: 'page',
+    name: '页面',
+    elements: [inputBox, standaloneInput, standaloneFraction, plainInput, nestedInput],
+  };
+
+  assert.deepEqual(
+    collectHomeworkStandaloneInputJudgeTargets(page).map((item) => item.id),
+    ['standalone-input', 'standalone-fraction'],
+  );
+
+  const code = buildHomeworkStandaloneInputJudgeCode(
+    page,
+    (item) => item.name ?? item.id,
+  );
+  assert.match(code, /this\.standalone_input\.valueOrSkinIsNull/);
+  assert.match(code, /this\.standalone_input\.fontClipValue \|\| ""\) === "12\.5"/);
+  assert.match(code, /this\.standalone_fraction\.valueOrSkinIsNull/);
+  assert.match(code, /this\.standalone_fraction\.fontClipValue \|\| ""\) === "12<3_4>"/);
+  assert.doesNotMatch(code, /plain_input/);
+  assert.doesNotMatch(code, /nested_input/);
+
+  const vars = collectElementsNeedingVar(page);
+  assert.equal(vars.has(standaloneInput.id), true);
+  assert.equal(vars.has(standaloneFraction.id), true);
+  assert.equal(vars.has(plainInput.id), false);
+  assert.equal(vars.has(nestedInput.id), false);
+});
+
+test('作业与专题测评预设完成聚合多个独立输入答案', () => {
+  for (const course of [homeworkCourseFixture(), evaluationCourseFixture()]) {
+    const page = activePage(course);
+    page.elements.push(
+      element(`${course.kind}-answer-input`, 'KlInputImage', {
+        props: { _judgeAnswer: '12.5' },
+      }),
+      element(`${course.kind}-answer-fraction`, 'FractionInput', {
+        props: { _judgeAnswer: '12<3_4>' },
+      }),
+      element(`${course.kind}-plain-input`, 'KlInputImage', {
+        props: { _judgeAnswer: '' },
+      }),
+    );
+
+    const artifact = buildExportRegressionArtifacts(course).scenes[0];
+    const source = artifact.source;
+    const inputVar = `${course.kind}_answer_input`;
+    const fractionVar = `${course.kind}_answer_fraction`;
+
+    assert.match(source, new RegExp(`this\\.${inputVar}\\.valueOrSkinIsNull`));
+    assert.match(source, new RegExp(`this\\.${fractionVar}\\.valueOrSkinIsNull`));
+    assert.match(source, /__forgeJudgeResults\.indexOf\(null\) >= 0/);
+    assert.match(source, /__forgeJudgeResults\.every\(function\(value\) \{ return value === true; \}\)/);
+    assert.equal((source.match(/this\.result = __forgeJudgeResults/g) ?? []).length, 1);
+    assert.doesNotMatch(source, new RegExp(`${course.kind}_plain_input\\.fontClipValue`));
+    assert.doesNotMatch(JSON.stringify(artifact.scene), /_judgeAnswer/);
+  }
 });
 
 test('通用点击判定分离判定目标与结果动作目标', () => {

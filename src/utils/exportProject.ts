@@ -351,6 +351,11 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
     }
   }
 
+  // 作业预设“完成”会直接读取配置了答案的独立输入控件。
+  for (const el of collectHomeworkStandaloneInputJudgeTargets(page)) {
+    needsVar.add(el.id);
+  }
+
   // 数学键盘初始化代码会直接引用这些组件，需要把对应 var 写入 scene。
   const decimalCamps = new Set(elements.flatMap((el) => {
     const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
@@ -1258,6 +1263,45 @@ export function buildSdkJudgeClickInitCode(
   return code;
 }
 
+/**
+ * 作业预设“完成”自动判定的独立输入控件。
+ * 嵌套在 KlInputBox 内的输入格继续由题型容器负责，避免快捷模板重复判定。
+ */
+export function collectHomeworkStandaloneInputJudgeTargets(page: SubPage): Element[] {
+  const elementById = new Map(page.elements.map((element) => [element.id, element]));
+  const isInsideInputBox = (element: Element): boolean => {
+    let parent = element.parentId ? elementById.get(element.parentId) : undefined;
+    while (parent) {
+      if (parent.type === 'KlInputBox') return true;
+      parent = parent.parentId ? elementById.get(parent.parentId) : undefined;
+    }
+    return false;
+  };
+
+  return page.elements.filter((element) => {
+    if (element.type !== 'KlInputImage' && element.type !== 'FractionInput') return false;
+    const answer = String(element.props?._judgeAnswer ?? '');
+    return answer.trim() !== '' && !isInsideInputBox(element);
+  });
+}
+
+/** 生成独立输入控件的三态结果，并写入作业页统一结果集合。 */
+export function buildHomeworkStandaloneInputJudgeCode(
+  page: SubPage,
+  getVar: (element: Element) => string,
+  resultCollection = '__forgeJudgeResults',
+): string {
+  let code = '';
+  for (const element of collectHomeworkStandaloneInputJudgeTargets(page)) {
+    const elementRef = `this.${getVar(element)}`;
+    const answer = JSON.stringify(String(element.props?._judgeAnswer ?? ''));
+    code += `        if (!${elementRef} || ${elementRef}.valueOrSkinIsNull) { ${resultCollection}.push(null); }\n`;
+    code += `        else if (String(${elementRef}.fontClipValue || "") === ${answer}) { ${resultCollection}.push(true); }\n`;
+    code += `        else { ${resultCollection}.push(false); }\n`;
+  }
+  return code;
+}
+
 export function buildMathKeyboardInitCode(page: SubPage, getVar: (element: Element) => string): string {
   const decimalCamps = new Set(page.elements.flatMap((element) => {
     const props = element.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
@@ -1721,7 +1765,7 @@ function generateHomeworkSceneTs(
   const buildActionBody = makeActionBuilder(varAssignment, resourceMap, 'game_hw');
 
   let initCode = '';
-  let checkResultCode = '';
+  let checkResultCode = '        var __forgeJudgeResults: any[] = [];\n';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildMathKeyboardInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
@@ -1761,10 +1805,9 @@ function generateHomeworkSceneTs(
     }
 
     checkResultCode +=
-      `        if (${elRef}.isRight) { ${rightBody ? rightBody + ' ' : ''}this.result = true; }\n` +
-      `        else if (${elRef}.isNull) { ${nullBody ? nullBody + ' ' : ''}this.result = null; }\n` +
-      `        else { ${wrongBody ? wrongBody + ' ' : ''}this.result = false; }\n` +
-      `        console.log("==========result:", this.result);\n`;
+      `        if (${elRef}.isRight) { ${rightBody ? rightBody + ' ' : ''}__forgeJudgeResults.push(true); }\n` +
+      `        else if (${elRef}.isNull) { ${nullBody ? nullBody + ' ' : ''}__forgeJudgeResults.push(null); }\n` +
+      `        else { ${wrongBody ? wrongBody + ' ' : ''}__forgeJudgeResults.push(false); }\n`;
   }
 
   // KlInputBox 自动判定：afterJudgeHandler 绑到 checkResult；result 在 checkResult 内根据 isRight()/isNull() 写值
@@ -1801,10 +1844,9 @@ function generateHomeworkSceneTs(
     }
 
     checkResultCode +=
-      `        if (${elRef}.isRight()) { ${rightBody ? rightBody + ' ' : ''}this.result = true; }\n` +
-      `        else if (${elRef}.isNull()) { ${nullBody ? nullBody + ' ' : ''}this.result = null; }\n` +
-      `        else { ${wrongBody ? wrongBody + ' ' : ''}this.result = false; }\n` +
-      `        console.log("==========result:", this.result);\n`;
+      `        if (${elRef}.isRight()) { ${rightBody ? rightBody + ' ' : ''}__forgeJudgeResults.push(true); }\n` +
+      `        else if (${elRef}.isNull()) { ${nullBody ? nullBody + ' ' : ''}__forgeJudgeResults.push(null); }\n` +
+      `        else { ${wrongBody ? wrongBody + ' ' : ''}__forgeJudgeResults.push(false); }\n`;
   }
 
   // DragViewBox 自动判定：EVENT_SUCCESS/EVENT_FAILD 监听 + checkResult 内根据 dragsOnRightDrops() 写 result
@@ -1816,9 +1858,8 @@ function generateHomeworkSceneTs(
     if (!hasJudge) continue;
     const elRef = `this.${getVar(el)}`;
     checkResultCode +=
-      `        if (${elRef}.dragsOnRightDrops()) { this.result = true; }\n` +
-      `        else { this.result = false; }\n` +
-      `        console.log("==========result:", this.result);\n`;
+      `        if (${elRef}.dragsOnRightDrops()) { __forgeJudgeResults.push(true); }\n` +
+      `        else { __forgeJudgeResults.push(false); }\n`;
   }
 
   // MatchingGame 自动判定：监听 EVENT_CLICKLINE 触发 checkResult + checkResult 内根据 allRight/isNull() 写 result
@@ -1858,11 +1899,19 @@ function generateHomeworkSceneTs(
     }
 
     checkResultCode +=
-      `        if (${elRef}.allRight) { ${rightBody ? rightBody + ' ' : ''}this.result = true; }\n` +
-      `        else if (${elRef}.isNull()) { ${nullBody ? nullBody + ' ' : ''}this.result = null; }\n` +
-      `        else { ${wrongBody ? wrongBody + ' ' : ''}this.result = false; }\n` +
-      `        console.log("==========result:", this.result);\n`;
+      `        if (${elRef}.allRight) { ${rightBody ? rightBody + ' ' : ''}__forgeJudgeResults.push(true); }\n` +
+      `        else if (${elRef}.isNull()) { ${nullBody ? nullBody + ' ' : ''}__forgeJudgeResults.push(null); }\n` +
+      `        else { ${wrongBody ? wrongBody + ' ' : ''}__forgeJudgeResults.push(false); }\n`;
   }
+
+  checkResultCode += buildHomeworkStandaloneInputJudgeCode(page, getVar);
+  checkResultCode +=
+    `        if (__forgeJudgeResults.length > 0) {\n` +
+    `            this.result = __forgeJudgeResults.indexOf(null) >= 0\n` +
+    `                ? null\n` +
+    `                : __forgeJudgeResults.every(function(value) { return value === true; });\n` +
+    `            console.log("==========result:", this.result);\n` +
+    `        }\n`;
 
   // 画笔组合：只有 NewBrushSprite 自己配置了 onInitBrush 事件，才生成 GameUtils.initDraw 调用
   for (const el of page.elements) {
