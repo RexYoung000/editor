@@ -8,6 +8,7 @@ import SkinEditor from './SkinEditor';
 import ActionEditor from './ActionEditor';
 import BindKeyboardModal from './BindKeyboardModal';
 import FractionAnswerEditorModal from './FractionAnswerEditorModal';
+import FillAnswerSchemesEditor from './FillAnswerSchemesEditor';
 import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import PageTurnPageList from './PageTurnPageList';
@@ -894,26 +895,35 @@ export default function PropertyPanel() {
               {single && single.type === 'KlInputBox' && (() => {
                 const hasInputChildren = currentPage?.elements.some(e => e.parentId === single.id && e.type === 'KlInputImage');
                 return (
-                  <div className="mb-2 pb-2 border-b border-slate-700">
-                    <div className="text-xs text-slate-500 mb-1.5">填空管理</div>
-                    <div className="flex gap-1">
-                      <button onClick={() => addFillBlankInput(single.id)} className="flex items-center gap-1 flex-1 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
-                        <Plus size={12} /> 添加选项
-                      </button>
-                      <button
-                        disabled={!hasInputChildren}
-                        onClick={() => removeFillBlankInput(single.id)}
-                        className={`flex items-center gap-1 py-1.5 px-2 text-xs border rounded transition-colors ${
-                          hasInputChildren
-                            ? 'bg-red-900/40 hover:bg-red-900/70 border-red-800/50 text-red-400 cursor-pointer'
-                            : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
-                        }`}
-                        title={hasInputChildren ? '删除最后一个输入框' : '没有可删除的输入框'}
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                  <>
+                    <div className="mb-2 pb-2 border-b border-slate-700">
+                      <div className="text-xs text-slate-500 mb-1.5">填空管理</div>
+                      <div className="flex gap-1">
+                        <button onClick={() => addFillBlankInput(single.id)} className="flex items-center gap-1 flex-1 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
+                          <Plus size={12} /> 添加普通空位
+                        </button>
+                        <button
+                          disabled={!hasInputChildren}
+                          onClick={() => removeFillBlankInput(single.id)}
+                          className={`flex items-center gap-1 py-1.5 px-2 text-xs border rounded transition-colors ${
+                            hasInputChildren
+                              ? 'bg-red-900/40 hover:bg-red-900/70 border-red-800/50 text-red-400 cursor-pointer'
+                              : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+                          }`}
+                          title={hasInputChildren ? '删除最后一个普通输入框' : '没有可删除的普通输入框'}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                      <div className="mt-1 text-[10px] text-slate-500">分数输入框可从组件栏添加后，将父容器设为当前填空题。</div>
                     </div>
-                  </div>
+                    <FillAnswerSchemesEditor
+                      target={single}
+                      elements={currentPage?.elements ?? []}
+                      onChange={handleChange}
+                      onCommit={saveHistory}
+                    />
+                  </>
                 );
               })()}
 

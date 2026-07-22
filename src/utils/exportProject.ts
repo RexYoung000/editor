@@ -17,6 +17,12 @@ import {
   internalPageActionBody,
 } from './internalPageCompiler';
 import { getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
+import {
+  buildFillAnswerSchemeInitCode,
+  collectCourseFillAnswerSchemeIssues,
+  getFillAnswerInputs,
+  hasFillAnswerSchemes,
+} from './fillAnswerSchemes';
 
 // ─── Text 烘焙 ───
 
@@ -354,6 +360,13 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
   // 作业预设“完成”会直接读取配置了答案的独立输入控件。
   for (const el of collectHomeworkStandaloneInputJudgeTargets(page)) {
     needsVar.add(el.id);
+  }
+
+  // 结构化填空题判定会直接读取容器内每一个输入格。
+  for (const el of elements) {
+    if (el.type !== 'KlInputBox' || !hasFillAnswerSchemes(el)) continue;
+    needsVar.add(el.id);
+    for (const input of getFillAnswerInputs(el, elements)) needsVar.add(input.id);
   }
 
   // 数学键盘初始化代码会直接引用这些组件，需要把对应 var 写入 scene。
@@ -1352,6 +1365,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   let initCode = '';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildMathKeyboardInitCode(page, getVar);
+  initCode += buildFillAnswerSchemeInitCode(page, getVar);
 
   // 口才反馈动画：如果有 onClickInitConfirmCH / *WithLock / onClickInitGameConfirmCH / *WithLock 或 playKcRightAni / playKcWrongAni，需要在类末尾追加 playRightAni/playWrongAni
   const hasCHConfirm = page.elements.some(el =>
@@ -1768,6 +1782,7 @@ function generateHomeworkSceneTs(
   let checkResultCode = '        var __forgeJudgeResults: any[] = [];\n';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildMathKeyboardInitCode(page, getVar);
+  initCode += buildFillAnswerSchemeInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
 
@@ -2575,6 +2590,13 @@ export async function extractZipFromServer(
 export async function exportProject(course: Course, options: { skipSvn?: boolean } = {}): Promise<{ svnSubmitted: boolean }> {
   const dirPath = getCourseDirPath(course.id);
   if (!dirPath) throw new Error('未找到课件目录，请先保存课件');
+
+  const fillAnswerIssues = collectCourseFillAnswerSchemeIssues(course);
+  if (fillAnswerIssues.length > 0) {
+    const details = fillAnswerIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = fillAnswerIssues.length > 8 ? `\n另有 ${fillAnswerIssues.length - 8} 项未显示` : '';
+    throw new Error(`填空题答案方案尚未完成，不能预览或发布：\n\n${details}${more}`);
+  }
 
   if (!options.skipSvn) {
     const blockingIssues = collectInternalPageIssues(course).filter((issue) => issue.severity === 'blocking');

@@ -164,11 +164,13 @@
 
 事件：`INPUT_LATER`
 
-#### v1.2.0 计划扩展（尚未实施）
+#### v1.2.0 扩展
 
 [Issue #74](https://github.com/RexYoung000/editor/issues/74) 将新增可视化分数输入框，并与普通输入框按键盘兼容性分别绑定；一个分数固定占外框 3 个逻辑字符位，分子与分母各最多 4 位，外框缩放只改变显示尺寸，不改变老师配置的最大字符数。
 
-[Issue #72](https://github.com/RexYoung000/editor/issues/72) 将在同一个填空题判定目标内部增加多套完整答案方案和指定空位互换规则。该计划不等于 SDK 当前已经提供多目标聚合 API；实现需要保持编辑器、预览和导出结果一致。
+[Issue #72](https://github.com/RexYoung000/editor/issues/72) 在同一个 `KlInputBox` 内增加多套完整答案方案。编辑器用 `_answerSchemes` 保存按输入控件 ID 绑定的结构化答案；运行时不会把该编辑器字段写入 scene，而是在生成的场景初始化代码中为该 `KlInputBox` 注入统一的 `isRight()` / `isNull()` 判定。方案内全部空格同时匹配，多套方案任选一套即可；可互换模式保留答案重复次数。普通输入框和 `FractionInput` 可以混合，分数仍按结构化字符串精确比较。
+
+没有 `_answerSchemes` 的历史课件继续走 SDK 原有 `answer`。结构化方案引用缺失、漏配当前空位或存在空答案时必须先在编辑器修复，预览与发布不得生成不完整规则。
 
 ---
 
