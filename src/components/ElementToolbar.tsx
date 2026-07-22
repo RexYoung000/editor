@@ -16,6 +16,7 @@ import type { Action, Element } from '../types';
 import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
 import { keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
 import { isInputRuleHost } from '../utils/inputAnswerRules';
+import { applyQuickTemplateConfirmDefaults } from '../utils/quickTemplateConfirm';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -359,7 +360,6 @@ export default function ElementToolbar() {
     const choiceBox = createDefaultElement('ChoiceBox', subPageId);
 
     const optionNames = ['a', 'b', 'c', 'd'];
-    const optionFgSkins = ['selectableObj.btn1', 'selectableObj.btn2', 'selectableObj.btn3', 'selectableObj.btn4'];
     const positions = [
       { x: 343, y: 938 }, { x: 714, y: 938 },
       { x: 1085, y: 938 }, { x: 1456, y: 938 },
@@ -369,8 +369,17 @@ export default function ElementToolbar() {
       opt.name = name;
       opt.x = positions[i].x;
       opt.y = positions[i].y;
+      opt.width = 237;
+      opt.height = 77;
       opt.parentId = choiceBox.id;
-      opt.props = { ...opt.props, _foregroundSkin: assetExport(optionFgSkins[i]) };
+      opt.props = {
+        ...opt.props,
+        _foregroundSkin: assetExport('choiceOption.normal'),
+        _pressedSkin: assetExport('choiceOption.pressed'),
+        _bgSkin: assetExport('choiceOption.selected'),
+        _correctSkin: assetExport('choiceOption.correct'),
+        _wrongSkin: assetExport('choiceOption.wrong'),
+      };
       return opt;
     });
 
@@ -400,6 +409,7 @@ export default function ElementToolbar() {
 
     // 正课：保留 ConfirmButton 原逻辑
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{
@@ -514,6 +524,7 @@ export default function ElementToolbar() {
 
     // 正课：创建确定按钮（顶级元素，与 KlInputBox 同级）
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{
@@ -607,6 +618,7 @@ export default function ElementToolbar() {
     // 7. 正课/预习：创建 ConfirmButton 并绑定 onClickInitGameConfirmWithLock
     if (!isFlat) {
       const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+      applyQuickTemplateConfirmDefaults(confirmBtn);
       confirmBtn.x = 1666;
       confirmBtn.y = 960;
       confirmBtn.actions = [{
@@ -682,6 +694,7 @@ export default function ElementToolbar() {
 
     // 正课/预习：创建 ConfirmButton，绑 onClickInitGameConfirmWithLock，target 指向 DragViewBox
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{

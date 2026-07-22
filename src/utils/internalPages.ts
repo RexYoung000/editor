@@ -2,6 +2,7 @@ import type { Action, Course, EditorLayerGroup, Element, InternalPage, InternalP
 import { findSubPage } from './findSubPage';
 import { EDITOR_CANVAS_FILL_COLOR_PROP, EDITOR_CANVAS_HIT_THROUGH_PROP } from './canvasComposite';
 import { remapInputRelationRefs } from './inputAnswerRules';
+import { remapChoiceAnswerRefs } from './choiceAnswerRules';
 
 export const INTERNAL_PAGES_TEMPLATE_ID = 'internal-pages-v1' as const;
 export const INTERNAL_PAGES_MIN_VERSION = '1.1.0';
@@ -184,6 +185,7 @@ function remapElements(
       if (action.judgeTargetId && idMap.has(action.judgeTargetId)) action.judgeTargetId = idMap.get(action.judgeTargetId);
     }
     remapInputRelationRefs(el, idMap, makeId);
+    remapChoiceAnswerRefs(el, idMap);
   }
   return cloned;
 }

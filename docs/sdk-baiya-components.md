@@ -280,9 +280,13 @@
 
 方法：`cancelSel(name)`, `cancelAllSel()`, `pushSel(name)`, `getSelRetArray()`, `currSelObjs()`
 
-#### v1.2.0 计划扩展（尚未实施）
+#### forge 编辑器映射
 
-[Issue #76](https://github.com/RexYoung000/editor/issues/76) 将在编辑器侧增加明确的单选/多选模式和按子选项元素引用保存的正确答案配置。单选模式限制一个答案；多选模式允许配置多个答案并做完整集合比较。现有 `rightItemNames` 和 `upperLimit` 仍是当前运行时事实，兼容或迁移方式需在实施 Issue 中确定，不能把计划字段当作当前 SDK 属性。
+[Issue #76](https://github.com/RexYoung000/editor/issues/76) 起，编辑器不再直接开放 `rightItemNames` 和 `upperLimit`。`ChoiceBox.props._correctOptionIds` 保存直属选项的稳定元素 ID：1 个答案自动按单选交互，2 个及以上自动按多选交互。导出时才把 ID 转成当前选项名称写入 `rightItemNames`，并自动生成 `upperLimit=1` 或 `0`，因此改名不会破坏答案引用。该字段只属于编辑器数据，不进入 `.scene`。
+
+选项视觉由五个互斥图层组成：通常、按压、选中、正确和错误。判定正确后锁定；判定错误只标记已选项且允许继续修改。正课和预习由画布确认按钮应用结果，作业和专题测评在右上角通用提交读取 `result` 时应用结果。
+
+正课和预习使用的画布确认按钮属于 `ConfirmButton` 元素。选择题、填空题、连线题、拖拽题等快捷题型模板自动生成的按钮，默认使用内置的 S3-S7 黄色繁体确定按钮资源，并标记为题型模板按钮；老师可以在属性面板从本地文件、正式资源库或确定按钮预设中替换图片，三种来源共享同一 `skin` 字段和尺寸同步规则。独立的 `ConfirmButton` 组件和“快捷组件 → 确定”不改变现有默认资源与创建流程。
 
 ---
 

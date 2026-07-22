@@ -27,6 +27,11 @@ import {
   hasStructuredInputRules,
   isInputRuleHost,
 } from './inputAnswerRules';
+import {
+  collectCourseChoiceAnswerIssues,
+  getChoiceRuntimeProps,
+  isChoiceOptionText,
+} from './choiceAnswerRules';
 
 // ─── Text 烘焙 ───
 
@@ -210,7 +215,7 @@ export function collectResources(
           // _ 前缀的编辑器专用属性默认不收集；以下例外字段需要参与资源收集和路径重写：
           // - SpeechSelectableObj: _foregroundSkin / _bgSkin / _wrongSkin（前后景皮肤）
           // - MatchingItem: _itemImage（导出时转为子 Image 节点的 skin）
-          if (!options.collectAllEditorProps && k.startsWith('_') && k !== '_foregroundSkin' && k !== '_bgSkin' && k !== '_wrongSkin' && k !== '_itemImage') continue;
+          if (!options.collectAllEditorProps && k.startsWith('_') && !['_foregroundSkin', '_pressedSkin', '_bgSkin', '_correctSkin', '_wrongSkin', '_itemImage'].includes(k)) continue;
           collectValue(v);
         }
         // playSound / stopSound 动作中的音频路径也需要收集
@@ -355,6 +360,8 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
     if (el.type === 'DragViewBox') needsVar.add(el.id);
     // MatchingGame：onClickInitGameConfirm* 时需要 var 引用（this.<var>.allRight）
     if (el.type === 'MatchingGame') needsVar.add(el.id);
+    // ChoiceBox：五态视觉初始化与作业提交判定会直接引用容器。
+    if (el.type === 'ChoiceBox') needsVar.add(el.id);
     // 画笔组合：NewBrushSprite Box（var 借调给注入的画板子节点）+ 画笔开关 + 清空按钮
     if (el.type === 'NewBrushSprite' || el.type === 'BrushDrawBtn' || el.type === 'BrushClearBtn') {
       needsVar.add(el.id);
@@ -467,6 +474,10 @@ function buildSceneNode(
     rawProps.sheet = FRACTION_INPUT_SHEET;
   }
   const merged = { ...(meta?.defaultProps ?? {}), ...rawProps };
+  if (element.type === 'ChoiceBox') {
+    Object.assign(merged, getChoiceRuntimeProps(element, allElements));
+    delete merged._correctOptionIds;
+  }
   const rewritten = rewriteProps(merged, resourceMap);
 
   const props: Record<string, unknown> = { x: element.x, y: element.y, width: element.width, height: element.height };
@@ -523,6 +534,10 @@ function buildSceneNode(
     props.mouseEnabled = true;
     props.mouseThrough = false;
   }
+  if (isChoiceOptionText(element, allElements)) {
+    props.mouseEnabled = false;
+    props.mouseThrough = true;
+  }
   // SoundButton 的 isNeedAni/showInStu 导出为字符串（sdk_baiya 要求字符串格式）
   if (element.layaType === 'SoundButton') {
     if ('isNeedAni' in props) props.isNeedAni = String(props.isNeedAni);
@@ -563,47 +578,73 @@ function buildSceneNode(
       props.isSelected = false;
     }
   }
-  // SelectableObj：将编辑器专用皮肤属性转换为子 Image 节点（与 export.ts 同逻辑）
+  // SelectableObj：将编辑器专用皮肤属性转换为互斥状态图层。
   let selectableObjChildren: Record<string, unknown>[] = []; // eslint-disable-line prefer-const
   if (element.layaType === 'SelectableObj') {
     const fgSkin = rewritten._foregroundSkin;
     if (typeof fgSkin === 'string' && fgSkin !== '') {
-      const fgId = nextId();
       selectableObjChildren.push({
         x: 15, type: 'Image', searchKey: 'Image', label: 'Image',
         isDirectory: false, isAniNode: true, hasChild: false,
-        compId: fgId, nodeParent: id,
-        props: { skin: fgSkin, left: 0, top: 0, right: 0, bottom: 0 },
+        compId: nextId(), nodeParent: id,
+        props: { skin: fgSkin, left: 0, top: 0, right: 0, bottom: 0, sizeGrid: '10,38,10,38', mouseEnabled: false },
         child: [],
       });
     }
-    // 选中态 / 错误态：图片原始尺寸居中显示（anchor 0.5 + 父中心坐标，不指定 width/height）
+    const pressedSkin = rewritten._pressedSkin;
+    if (typeof pressedSkin === 'string' && pressedSkin !== '') {
+      selectableObjChildren.push({
+        x: 15, type: 'Image', searchKey: 'Image,down', label: 'down',
+        isDirectory: false, isAniNode: true, hasChild: false,
+        compId: nextId(), nodeParent: id,
+        props: { name: 'down', skin: pressedSkin, visible: false, left: 0, top: 0, right: 0, bottom: 0, sizeGrid: '10,38,10,38', mouseEnabled: false },
+        child: [],
+      });
+    }
     const bgSkin = rewritten._bgSkin;
     if (typeof bgSkin === 'string' && bgSkin !== '') {
-      const bgId = nextId();
       selectableObjChildren.push({
         x: 15, type: 'Image', searchKey: 'Image,bg', label: 'bg',
         isDirectory: false, isAniNode: true, hasChild: false,
-        compId: bgId, nodeParent: id,
+        compId: nextId(), nodeParent: id,
         props: {
           name: 'bg', skin: bgSkin,
           anchorX: 0.5, anchorY: 0.5,
           x: element.width / 2, y: element.height / 2,
+          width: element.width + 22, height: 99,
+          sizeGrid: '12,49,12,49', mouseEnabled: false,
+        },
+        child: [],
+      });
+    }
+    const correctSkin = rewritten._correctSkin;
+    if (typeof correctSkin === 'string' && correctSkin !== '') {
+      selectableObjChildren.push({
+        x: 15, type: 'Image', searchKey: 'Image,right', label: 'right',
+        isDirectory: false, isAniNode: true, hasChild: false,
+        compId: nextId(), nodeParent: id,
+        props: {
+          name: 'right', skin: correctSkin, visible: false,
+          anchorX: 0.5, anchorY: 0.5,
+          x: element.width / 2, y: element.height / 2,
+          width: element.width + 14, height: 91,
+          sizeGrid: '12,45,12,45', mouseEnabled: false,
         },
         child: [],
       });
     }
     const wrongSkin = rewritten._wrongSkin;
     if (typeof wrongSkin === 'string' && wrongSkin !== '') {
-      const wrongId = nextId();
       selectableObjChildren.push({
         x: 15, type: 'Image', searchKey: 'Image,wrong', label: 'wrong',
         isDirectory: false, isAniNode: true, hasChild: false,
-        compId: wrongId, nodeParent: id,
+        compId: nextId(), nodeParent: id,
         props: {
           name: 'wrong', skin: wrongSkin, visible: false,
           anchorX: 0.5, anchorY: 0.5,
           x: element.width / 2, y: element.height / 2,
+          width: element.width + 14, height: 91,
+          sizeGrid: '12,45,12,45', mouseEnabled: false,
         },
         child: [],
       });
@@ -1350,6 +1391,86 @@ export function buildMathKeyboardInitCode(page: SubPage, getVar: (element: Eleme
   return code;
 }
 
+export function buildChoiceVisualInitCode(
+  page: SubPage,
+  getVar: (element: Element) => string,
+  bindConfirmResults = true,
+): string {
+  let code = '';
+  const confirmEvents = new Set([
+    'onClickInitConfirm',
+    'onClickInitConfirmWithLock',
+    'onClickInitConfirmCH',
+    'onClickInitConfirmCHWithLock',
+  ]);
+
+  for (const choiceBox of page.elements.filter((element) => element.type === 'ChoiceBox')) {
+    const choiceRef = `this.${getVar(choiceBox)}`;
+    const optionNames = page.elements
+      .filter((element) => element.parentId === choiceBox.id && element.type === 'SpeechSelectableObj')
+      .map((element) => JSON.stringify(element.name ?? element.id));
+    code += `        (function() {\n`;
+    code += `            var __choice: any = ${choiceRef};\n`;
+    code += `            if (!__choice) return;\n`;
+    code += `            var __items: any[] = [${optionNames.map((name) => `__choice.getChildByName(${name})`).join(', ')}].filter(function(item) { return !!item; });\n`;
+    code += `            if (__choice.__forgeChoiceVisualReady) { if (byReset && __choice.cancelAllSel) __choice.cancelAllSel(); __choice.__forgeApplyResult(null); return; }\n`;
+    code += `            var __setLayer = function(item: any, name: string, visible: boolean) { var layer = item.getChildByName(name); if (layer) layer.visible = visible; };\n`;
+    code += `            __choice.__forgeApplyResult = function(result: any) {\n`;
+    code += `                __choice.__forgeResult = result;\n`;
+    code += `                __choice.mouseChildren = result !== true;\n`;
+    code += `                for (var i = 0; i < __items.length; i++) {\n`;
+    code += `                    var item = __items[i]; var selected = !!item.isSelected;\n`;
+    code += `                    __setLayer(item, 'down', false);\n`;
+    code += `                    __setLayer(item, 'bg', result == null && selected);\n`;
+    code += `                    __setLayer(item, 'right', result === true && selected);\n`;
+    code += `                    __setLayer(item, 'wrong', result === false && selected);\n`;
+    code += `                    item.mouseEnabled = result !== true;\n`;
+    code += `                }\n`;
+    code += `            };\n`;
+    code += `            __choice.__forgeChoiceVisualReady = true;\n`;
+    code += `            __choice.__forgeResult = null;\n`;
+    code += `            for (let i = 0; i < __items.length; i++) {\n`;
+    code += `                let item: any = __items[i];\n`;
+    code += `                item.on(Laya.Event.MOUSE_DOWN, this, function() { item.__forgeWasSelected = !!item.isSelected; if (__choice.__forgeResult == null) __setLayer(item, 'down', true); });\n`;
+    code += `                item.on(Laya.Event.MOUSE_UP, this, function() { __setLayer(item, 'down', false); });\n`;
+    code += `                item.on(Laya.Event.MOUSE_OUT, this, function() { __setLayer(item, 'down', false); });\n`;
+    code += `                item.on(Laya.Event.CLICK, this, function() {\n`;
+    code += `                    if (__choice.upperLimit === 1 && item.__forgeWasSelected && item.isSelected && __choice.cancelAllSel) __choice.cancelAllSel();\n`;
+    code += `                    __choice.__forgeApplyResult(null);\n`;
+    code += `                });\n`;
+    code += `            }\n`;
+    code += `            __choice.__forgeApplyResult(null);\n`;
+    code += `        }).call(this);\n`;
+
+    if (!bindConfirmResults) continue;
+    for (const source of page.elements) {
+      const judgesChoice = (source.actions ?? []).some((action) => (
+        (confirmEvents.has(action.event) && action.targetId === choiceBox.id)
+        || (action.event === SDK_JUDGE_EVENT && action.judgeTargetId === choiceBox.id)
+      ));
+      if (!judgesChoice) continue;
+      code += `        (function() {\n`;
+      code += `            var source: any = this.${getVar(source)};\n`;
+      code += `            var choice: any = ${choiceRef};\n`;
+      code += `            if (!source || !choice || source.__forgeChoiceVisualTarget === choice) return;\n`;
+      code += `            source.__forgeChoiceVisualTarget = choice;\n`;
+      code += `            source.on(Laya.Event.CLICK, this, function() { Laya.timer.callLater(this, function() { if (choice.__forgeApplyResult) choice.__forgeApplyResult(choice.isNull ? null : choice.isRight === true); }); });\n`;
+      code += `        }).call(this);\n`;
+    }
+  }
+  return code;
+}
+
+function buildHomeworkChoiceResultCode(page: SubPage, getVar: (element: Element) => string): string {
+  let code = '';
+  for (const choiceBox of page.elements) {
+    if (choiceBox.type !== 'ChoiceBox') continue;
+    const choiceRef = `this.${getVar(choiceBox)}`;
+    code += `        if ((${choiceRef} as any).__forgeApplyResult) (${choiceRef} as any).__forgeApplyResult(${choiceRef}.isNull ? null : ${choiceRef}.isRight === true);\n`;
+  }
+  return code;
+}
+
 function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<string, string>, varAssignment: Map<string, string>, uiNamespace = 'game_lt'): string {
   /** 根据元素 ID 获取分配的 var 名（用于 this.xxx 引用） */
   const getVar = (el: Element): string => {
@@ -1744,6 +1865,7 @@ import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
   const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
   const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n\n' : '';
 
+  initCode += buildChoiceVisualInitCode(page, getVar);
   initCode += internalRuntime.initCode;
 
   return `import { ui } from "../../ui/layaMaxUI";
@@ -1786,17 +1908,14 @@ function generateHomeworkSceneTs(
   initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
+  initCode += buildChoiceVisualInitCode(page, getVar, false);
 
-  // ChoiceBox 自动判定：clickHanler 绑到 checkResult；result 在 checkResult 内根据 isRight/isNull 写值
+  // 作业与测评由右上角通用提交读取 result；所有 ChoiceBox 都参与聚合判定。
   for (const el of page.elements) {
     if (el.layaType !== 'ChoiceBox') continue;
-    const hasJudge = el.actions?.some(a => a.event === 'onChoiceJudge');
-    if (!hasJudge) continue;
 
     const elVar = getVar(el);
     const elRef = `this.${elVar}`;
-
-    initCode += `        ${elRef}.clickHanler = Laya.Handler.create(this, this.checkResult, null, false);\n`;
 
     // 按 branchCondition 分流构建 right/wrong/null 三个分支的动作 body
     let rightBody = '', wrongBody = '', nullBody = '';
@@ -1973,6 +2092,7 @@ ${initCode}        //add script
     private _result: Boolean = null;
     public get result(): any {
         this.checkResult();
+${buildHomeworkChoiceResultCode(page, getVar)}
         return this._result;
     }
     public set result(v: any) {
@@ -2141,10 +2261,10 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
               }
             }
           }
-          // 选项卡片：_foregroundSkin/_bgSkin/_wrongSkin 被主循环跳过，需显式收集
+          // 选项卡片状态皮肤被主循环跳过，需显式收集
           if (el.type === 'SpeechSelectableObj') {
-            const sMerged = merged as { _foregroundSkin?: string; _bgSkin?: string; _wrongSkin?: string };
-            for (const skinVal of [sMerged._foregroundSkin, sMerged._bgSkin, sMerged._wrongSkin]) {
+            const sMerged = merged as { _foregroundSkin?: string; _pressedSkin?: string; _bgSkin?: string; _correctSkin?: string; _wrongSkin?: string };
+            for (const skinVal of [sMerged._foregroundSkin, sMerged._pressedSkin, sMerged._bgSkin, sMerged._correctSkin, sMerged._wrongSkin]) {
               if (!skinVal) continue;
               const mapped = resourceMap.get(skinVal);
               if (!mapped) continue;
@@ -2295,10 +2415,10 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
               }
             }
           }
-          // 选项卡片：_foregroundSkin/_bgSkin/_wrongSkin 被主循环跳过，需显式收集
+          // 选项卡片状态皮肤被主循环跳过，需显式收集
           if (el.type === 'SpeechSelectableObj') {
-            const sMerged = merged as { _foregroundSkin?: string; _bgSkin?: string; _wrongSkin?: string };
-            for (const skinVal of [sMerged._foregroundSkin, sMerged._bgSkin, sMerged._wrongSkin]) {
+            const sMerged = merged as { _foregroundSkin?: string; _pressedSkin?: string; _bgSkin?: string; _correctSkin?: string; _wrongSkin?: string };
+            for (const skinVal of [sMerged._foregroundSkin, sMerged._pressedSkin, sMerged._bgSkin, sMerged._correctSkin, sMerged._wrongSkin]) {
               if (!skinVal) continue;
               const mapped = resourceMap.get(skinVal);
               if (!mapped) continue;
@@ -2604,6 +2724,13 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
     const details = inputRuleIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
     const more = inputRuleIssues.length > 8 ? `\n另有 ${inputRuleIssues.length - 8} 项未显示` : '';
     throw new Error(`填空题判定规则尚未完成，不能预览或发布：\n\n${details}${more}`);
+  }
+
+  const choiceAnswerIssues = collectCourseChoiceAnswerIssues(course);
+  if (choiceAnswerIssues.length > 0) {
+    const details = choiceAnswerIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = choiceAnswerIssues.length > 8 ? `\n另有 ${choiceAnswerIssues.length - 8} 项未显示` : '';
+    throw new Error(`选择题配置尚未完成，不能预览或发布：\n\n${details}${more}`);
   }
 
   if (!options.skipSvn) {

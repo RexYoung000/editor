@@ -52,6 +52,7 @@ import {
   type SnapLocks,
   type SnapResult,
 } from '../utils/canvasSnap';
+import { isChoiceOption } from '../utils/choiceAnswerRules';
 import {
   createEqualSpacingItems,
   getDistanceHintBetweenRects,
@@ -866,6 +867,9 @@ export default function CanvasOverlay({
     editorLayerGroupIds,
   });
   const canTransform = getTransformRootIds(displayElements, selectedIds, editorLayerGroupIds).length > 0;
+  const resizeHandleDefinitions = selectedElement && isChoiceOption(selectedElement, displayElements)
+    ? HANDLE_DEFS.filter((definition) => definition.id === 'e' || definition.id === 'w')
+    : HANDLE_DEFS;
 
   const groupColors = new Map<string, string>();
   const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -1164,7 +1168,7 @@ export default function CanvasOverlay({
             transform: `rotate(${selectionFrame.rotation}deg)`,
             transformOrigin: '0 0',
           }}>
-            {canTransform && HANDLE_DEFS.map((definition) => (
+            {canTransform && resizeHandleDefinitions.map((definition) => (
               <div
                 key={definition.id}
                 style={{
