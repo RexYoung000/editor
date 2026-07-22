@@ -25,19 +25,18 @@
 
 资源库分离暂不进入短期主线，作为后备方案保留。
 
-## v1.2.0 已确认迭代
+## v1.2.0 已完成，待正式发布
 
-2026-07-21 已完成 v1.2.0 的首轮需求对齐。完整产品规则、非范围、资源索取时机和共同验收要求统一记录在 [forge v1.2.0 需求基线](./v1.2.0-requirements.md)。该文档记录计划，不表示功能已经进入当前版本。
+2026-07-22 已完成 v1.2.0 发布范围调整与候选准备。完整产品规则、非范围和共同验收要求记录在 [forge v1.2.0 需求基线](./v1.2.0-requirements.md)。本版本纳入四项已合入 `main` 的能力；资源库独立搜索与三级快捷筛选从本版本移出，顺延至 [v1.2.1 需求基线](./v1.2.1-requirements.md)。
 
-本次按可独立开发和验收的边界拆为：
+本次纳入：
 
 1. [#74 新增数字小数点键盘与分数输入键盘](https://github.com/RexYoung000/editor/issues/74)（P1，最优先）。
-2. [#73 重构资源库为独立搜索与三级快捷筛选](https://github.com/RexYoung000/editor/issues/73)。
-3. [#75 修复锁定图层阻断其他图层的画布选择](https://github.com/RexYoung000/editor/issues/75)。
-4. [#72 支持单框多答案与两框算式关系判定](https://github.com/RexYoung000/editor/issues/72)。
-5. [#76 优化选择题单选、多选配置与正确答案判定](https://github.com/RexYoung000/editor/issues/76)。
+2. [#75 修复锁定图层阻断其他图层的画布选择](https://github.com/RexYoung000/editor/issues/75)。
+3. [#72 支持单框多答案与两框算式关系判定](https://github.com/RexYoung000/editor/issues/72)。
+4. [#76 优化选择题单选、多选配置与正确答案判定](https://github.com/RexYoung000/editor/issues/76)。
 
-键盘、选择题和资源库正式素材不在需求对齐阶段预制。领取对应 Issue 后，开发者先索要资源和规格；资源未到位时可以完成不依赖最终视觉的逻辑，但不能自行确定最终皮肤或素材归属。
+资源库独立搜索与三级快捷筛选 [#73](https://github.com/RexYoung000/editor/issues/73) 不纳入 v1.2.0，后续按 [v1.2.1 需求基线](./v1.2.1-requirements.md) 单独开发和验收。v1.2.0 的键盘与选择题资源已随对应实现确认并进入本次发布候选。
 
 ## 阶段一：交互与层级管理
 
