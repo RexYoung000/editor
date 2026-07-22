@@ -24,7 +24,7 @@ import {
   compileInternalPagesCourse,
   internalPageActionBody,
 } from './internalPageCompiler';
-import { buildInputRuleInitCode } from './inputAnswerRules';
+import { buildInputRuleInitCode, isInputRuleHost } from './inputAnswerRules';
 
 // ─── 预习场景差异 ───
 
@@ -77,7 +77,7 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     for (const action of el.actions) {
       if (action.event !== 'onClickInitConfirm' && action.event !== 'onClickInitConfirmWithLock') continue;
       const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
-      if (!targetEl || targetEl.type !== 'KlInputBox') continue;
+      if (!isInputRuleHost(targetEl)) continue;
       const btnVar = getVar(el);
       const inputBoxVar = getVar(targetEl);
       const lockArg = action.event === 'onClickInitConfirmWithLock' ? ', null, this._lockBox' : '';

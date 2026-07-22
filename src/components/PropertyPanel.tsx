@@ -25,6 +25,7 @@ import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../u
 import { createElementMap, getElementLayerState } from '../utils/layerState';
 import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
 import { keyboardBindingInfo, keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
+import { INPUT_RULE_ENABLED_KEY } from '../utils/inputAnswerRules';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -925,6 +926,21 @@ export default function PropertyPanel() {
                   </>
                 );
               })()}
+
+              {/* 通用容器：显式开启后作为答题判定容器 */}
+              {single
+                && single.type === 'ContainerBox'
+                && single.props?.[INPUT_RULE_ENABLED_KEY] === true
+                && (
+                  <InputRulesOverview
+                    target={single}
+                    elements={currentPage?.elements ?? []}
+                    disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                    onUpdateProps={(elementId, props) => updateElement(elementId, { props })}
+                    onCommit={saveHistory}
+                    onSelectElement={(elementId) => selectElement(elementId, false)}
+                  />
+                )}
 
               {/* 连线题：连线项管理（一次添加/删除一对：左 camp1 + 右 camp2） */}
               {single && single.type === 'MatchingGame' && (() => {

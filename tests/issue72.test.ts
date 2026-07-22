@@ -7,11 +7,15 @@ import {
   createInputRelation,
   evaluateStructuredInputRuleState,
   evaluateInputRelation,
+  findInputRuleHostAncestor,
+  getFillAnswerInputs,
   getInputAnswerCandidates,
   getInputRuleDisplayName,
   hasStructuredInputRules,
   INPUT_ANSWER_CANDIDATES_KEY,
   INPUT_RELATIONS_KEY,
+  INPUT_RULE_ENABLED_KEY,
+  isInputRuleHost,
   parseRuleNumber,
   remapInputRelationRefs,
   splitAnswerCandidates,
@@ -108,6 +112,63 @@ test('关系配置显示用户图层名称，并在重命名后立即读取新�
   input.props = withLayerLabel(input.props, '新的左因数');
   assert.equal(getInputRuleDisplayName(input), '新的左因数');
   assert.equal(input.name, 'KlInputImage_1');
+});
+
+test('ContainerBox 只有显式开启后才成为答题判定容器', () => {
+  const target = element('answer-group', 'ContainerBox', {
+    props: { [INPUT_RULE_ENABLED_KEY]: false },
+  });
+  const left = element('group-left', 'KlInputImage', {
+    parentId: target.id,
+    props: { [INPUT_ANSWER_CANDIDATES_KEY]: ['1'] },
+  });
+  const right = element('group-right', 'KlInputImage', {
+    parentId: target.id,
+    props: { [INPUT_ANSWER_CANDIDATES_KEY]: ['4'] },
+  });
+  const page: SubPage = { id: 'container-page', name: '容器页', elements: [target, left, right] };
+
+  assert.equal(isInputRuleHost(target), false);
+  assert.equal(findInputRuleHostAncestor(left, page.elements), undefined);
+  assert.deepEqual(getFillAnswerInputs(target, page.elements), []);
+  assert.equal(hasStructuredInputRules(target, page.elements), false);
+
+  target.props[INPUT_RULE_ENABLED_KEY] = true;
+  target.props[INPUT_RELATIONS_KEY] = [createInputRelation(left.id, right.id, 'multiply', '4')];
+  assert.equal(isInputRuleHost(target), true);
+  assert.equal(findInputRuleHostAncestor(left, page.elements)?.id, target.id);
+  assert.deepEqual(getFillAnswerInputs(target, page.elements).map((item) => item.id), [left.id, right.id]);
+  assert.deepEqual(collectInputRuleIssues(target, page.elements), []);
+  assert.match(buildInputRuleInitCode(page, (item) => item.name ?? item.id), /this\.answer_group/);
+
+  target.props[INPUT_RULE_ENABLED_KEY] = false;
+  assert.equal(hasStructuredInputRules(target, page.elements), false);
+  assert.ok(Array.isArray(target.props[INPUT_RELATIONS_KEY]), '关闭开关应保留已有关系配置');
+});
+
+test('嵌套答题容器只收集离输入框最近的一组', () => {
+  const outer = element('outer-box', 'KlInputBox');
+  const inner = element('inner-box', 'ContainerBox', {
+    parentId: outer.id,
+    props: { [INPUT_RULE_ENABLED_KEY]: true },
+  });
+  const outerInput = element('outer-input', 'KlInputImage', {
+    parentId: outer.id,
+    props: { [INPUT_ANSWER_CANDIDATES_KEY]: ['1'] },
+  });
+  const innerInput = element('inner-input', 'KlInputImage', {
+    parentId: inner.id,
+    props: { [INPUT_ANSWER_CANDIDATES_KEY]: ['2'] },
+  });
+  const elements = [outer, inner, outerInput, innerInput];
+
+  assert.deepEqual(getFillAnswerInputs(outer, elements).map((item) => item.id), [outerInput.id]);
+  assert.deepEqual(getFillAnswerInputs(inner, elements).map((item) => item.id), [innerInput.id]);
+  assert.equal(findInputRuleHostAncestor(innerInput, elements)?.id, inner.id);
+
+  inner.props[INPUT_RULE_ENABLED_KEY] = false;
+  assert.deepEqual(getFillAnswerInputs(outer, elements).map((item) => item.id), [outerInput.id, innerInput.id]);
+  assert.equal(findInputRuleHostAncestor(innerInput, elements)?.id, outer.id);
 });
 
 test('数值解析支持小数、简单分数和带整数部分的结构化分数', () => {

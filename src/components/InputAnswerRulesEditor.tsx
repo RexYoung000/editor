@@ -4,7 +4,7 @@ import type { Element } from '../types';
 import {
   collectInputRuleIssues,
   createInputRelation,
-  findInputBoxAncestor,
+  findInputRuleHostAncestor,
   getFillAnswerInputs,
   getInputAnswerCandidates,
   getInputRuleDisplayName,
@@ -68,7 +68,7 @@ function RelationBuilder({
     <div className="mt-2 rounded border border-blue-600/50 bg-blue-950/20 p-2">
       <div className="mb-2 text-[10px] text-blue-200">建立两框算式关系</div>
       {available.length === 0 ? (
-        <div className="text-[10px] text-amber-300">当前填空题没有其他可连接的输入框。</div>
+        <div className="text-[10px] text-amber-300">当前答题容器没有其他可连接的输入框。</div>
       ) : (
         <div className="space-y-2">
           <select
@@ -264,7 +264,7 @@ function CandidateAnswerEditor({
 }
 
 export function InputRuleEditor({ input, ...shared }: SharedProps & { input: Element }) {
-  const target = findInputBoxAncestor(input, shared.elements);
+  const target = findInputRuleHostAncestor(input, shared.elements);
   const relation = target
     ? readInputRelations(target).find((item) => item.leftInputId === input.id || item.rightInputId === input.id)
     : undefined;

@@ -1,4 +1,5 @@
 import type { Action, Element } from '../types';
+import { isInputRuleHost } from './inputAnswerRules';
 
 export const SDK_JUDGE_EVENT = 'onClickSdkJudge';
 
@@ -27,7 +28,7 @@ export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCap
       emptyLabel: '还没有填写',
     };
   }
-  if (element.type === 'KlInputBox') {
+  if (isInputRuleHost(element)) {
     return {
       kind: 'input',
       conditions: THREE_STATE,

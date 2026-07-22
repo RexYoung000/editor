@@ -14,6 +14,7 @@ import {
   SDK_JUDGE_EVENT,
   type JudgeCondition,
 } from '../utils/sdkJudge';
+import { isInputRuleHost } from '../utils/inputAnswerRules';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -65,7 +66,7 @@ export default function ActionEditor({
   const isImage = element.type === 'NewImage';
   const isConfirmButton = element.type === 'ConfirmButton';
   const isChoiceBox = element.layaType === 'ChoiceBox';
-  const isKlInputBox = element.type === 'KlInputBox';
+  const isInputRuleTarget = isInputRuleHost(element);
   const isMatchingGame = element.layaType === 'MatchingGame';
   const isNewBrushSprite = element.type === 'NewBrushSprite';
   const hideAddButton = element.type === 'DropObj' || element.type === 'DragObj';
@@ -94,8 +95,8 @@ export default function ActionEditor({
 
   // 画布上是否存在 DragViewBox / MatchingGame（决定 ConfirmButton 的"点击+游戏判断"事件是否可见）
   const hasGameTarget = allElements.some((e) => e.type === 'DragViewBox' || e.type === 'MatchingGame');
-  // 画布上是否存在 ChoiceBox 或 KlInputBox（决定 ConfirmButton 的"点击+SDK通用判断"事件是否可见）
-  const hasChoiceOrInput = allElements.some((e) => e.type === 'KlInputBox' || e.layaType === 'ChoiceBox');
+  // 画布上是否存在选择题或答题判定容器（决定 ConfirmButton 的“点击+SDK通用判断”事件是否可见）
+  const hasChoiceOrInput = allElements.some((e) => isInputRuleHost(e) || e.layaType === 'ChoiceBox');
 
   const EVENT_OPTS = [
     ...(isImage ? [
@@ -134,7 +135,7 @@ export default function ActionEditor({
     ...(isChoiceBox ? [
       { value: 'onChoiceJudge', label: '自动判定是否全对' },
     ] : []),
-    ...(isKlInputBox ? [
+    ...(isInputRuleTarget ? [
       { value: 'onInputJudge', label: '自动判定是否全对' },
     ] : []),
     ...(isMatchingGame ? [
@@ -469,12 +470,12 @@ export default function ActionEditor({
                   return;
                 }
                 const patch: Partial<Action> = { event: nextEvent };
-                // 切到 onClickInitConfirm*：如果当前 target 不是 KlInputBox / ChoiceBox，默认选画布上第一个 ChoiceBox 或 KlInputBox
+                // 切到 onClickInitConfirm*：如果当前 target 不是答题判定容器 / ChoiceBox，默认选择第一个有效目标
                 if (nextEvent === 'onClickInitConfirm' || nextEvent === 'onClickInitConfirmWithLock') {
                   const currentTarget = group.targetId ? allElements.find((el) => el.id === group.targetId) : null;
-                  const isValid = currentTarget && (currentTarget.type === 'KlInputBox' || currentTarget.layaType === 'ChoiceBox');
+                  const isValid = currentTarget && (isInputRuleHost(currentTarget) || currentTarget.layaType === 'ChoiceBox');
                   if (!isValid) {
-                    const firstValid = allElements.find((el) => el.type === 'KlInputBox' || el.layaType === 'ChoiceBox');
+                    const firstValid = allElements.find((el) => isInputRuleHost(el) || el.layaType === 'ChoiceBox');
                     patch.targetId = firstValid?.id;
                   }
                 }
@@ -642,7 +643,7 @@ export default function ActionEditor({
                   {isInitGameConfirm && !group.targetId && <option value="">请选择拖拽容器或连线游戏</option>}
                   {allElements.filter((el) => {
                     if (el.id === element.id) return false;
-                    if (isInitConfirm) return el.type === 'KlInputBox' || el.layaType === 'ChoiceBox';
+                    if (isInitConfirm) return isInputRuleHost(el) || el.layaType === 'ChoiceBox';
                     if (isInitGameConfirm) return el.type === 'DragViewBox' || el.type === 'MatchingGame';
                     return true;
                   }).map((el) => (

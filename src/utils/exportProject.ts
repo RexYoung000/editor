@@ -20,9 +20,11 @@ import { getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
 import {
   buildInputRuleInitCode,
   collectCourseInputRuleIssues,
+  findInputRuleHostAncestor,
   getFillAnswerInputs,
   getInputAnswerCandidates,
   hasStructuredInputRules,
+  isInputRuleHost,
 } from './inputAnswerRules';
 
 // ─── Text 烘焙 ───
@@ -365,7 +367,7 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
 
   // 结构化填空题判定会直接读取容器内每一个输入格。
   for (const el of elements) {
-    if (el.type !== 'KlInputBox' || !hasStructuredInputRules(el, elements)) continue;
+    if (!isInputRuleHost(el) || !hasStructuredInputRules(el, elements)) continue;
     needsVar.add(el.id);
     for (const input of getFillAnswerInputs(el, elements)) needsVar.add(input.id);
   }
@@ -1279,22 +1281,13 @@ export function buildSdkJudgeClickInitCode(
 
 /**
  * 作业预设“完成”自动判定的独立输入控件。
- * 嵌套在 KlInputBox 内的输入格继续由题型容器负责，避免快捷模板重复判定。
+ * 属于答题判定容器的输入格继续由最近的父容器负责，避免重复判定。
  */
 export function collectHomeworkStandaloneInputJudgeTargets(page: SubPage): Element[] {
-  const elementById = new Map(page.elements.map((element) => [element.id, element]));
-  const isInsideInputBox = (element: Element): boolean => {
-    let parent = element.parentId ? elementById.get(element.parentId) : undefined;
-    while (parent) {
-      if (parent.type === 'KlInputBox') return true;
-      parent = parent.parentId ? elementById.get(parent.parentId) : undefined;
-    }
-    return false;
-  };
-
   return page.elements.filter((element) => {
     if (element.type !== 'KlInputImage' && element.type !== 'FractionInput') return false;
-    return getInputAnswerCandidates(element).length > 0 && !isInsideInputBox(element);
+    return getInputAnswerCandidates(element).length > 0
+      && !findInputRuleHostAncestor(element, page.elements);
   });
 }
 
@@ -1475,7 +1468,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
           const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
           const btnVar = getVar(el);
           const lockArg = rawEvent === 'onClickInitConfirmWithLock' ? ', null, this._lockBox' : '';
-          if (targetEl && targetEl.type === 'KlInputBox') {
+          if (isInputRuleHost(targetEl)) {
             const inputBoxVar = getVar(targetEl);
             initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
           } else if (targetEl && targetEl.layaType === 'ChoiceBox') {
@@ -1493,7 +1486,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
           const btnVar = getVar(el);
           const isLock = rawEvent === 'onClickInitConfirmCHWithLock';
           const lockArg = isLock ? 'this._lockBox' : 'null';
-          if (targetEl && targetEl.type === 'KlInputBox') {
+          if (isInputRuleHost(targetEl)) {
             const inputBoxVar = getVar(targetEl);
             initCode += `        GameUtils.initConfirmCH(this, this.${btnVar}, this.${inputBoxVar}, null, ${lockArg}, this.playRightAni, this.playWrongAni);\n`;
           } else if (targetEl && targetEl.layaType === 'ChoiceBox') {
@@ -1612,8 +1605,8 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
       }
     }
 
-    // KlInputBox 自动判定：合并到一个 afterJudgeHandler
-    if (el.type === 'KlInputBox') {
+    // 答题判定容器自动判定：合并到一个 afterJudgeHandler
+    if (isInputRuleHost(el)) {
       const hasJudge = el.actions?.some(a => a.event === 'onInputJudge');
       if (hasJudge) {
         // 按 branchCondition 分流构建 right/wrong/null 三个分支的动作 body
@@ -1825,9 +1818,9 @@ function generateHomeworkSceneTs(
       `        else { ${wrongBody ? wrongBody + ' ' : ''}__forgeJudgeResults.push(false); }\n`;
   }
 
-  // KlInputBox 自动判定：afterJudgeHandler 绑到 checkResult；result 在 checkResult 内根据 isRight()/isNull() 写值
+  // 答题判定容器自动判定：afterJudgeHandler 绑到 checkResult；result 在 checkResult 内根据 isRight()/isNull() 写值
   for (const el of page.elements) {
-    if (el.type !== 'KlInputBox') continue;
+    if (!isInputRuleHost(el)) continue;
     const hasJudge = el.actions?.some(a => a.event === 'onInputJudge');
     if (!hasJudge) continue;
 
@@ -2058,7 +2051,7 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
 
       // classType 规则：
       //   subPage 对应的 ts 中调用了以下任一函数 → 视为教学关：sj === 0 用 'lt'，其余用 'lx'
-      //     · GameUtils.initConfirm           ← onClickInitConfirm[WithLock] + targetEl.type === 'KlInputBox'
+      //     · GameUtils.initConfirm           ← onClickInitConfirm[WithLock] + 答题判定容器
       //     · GameUtils.initChoiceBoxConfirm  ← onClickInitConfirm[WithLock] + targetEl.layaType === 'ChoiceBox'
       //     · this.showAnswerFace(1)          ← showAnswerRight / showAnswerRightLock
       //                                       ← onClickInitGameConfirm[WithLock] + targetEl.type === 'DragViewBox' / 'MatchingGame'
@@ -2072,7 +2065,7 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
             }
             if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
               const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
-              if (targetEl && (targetEl.type === 'KlInputBox' || targetEl.layaType === 'ChoiceBox')) {
+              if (targetEl && (isInputRuleHost(targetEl) || targetEl.layaType === 'ChoiceBox')) {
                 return true;
               }
             }

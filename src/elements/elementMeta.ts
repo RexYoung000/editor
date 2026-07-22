@@ -398,7 +398,25 @@ export const elementMeta: Record<string, Meta> = {
       { key: 'sizeGrid', label: '九宫格', type: 'text', group: '外观' },
     ],
   },
-  ContainerBox: { layaType: 'Box', label: '容器Box', category: 'commonComponents', defaultSize: { width: 300, height: 300 }, defaultPosition: { x: 200, y: 200 }, placeholderImage: assetSrc('containerBox.placeholder'), defaultProps: {}, properties: [...COMMON_STATE_PROPS] },
+  ContainerBox: {
+    layaType: 'Box',
+    label: '容器Box',
+    category: 'commonComponents',
+    defaultSize: { width: 300, height: 300 },
+    defaultPosition: { x: 200, y: 200 },
+    placeholderImage: assetSrc('containerBox.placeholder'),
+    defaultProps: { _inputRuleEnabled: false },
+    properties: [
+      ...COMMON_STATE_PROPS,
+      {
+        key: '_inputRuleEnabled',
+        label: '启用答题判定',
+        type: 'boolean',
+        group: '交互',
+        tooltip: '开启后，容器内输入框可建立算式关系并作为一组统一判定；关闭时保留配置，输入框恢复独立判定。',
+      },
+    ],
+  },
   // ─── 画笔组件（commonComponents 分类，组合创建：Box + SelectableObj + ScaleButton；导出时注入 NewBrushSprite 子节点）───
   NewBrushSprite: {
     layaType: 'Box',

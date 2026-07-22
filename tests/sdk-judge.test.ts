@@ -88,6 +88,8 @@ test('SDK 判定目标矩阵只接受现有题型组件并返回真实结果能�
   const drag = element('drag', 'DragViewBox');
   const matching = element('matching', 'MatchingGame');
   const image = element('image', 'Image');
+  const answerContainer = element('answer-container', 'ContainerBox', { props: { _inputRuleEnabled: true } });
+  const layoutContainer = element('layout-container', 'ContainerBox', { props: { _inputRuleEnabled: false } });
 
   assert.deepEqual(getSdkJudgeCapability(inputImage)?.conditions, ['right', 'wrong', 'null']);
   assert.equal(getSdkJudgeCapability(inputImage)?.answerKey, '_judgeAnswer');
@@ -97,6 +99,8 @@ test('SDK 判定目标矩阵只接受现有题型组件并返回真实结果能�
   assert.equal(getSdkJudgeCapability(choice)?.answerKey, 'rightItemNames');
   assert.deepEqual(getSdkJudgeCapability(drag)?.conditions, ['right', 'wrong']);
   assert.deepEqual(getSdkJudgeCapability(matching)?.conditions, ['right', 'wrong', 'null']);
+  assert.equal(getSdkJudgeCapability(answerContainer)?.kind, 'input');
+  assert.equal(isSdkJudgeTarget(layoutContainer), false);
   assert.equal(isSdkJudgeTarget(image), false);
 });
 
@@ -137,10 +141,17 @@ test('作业预设完成只收集配置答案的独立输入控件', () => {
     parentId: inputBox.id,
     props: { _judgeAnswer: '8' },
   });
+  const answerContainer = element('answer-container', 'ContainerBox', {
+    props: { _inputRuleEnabled: true },
+  });
+  const containerInput = element('container-input', 'KlInputImage', {
+    parentId: answerContainer.id,
+    props: { _judgeAnswer: '4' },
+  });
   const page: SubPage = {
     id: 'page',
     name: '页面',
-    elements: [inputBox, standaloneInput, standaloneFraction, plainInput, nestedInput],
+    elements: [inputBox, answerContainer, standaloneInput, standaloneFraction, plainInput, nestedInput, containerInput],
   };
 
   assert.deepEqual(
@@ -158,12 +169,14 @@ test('作业预设完成只收集配置答案的独立输入控件', () => {
   assert.match(code, /\(\["12<3_4>"\]\)\.indexOf\(String\(this\.standalone_fraction\.fontClipValue \|\| ""\)\) >= 0/);
   assert.doesNotMatch(code, /plain_input/);
   assert.doesNotMatch(code, /nested_input/);
+  assert.doesNotMatch(code, /container_input/);
 
   const vars = collectElementsNeedingVar(page);
   assert.equal(vars.has(standaloneInput.id), true);
   assert.equal(vars.has(standaloneFraction.id), true);
   assert.equal(vars.has(plainInput.id), false);
   assert.equal(vars.has(nestedInput.id), false);
+  assert.equal(vars.has(containerInput.id), true);
 });
 
 test('作业与专题测评预设完成聚合多个独立输入答案', () => {

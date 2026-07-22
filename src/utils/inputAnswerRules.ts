@@ -3,6 +3,7 @@ import { getLayerDisplayName } from './layerPresentation';
 
 export const INPUT_ANSWER_CANDIDATES_KEY = '_judgeAnswers';
 export const INPUT_RELATIONS_KEY = '_inputRelations';
+export const INPUT_RULE_ENABLED_KEY = '_inputRuleEnabled';
 
 export type InputRelationOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'equal';
 
@@ -20,6 +21,8 @@ export interface InputRuleIssue {
   message: string;
 }
 
+export type InputRuleHost = Element & { type: 'KlInputBox' | 'ContainerBox' };
+
 const OPERATORS = new Set<InputRelationOperator>(['add', 'subtract', 'multiply', 'divide', 'equal']);
 
 function makeRuleId(): string {
@@ -29,6 +32,11 @@ function makeRuleId(): string {
 
 export function isAnswerInput(element: Element | undefined): element is Element {
   return element?.type === 'KlInputImage' || element?.type === 'FractionInput';
+}
+
+export function isInputRuleHost(element: Element | null | undefined): element is InputRuleHost {
+  return element?.type === 'KlInputBox'
+    || (element?.type === 'ContainerBox' && element.props?.[INPUT_RULE_ENABLED_KEY] === true);
 }
 
 export function getInputRuleDisplayName(element: Element | undefined): string {
@@ -55,23 +63,17 @@ export function hasStructuredInputAnswers(element: Element): boolean {
 }
 
 export function getFillAnswerInputs(target: Element, elements: Element[]): Element[] {
-  const byId = new Map(elements.map((element) => [element.id, element]));
-  return elements.filter((element) => {
-    if (!isAnswerInput(element)) return false;
-    let parent = element.parentId ? byId.get(element.parentId) : undefined;
-    while (parent) {
-      if (parent.id === target.id) return true;
-      parent = parent.parentId ? byId.get(parent.parentId) : undefined;
-    }
-    return false;
-  });
+  if (!isInputRuleHost(target)) return [];
+  return elements.filter((element) => (
+    isAnswerInput(element) && findInputRuleHostAncestor(element, elements)?.id === target.id
+  ));
 }
 
-export function findInputBoxAncestor(input: Element, elements: Element[]): Element | undefined {
+export function findInputRuleHostAncestor(input: Element, elements: Element[]): Element | undefined {
   const byId = new Map(elements.map((element) => [element.id, element]));
   let parent = input.parentId ? byId.get(input.parentId) : undefined;
   while (parent) {
-    if (parent.type === 'KlInputBox') return parent;
+    if (isInputRuleHost(parent)) return parent;
     parent = parent.parentId ? byId.get(parent.parentId) : undefined;
   }
   return undefined;
@@ -110,7 +112,9 @@ export function createInputRelation(
 }
 
 export function hasStructuredInputRules(target: Element, elements: Element[]): boolean {
-  return Array.isArray(target.props?.[INPUT_RELATIONS_KEY])
+  if (!isInputRuleHost(target)) return false;
+  return (target.type === 'ContainerBox' && target.props?.[INPUT_RULE_ENABLED_KEY] === true)
+    || Array.isArray(target.props?.[INPUT_RELATIONS_KEY])
     || getFillAnswerInputs(target, elements).some(hasStructuredInputAnswers);
 }
 
@@ -197,23 +201,23 @@ export function collectInputRuleIssues(target: Element, elements: Element[]): In
   const raw = target.props?.[INPUT_RELATIONS_KEY];
   const relations = readInputRelations(target);
   if (raw !== undefined && (!Array.isArray(raw) || relations.length !== raw.length)) {
-    return [{ code: 'invalid-data', targetId: target.id, message: `填空题“${targetLabel}”的算式关系数据无效，请重新配置` }];
+    return [{ code: 'invalid-data', targetId: target.id, message: `答题容器“${targetLabel}”的算式关系数据无效，请重新配置` }];
   }
   const inputs = getFillAnswerInputs(target, elements);
   if (inputs.length === 0) {
-    return [{ code: 'no-input', targetId: target.id, message: `填空题“${targetLabel}”没有可判定的输入框` }];
+    return [{ code: 'no-input', targetId: target.id, message: `答题容器“${targetLabel}”没有可判定的输入框` }];
   }
   const inputIds = new Set(inputs.map((input) => input.id));
   const usedInputIds = new Set<string>();
   const issues: InputRuleIssue[] = [];
   relations.forEach((relation, index) => {
-    const relationLabel = `填空题“${targetLabel}”的关系 ${index + 1}`;
+    const relationLabel = `答题容器“${targetLabel}”的关系 ${index + 1}`;
     if (relation.leftInputId === relation.rightInputId) {
       issues.push({ code: 'same-input', targetId: target.id, message: `${relationLabel}不能连接同一个输入框` });
     }
     for (const inputId of [relation.leftInputId, relation.rightInputId]) {
       if (!inputIds.has(inputId)) {
-        issues.push({ code: 'missing-input', targetId: target.id, message: `${relationLabel}包含已删除或已移出当前填空题的输入框` });
+        issues.push({ code: 'missing-input', targetId: target.id, message: `${relationLabel}包含已删除或已移出当前答题容器的输入框` });
       }
       if (usedInputIds.has(inputId)) {
         issues.push({ code: 'duplicate-input', targetId: target.id, message: `${relationLabel}重复使用了已参加其他关系的输入框` });
@@ -230,7 +234,7 @@ export function collectInputRuleIssues(target: Element, elements: Element[]): In
   });
   inputs.forEach((input) => {
     if (!usedInputIds.has(input.id) && getInputAnswerCandidates(input).length === 0) {
-      issues.push({ code: 'missing-answer', targetId: target.id, message: `填空题“${targetLabel}”的空位“${getInputRuleDisplayName(input)}”尚未配置候选答案或算式关系` });
+      issues.push({ code: 'missing-answer', targetId: target.id, message: `答题容器“${targetLabel}”的空位“${getInputRuleDisplayName(input)}”尚未配置候选答案或算式关系` });
     }
   });
   return issues;
@@ -243,7 +247,7 @@ export function collectCourseInputRuleIssues(course: Course): InputRuleIssue[] {
       const pages: Array<SubPage | NonNullable<SubPage['internalPages']>[number]> = [subPage, ...(subPage.internalPages ?? [])];
       for (const page of pages) {
         for (const target of page.elements) {
-          if (target.type === 'KlInputBox') issues.push(...collectInputRuleIssues(target, page.elements));
+          if (isInputRuleHost(target)) issues.push(...collectInputRuleIssues(target, page.elements));
         }
       }
     }
@@ -285,7 +289,7 @@ function runtimeNumberParserCode(): string {
 export function buildInputRuleInitCode(page: SubPage, getVar: (element: Element) => string): string {
   let code = '';
   for (const target of page.elements) {
-    if (target.type !== 'KlInputBox' || !hasStructuredInputRules(target, page.elements)) continue;
+    if (!isInputRuleHost(target) || !hasStructuredInputRules(target, page.elements)) continue;
     if (collectInputRuleIssues(target, page.elements).length > 0) continue;
     const inputs = getFillAnswerInputs(target, page.elements);
     const inputIndexById = new Map(inputs.map((input, index) => [input.id, index]));

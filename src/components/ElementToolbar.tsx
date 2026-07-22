@@ -15,6 +15,7 @@ import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './Qui
 import type { Action, Element } from '../types';
 import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
 import { keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
+import { isInputRuleHost } from '../utils/inputAnswerRules';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -745,7 +746,7 @@ export default function ElementToolbar() {
       if (kind === 'confirm') {
         const element = createDefaultElement('ConfirmButton', subPageId);
         await applyPresetImage(element, courseId, preset, 'skin');
-        const target = pageContext.elements.find((item) => item.type === 'KlInputBox' || item.layaType === 'ChoiceBox')
+        const target = pageContext.elements.find((item) => isInputRuleHost(item) || item.layaType === 'ChoiceBox')
           ?? pageContext.elements.find((item) => item.type === 'DragViewBox' || item.type === 'MatchingGame');
         if (target) {
           const isGame = target.type === 'DragViewBox' || target.type === 'MatchingGame';
