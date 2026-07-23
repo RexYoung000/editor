@@ -214,6 +214,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 1. **工程模板**：`Game1_LT.zip` / `Game1_HW.zip` / `Game1_PREVIEW.zip` 解压到 `${dirPath}/project/<cid>/Game1_XX/`，`pathMapper` 不传，整包还原
 2. **`game.zip` 内置资源**：`collectGameZipFiles(resourceMap)` 算出**实际被引用**的精确路径集合（去掉 `game/` 前缀），filter 命中才解压；引用路径和解压落点统一由同一映射决定：`sound/` → `<viewDir>/sound/`，`animation/` → `<viewDir>/animation/`，`image/` → `<viewDir>/image/img/`，其他图片目录 → `<viewDir>/image/<topDir>/`
 
+运行时组件源码属于工程模板，不属于 `game.zip` 素材包。以 `FractionInput` 为例，正课、作业和预习分别从三份模板中的 `src/view/*/Components/FractionInput.ts` 编译；修改该组件时必须同步三份源目录并执行 `node scripts/pack-template-zips.mjs`，否则开发预览和正式导出可能因使用旧模板而表现不一致。该类修复不应改动 `game.zip`，除非同时变更了 `public/builtin/runtime/game/` 下的素材。
+
 每个 zip entry 通过 `eApi.writeBinaryFile(destPath, base64)` IPC 写盘；空目录通过 `eApi.ensureDir` 创建。
 
 ### 4.12 用户上传资源落盘

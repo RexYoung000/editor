@@ -176,20 +176,22 @@ export default class FractionInput extends KlInputImage {
             let _allInputs = keyBoard["_allInputs"] as KlInputImage[];
             keyBoard["_allInputs"] = _allInputs.filter(v => v != input)
         })
-        let events = KlKeyboardEvent.instance && KlKeyboardEvent.instance["events"] || KlKeyboardEvent.instance["_events"];
-        let inputs = events && events[KlKeyboardEvent.INPUT] as KlInputImage[];
-        if (inputs && events) {
-            events[KlKeyboardEvent.INPUT] = inputs.filter((v: any) => v && v.caller != input);
-        }
+        KlKeyboardEvent.instance.offAllCaller(input);
     }
     public eachAllKeyBorad(func: (keyBoard: KlBaseKeyboard) => void) {
-        let events = KlKeyboardEvent.instance && KlKeyboardEvent.instance["events"] || KlKeyboardEvent.instance["_events"];
-        let handels = events && events[KlKeyboardEvent.UNSELECT_ALLINPUTIMAGE];
-        if (handels) {
-            for (const data of handels) {
-                func(data.caller);
+        let view = VipThink.viewMgr["currPage"] && VipThink.viewMgr["currPage"].currView;
+        if (!view) return;
+
+        let visit = (node: any) => {
+            if (!node || node.destroyed) return;
+            if (node instanceof KlBaseKeyboard) {
+                func(node);
+            }
+            for (let i = 0; i < (node.numChildren || 0); i++) {
+                visit(node.getChildAt(i));
             }
         }
+        visit(view);
     }
     get parentsIsHide() {
         let p = this.parent as Laya.Box;
