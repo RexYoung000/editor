@@ -624,7 +624,10 @@ export default function PropertyPanel() {
   };
 
   const meta = single ? elementMeta[single.type] : null;
-  const properties: PropertyDef[] = meta?.properties ?? [];
+  // 文本尺寸模式在变换区域提供专用分段入口，避免在属性分组中重复出现。
+  const properties: PropertyDef[] = (meta?.properties ?? []).filter((field) => (
+    !(single?.type === 'NewTextArea' && field.key === 'textSizingMode')
+  ));
 
   // 通用变换属性（locked 元素不显示）
   const isDragSlotBox = single && (single.type === 'DragDropBox' || single.type === 'DragDragBox');
@@ -1183,10 +1186,15 @@ export default function PropertyPanel() {
                       : undefined;
                     const effectiveDefault = naturalSize !== undefined && naturalSize !== null ? Number(naturalSize) : (defaultSizeVal ?? 0);
                     const displayVal = editingValues[f.key] ?? (val !== undefined && val !== null ? String(val) : '');
+                    const textMode = single?.type === 'NewTextArea' ? normalizeTextSizingMode(single.props.textSizingMode) : null;
+                    const sizeDisabled = single?.type === 'NewTextArea' && (
+                      (f.key === 'width' && textMode === 'auto')
+                      || (f.key === 'height' && (textMode === 'auto' || textMode === 'fixed-width'))
+                    );
                     return (
                       <div key={f.key} className="flex items-center gap-1">
                         <span className="text-[10px] text-slate-500 w-4">{f.label}</span>
-                        <input type="number" className={`flex-1 min-w-0 px-1 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500`}
+                        <input type="number" disabled={sizeDisabled} title={sizeDisabled ? '请先切换尺寸模式' : undefined} className={`flex-1 min-w-0 px-1 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50`}
                           value={displayVal}
                           placeholder={String(effectiveDefault)}
                           onChange={(e) => {
@@ -1225,6 +1233,37 @@ export default function PropertyPanel() {
                     );
                   })}
                 </div>
+                {single?.type === 'NewTextArea' && !singleLayerState?.effectiveLocked && (
+                  <div className="mt-2">
+                    <div className="text-[10px] text-slate-500 mb-1">尺寸模式</div>
+                    <div className="grid grid-cols-3 gap-1" role="group" aria-label="尺寸模式">
+                      {[
+                        { value: 'auto', label: '自动宽高', title: '宽高随文本内容调整' },
+                        { value: 'fixed-width', label: '固定宽度', title: '宽度固定，高度随文本内容调整' },
+                        { value: 'fixed', label: '固定宽高', title: '宽高保持当前尺寸' },
+                      ].map((option) => {
+                        const active = normalizeTextSizingMode(single.props.textSizingMode) === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            title={option.title}
+                            aria-pressed={active}
+                            onClick={() => {
+                              handleChange('textSizingMode', option.value);
+                              saveHistory();
+                            }}
+                            className={`min-w-0 border px-1 py-1.5 text-[10px] transition-colors ${active
+                              ? 'border-blue-400 bg-blue-600/80 text-white'
+                              : 'border-slate-600 bg-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-600'}`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {single && single.type === 'NewImage' && (
                   <button onClick={() => { handleTransformChange('x', 0); handleTransformChange('y', 0); handleTransformChange('width', 1920); handleTransformChange('height', 1080); }}
                     className="w-full mt-1 py-1 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">

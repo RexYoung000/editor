@@ -326,6 +326,26 @@ export default function CanvasOverlay({
     }
   }, [editingElement, overlayFontFamily, textCaretPoint, textDraft]);
 
+  // CanvasOverlay 阻止画布默认 pointer 行为时，浏览器不会替 textarea 自然触发失焦。
+  // 在文档捕获阶段主动提交，保证点击画布、属性面板或工具栏都能结束编辑。
+  useEffect(() => {
+    if (!editingTextId) return;
+    const handleDocumentPointerDown = (event: Event) => {
+      const textarea = textAreaRef.current;
+      const target = event.target;
+      if (!textarea || !(target instanceof Node)) return;
+      const editor = textarea.closest('[data-text-editor]');
+      if (editor?.contains(target)) return;
+      textarea.blur();
+    };
+    document.addEventListener('pointerdown', handleDocumentPointerDown, true);
+    document.addEventListener('mousedown', handleDocumentPointerDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handleDocumentPointerDown, true);
+      document.removeEventListener('mousedown', handleDocumentPointerDown, true);
+    };
+  }, [editingTextId]);
+
   const pointerToWorld = useCallback((clientX: number, clientY: number) => {
     const host = layaHostRef.current;
     if (!host) return null;
@@ -1418,7 +1438,7 @@ export default function CanvasOverlay({
         const liveLayout = layoutText(textDraft, editingElement.width, editingElement.height, props, overlayFontFamily);
         const matrix = getElementWorldMatrix(editingElement, elements);
         return (
-          <div data-canvas-interactive style={{
+          <div data-canvas-interactive data-text-editor style={{
             position: 'absolute',
             left: matrix.tx * zoom + panX,
             top: matrix.ty * zoom + panY,
@@ -1429,6 +1449,7 @@ export default function CanvasOverlay({
             zIndex: 50,
             opacity: editingElement.opacity,
             background: 'transparent',
+            backgroundColor: 'transparent',
             outline: '2px solid #1677ff',
             boxShadow: '0 0 0 1px #fff, 0 2px 7px rgba(0, 0, 0, 0.9)',
             boxSizing: 'border-box',
@@ -1447,6 +1468,7 @@ export default function CanvasOverlay({
               }}
               onBlur={finishTextEditing}
               style={{
+                display: 'block',
                 width: '100%',
                 height: '100%',
                 margin: 0,
@@ -1454,6 +1476,10 @@ export default function CanvasOverlay({
                 border: 'none',
                 outline: 'none',
                 background: 'transparent',
+                backgroundColor: 'transparent',
+                backgroundImage: 'none',
+                appearance: 'none',
+                WebkitAppearance: 'none',
                 resize: 'none',
                 overflow: normalizeTextSizingMode(props.textSizingMode) === 'fixed' ? 'auto' : 'hidden',
                 fontFamily: `"${overlayFontFamily}"`,
