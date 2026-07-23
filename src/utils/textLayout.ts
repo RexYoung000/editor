@@ -23,14 +23,13 @@ function fallbackWidth(text: string, fontSize: number): number {
   return width;
 }
 
-function measureWidth(text: string, props: RenderTextProps, fontFamily: string): number {
-  if (!text) return 0;
-  if (typeof document === 'undefined') return fallbackWidth(text, props.fontSize ?? 20);
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return fallbackWidth(text, props.fontSize ?? 20);
+function createTextMeasurer(props: RenderTextProps, fontFamily: string): (text: string) => number {
+  const fontSize = props.fontSize ?? 20;
+  if (typeof document === 'undefined') return (text) => fallbackWidth(text, fontSize);
+  const ctx = document.createElement('canvas').getContext('2d');
+  if (!ctx) return (text) => fallbackWidth(text, fontSize);
   ctx.font = fontSpec(props, fontFamily);
-  return ctx.measureText(text).width;
+  return (text) => text ? ctx.measureText(text).width : 0;
 }
 
 export function normalizeTextSizingMode(value: unknown): TextSizingMode {
@@ -50,6 +49,7 @@ export function layoutText(
   const mode = normalizeTextSizingMode(props.textSizingMode);
   const availableWidth = Math.max(1, width || 1);
   const lines: string[] = [];
+  const measureWidth = createTextMeasurer(props, fontFamily);
 
   for (const rawLine of text.split('\n')) {
     if (!wordWrap || rawLine.length === 0) {
@@ -59,7 +59,7 @@ export function layoutText(
     let current = '';
     for (const char of rawLine) {
       const next = current + char;
-      if (current && measureWidth(next, props, fontFamily) > availableWidth) {
+      if (current && measureWidth(next) > availableWidth) {
         lines.push(current);
         current = char;
       } else current = next;
@@ -68,7 +68,7 @@ export function layoutText(
   }
   if (lines.length === 0) lines.push('');
 
-  const contentWidth = Math.max(0, ...lines.map((line) => measureWidth(line, props, fontFamily)));
+  const contentWidth = Math.max(0, ...lines.map(measureWidth));
   const autoWidth = Math.max(40, Math.ceil(contentWidth + 2));
   const autoHeight = Math.max(lineHeight, Math.ceil(lines.length * lineHeight));
   const nextWidth = mode === 'auto' ? autoWidth : Math.max(1, Math.ceil(width || autoWidth));
@@ -86,13 +86,14 @@ export function caretOffsetAtPoint(
   fontFamily = 'sans-serif',
 ): number {
   const layout = layoutText(text, width, 0, props, fontFamily);
+  const measureWidth = createTextMeasurer(props, fontFamily);
   const lineIndex = Math.max(0, Math.min(layout.lines.length - 1, Math.floor(Math.max(0, localY) / layout.lineHeight)));
   const line = layout.lines[lineIndex] ?? '';
   let offset = 0;
   let best = Number.POSITIVE_INFINITY;
   for (let i = 0; i <= line.length; i++) {
     const before = line.slice(0, i);
-    const distance = Math.abs(measureWidth(before, props, fontFamily) - Math.max(0, localX));
+    const distance = Math.abs(measureWidth(before) - Math.max(0, localX));
     if (distance < best) { best = distance; offset = i; }
   }
   return layout.lines.slice(0, lineIndex).reduce((sum, item) => sum + item.length + 1, 0) + offset;
