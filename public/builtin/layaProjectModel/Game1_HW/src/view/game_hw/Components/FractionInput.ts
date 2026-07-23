@@ -104,6 +104,7 @@ export default class FractionInput extends KlInputImage {
         this._isSelected = v;
     }
     private _lastOutPut: string;
+    private isUpdatingValue = false;
     public get lastOutPut(): string {
         return this._lastOutPut;
     }
@@ -154,6 +155,7 @@ export default class FractionInput extends KlInputImage {
     private onPrepared() {
         this.frameOnce(1, this, function (): void {
             KlKeyboardEvent.instance.on(KlKeyboardEvent.INPUT, this, this.onInput);
+            KlKeyboardEvent.instance.on(KlKeyboardEvent.ACTIVE, this, this.onActiveInput);
         })
     }
 
@@ -193,6 +195,40 @@ export default class FractionInput extends KlInputImage {
         }
         visit(view);
     }
+    private onActiveInput(evt: any) {
+        let input = evt && evt.target;
+        this.setFractionKeysDisabled(!!(input && input["isFractionLeafInput"]));
+    }
+    private setFractionKeysDisabled(disabled: boolean) {
+        this.eachAllKeyBorad((keyBoard) => {
+            let visit = (node: any) => {
+                if (!node || node.destroyed) return;
+                if (node instanceof KlKey && (node.output == "<_>" || node.output == "[<_>]")) {
+                    if (disabled) {
+                        if (!node.hasOwnProperty("__fractionOriginalDisabled")) {
+                            node["__fractionOriginalDisabled"] = !!node.disabled;
+                            node["__fractionOriginalGray"] = !!node.gray;
+                            node["__fractionOriginalMouseEnabled"] = node.mouseEnabled !== false;
+                        }
+                        node.disabled = true;
+                        node.gray = true;
+                        node.mouseEnabled = false;
+                    } else if (node.hasOwnProperty("__fractionOriginalDisabled")) {
+                        node.disabled = node["__fractionOriginalDisabled"];
+                        node.gray = node["__fractionOriginalGray"];
+                        node.mouseEnabled = node["__fractionOriginalMouseEnabled"];
+                        delete node["__fractionOriginalDisabled"];
+                        delete node["__fractionOriginalGray"];
+                        delete node["__fractionOriginalMouseEnabled"];
+                    }
+                }
+                for (let i = 0; i < (node.numChildren || 0); i++) {
+                    visit(node.getChildAt(i));
+                }
+            }
+            visit(keyBoard);
+        })
+    }
     get parentsIsHide() {
         let p = this.parent as Laya.Box;
         while (p) {
@@ -231,15 +267,14 @@ export default class FractionInput extends KlInputImage {
             return;
         }
         if (key.output == "del") {
-            let last = this.fontClipValue.charAt(this.fontClipValue.length - 1);
-            if (last == ">") {
-                this.fontClipValue = this.fontClipValue.replace(/<\d*_\d*>$/, "");
-            } else if (last == "]") {
-                let arr = this.fontClipValue.match(/[<.+?>]/g);
-                this.fontClipValue = this.fontClipValue.replace(arr[arr.length - 1], "");
-            } else {
-                this.fontClipValue = this.fontClipValue.substr(0, this.fontClipValue.length - 1);
+            let values = this.analysisFormula(this.fontClipValue);
+            let last = values[values.length - 1] || "";
+            if (last.charAt(0) == "<" || last.charAt(0) == "[") {
+                values.pop();
+            } else if (last) {
+                values[values.length - 1] = last.substr(0, last.length - 1);
             }
+            this.fontClipValue = values.join("");
         } else if (key.output == undefined) {
             this.fontClipValue = "";
             this.lastOutPut = null;
@@ -265,30 +300,32 @@ export default class FractionInput extends KlInputImage {
     }
     public analysisFormula(_str: string): string[] {
         let lst = [];
-        let index = 0;
-        let isParentheses = false;
-        let temp1 = [];
+        let temp = "";
+        let opener = "";
         for (let i = 0; i < _str.length; i++) {
             const str = _str[i];
-            if (str == "<") {
-                temp1.length && lst.push(temp1.join(""));
-                temp1 = [];
-                temp1.push(str);
-            } else if (str == ">") {
-                temp1.push(str);
-                temp1.length && lst.push(temp1.join(""));
-                temp1 = [];
+            if (!opener && (str == "<" || str == "[")) {
+                if (temp) lst.push(temp);
+                temp = str;
+                opener = str;
+            } else if (opener && ((opener == "<" && str == ">") || (opener == "[" && str == "]"))) {
+                temp += str;
+                lst.push(temp);
+                temp = "";
+                opener = "";
             } else {
-                temp1.push(str);
+                temp += str;
             }
         }
-        temp1.length && lst.push(temp1.join(""));
-        console.log(_str, lst);
+        if (temp) lst.push(temp);
         return lst;
     }
 
 
     private updateValue() {
+        if (this.isUpdatingValue) return;
+        this.isUpdatingValue = true;
+        try {
         this.removeAllInput();
         if (this.content) this.content.width = 0;
         if (this.fontClipValue) {
@@ -347,6 +384,9 @@ export default class FractionInput extends KlInputImage {
             this.content.width = x;
         }
         this.updateContentScale();
+        } finally {
+            this.isUpdatingValue = false;
+        }
     }
     private nFontClipCount = 0;
     public creatKlFontClip() {
@@ -375,6 +415,7 @@ export default class FractionInput extends KlInputImage {
         input1.fontClipSkin = this.fontClipSkin;
         input1["sheet"] = this.sheet;
         // 分子和分母是叶子输入格，不允许在其中再次插入分数结构。
+        input1["isFractionLeafInput"] = true;
         input1["inputValidator"] = (value: string) => value !== "<_>" && value !== "[<_>]";
 
         input1.place = this.fractionDigits;
@@ -495,27 +536,44 @@ export default class FractionInput extends KlInputImage {
         return box;
     }
     private onInput1Child(count: number, input1: KlInputImage, input2: KlInputImage) {
+        if (this.isUpdatingValue) return;
         let values = this.analysisFormula(this.fontClipValue);
-        if (!input1.fontClipValue && !input2.fontClipValue) {
+        let numerator = this.normalizeChildValue(input1.fontClipValue);
+        let denominator = this.normalizeChildValue(input2.fontClipValue);
+        if (!numerator && !denominator) {
             values.splice(count, 1);
             this.fontClipValue = values.join("");
             this.focusParentInput();
             this.event(KlKeyboardEvent.INPUT_LATER, [this]);
             return;
         }
-        let str = values[count] = `<${input1.fontClipValue}_${input2.fontClipValue}>`;
+        let str = values[count] = `<${numerator}_${denominator}>`;
         let v = values.join("");
         this.sync("fontClipValue", this.fontClipValue, v, undefined);
         this._fontClipValue = v;
         this.event(KlKeyboardEvent.INPUT_LATER, [this]);
     }
     private onInput1Child2(count: number, input0: KlInputImage, input1: KlInputImage, input2: KlInputImage) {
+        if (this.isUpdatingValue) return;
         let values = this.analysisFormula(this.fontClipValue);
-        let str = values[count] = `[${input0.fontClipValue}<${input1.fontClipValue}_${input2.fontClipValue}>]`;
+        let integer = this.normalizeChildValue(input0.fontClipValue);
+        let numerator = this.normalizeChildValue(input1.fontClipValue);
+        let denominator = this.normalizeChildValue(input2.fontClipValue);
+        if (!integer && !numerator && !denominator) {
+            values.splice(count, 1);
+            this.fontClipValue = values.join("");
+            this.focusParentInput();
+            this.event(KlKeyboardEvent.INPUT_LATER, [this]);
+            return;
+        }
+        let str = values[count] = `[${integer}<${numerator}_${denominator}>]`;
         let v = values.join("");
         this.sync("fontClipValue", this.fontClipValue, v, undefined);
         this._fontClipValue = v;
         this.event(KlKeyboardEvent.INPUT_LATER, [this]);
+    }
+    private normalizeChildValue(value: string): string {
+        return value && value.trim() ? value.trim() : "";
     }
     private inputs: KlBox[] = [];
     private inputs2: KlBox[] = [];
