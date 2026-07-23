@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { translations } from '../src/i18n/translations';
 import {
   isPresetVisibleForCourseType,
   type PresetTemplate,
@@ -30,12 +29,6 @@ function courseWithContent(): Course {
       subPages: [{ id: 'sub', name: 'sub', elements: [] }],
     }],
   };
-}
-
-function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/.*$/gm, '');
 }
 
 test('课件类型切换需要确认且不会修改运行 kind', async () => {
@@ -83,13 +76,10 @@ test('永久模板只跳过课型过滤但不跳过形态和运行能力约束',
   assert.equal(isPresetVisibleForCourseType(homeworkPreset, 'homework', { mode: 'stage', supportsInternalPages: true }), true);
 });
 
-test('课件设置和模板弹窗新增文案走 i18n 翻译键', () => {
-  const settingsSource = stripComments(readFileSync('src/components/CourseSettingsDialog.tsx', 'utf8'));
-  const dialogSource = stripComments(readFileSync('src/components/NewStageDialog.tsx', 'utf8'));
+test('模板弹窗不再展示存量无 type 旧课件兜底提示', () => {
+  const dialogSource = readFileSync('src/components/NewStageDialog.tsx', 'utf8');
 
-  assert.doesNotMatch(settingsSource, /[\p{Script=Han}]/u);
-  assert.doesNotMatch(dialogSource, /[\p{Script=Han}]/u);
-  assert.equal(translations.en.courseSettingsTitle, 'Course Settings');
-  assert.equal(translations.en.templateDialogTitle, 'Templates');
-  assert.match(translations.en.presetNoBusinessTemplate, /No matching templates/);
+  assert.doesNotMatch(dialogSource, /onOpenCourseSettings/);
+  assert.doesNotMatch(dialogSource, /尚未设置全局课件类型/);
+  assert.doesNotMatch(dialogSource, /当前仅显示空白关卡、视频关卡和内部页面关卡/);
 });

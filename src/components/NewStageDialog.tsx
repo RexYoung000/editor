@@ -4,18 +4,20 @@ import { useI18n } from '../i18n/context';
 import type { SubPage } from '../types';
 import type { CustomTemplate } from '../utils/customTemplateFs';
 import type { PresetTemplate } from '../presets';
-import {
-  isPermanentPreset,
-  isPresetEligibleForDialog,
-  isPresetVisibleForCourseType,
-  templateCategoryForCourseType,
-  TEMPLATE_CATEGORY_LABEL_KEYS,
-} from '../presets';
+import { templateCategoryForCourseType } from '../presets';
+import type { TemplateCourseCategory } from '../presets/types';
 import type { CourseType } from '../presets/types';
 import { useEditorStore } from '../store/editorStore';
 
 type Mode = 'stage' | 'subPage';
 type Tab = 'preset' | 'custom' | 'copyable';
+
+const TEMPLATE_CATEGORY_LABELS: Record<TemplateCourseCategory, string> = {
+  classroom: '课堂授课模板',
+  homework: '线上作业模板',
+  sEvaluation: '专题测评模板',
+  review: '复习课模板',
+};
 
 type ImportOutcome =
   | { kind: 'cancelled' }
@@ -103,15 +105,25 @@ export default function NewStageDialog({
   ];
   const copyableSubPages = allSubPages.filter((subPage) => supportsInternalPages || subPage.editorModel !== 'internal-pages');
   const presetCategory = templateCategoryForCourseType(courseTypeAtOpen);
-  const presetDialogOptions = useMemo(() => ({ mode, supportsInternalPages }), [mode, supportsInternalPages]);
+  const isPermanentPreset = (preset: PresetTemplate) => Boolean(preset.alwaysVisible);
+  /**
+   * 已废弃保留：评审修复版曾拆成 isPresetEligibleForDialog / isPresetVisibleForCourseType，
+   * 先校验 noSubPages、supportsInternalPages，再做 type 过滤，并将文案迁入 i18n。
+   * 当前业务要求取消内部页面关卡永久展示，因此永久展示只由 alwaysVisible 显式控制。
+   */
   const eligiblePresetTemplates = useMemo(
-    () => (presetTemplates ?? []).filter((preset) => isPresetEligibleForDialog(preset, presetDialogOptions)),
-    [presetDialogOptions, presetTemplates],
+    () => (presetTemplates ?? []).filter((p) => (
+      isPermanentPreset(p) || mode === 'stage' || !p.noSubPages
+    ) && (
+      isPermanentPreset(p) || supportsInternalPages || p.editorModel !== 'internal-pages'
+    )),
+    [mode, presetTemplates, supportsInternalPages],
   );
-  const visiblePresetTemplates = useMemo(
-    () => (presetTemplates ?? []).filter((preset) => isPresetVisibleForCourseType(preset, courseTypeAtOpen, presetDialogOptions)),
-    [courseTypeAtOpen, presetDialogOptions, presetTemplates],
-  );
+  const visiblePresetTemplates = useMemo(() => eligiblePresetTemplates.filter((preset) => {
+    if (isPermanentPreset(preset)) return true;
+    if (!presetCategory) return false;
+    return preset.category === presetCategory;
+  }), [eligiblePresetTemplates, presetCategory]);
   const hasMatchingBusinessTemplate = Boolean(
     presetCategory && eligiblePresetTemplates.some((preset) => !isPermanentPreset(preset) && preset.category === presetCategory),
   );
@@ -149,9 +161,9 @@ export default function NewStageDialog({
       setRenamingId(null);
       setRenameError(null);
     } else if (r.error === 'NAME_TAKEN') {
-      setRenameError(t('templateNameTaken'));
+      setRenameError('当前名字已被占用，请重新输入');
     } else {
-      setRenameError(t('templateRenameFailed').replace('{error}', r.error));
+      setRenameError(`重命名失败: ${r.error}`);
     }
   };
 
@@ -175,7 +187,7 @@ export default function NewStageDialog({
       <div className="bg-slate-800 rounded-lg shadow-xl w-[840px]" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="relative flex items-center justify-center px-8 py-5 border-b border-slate-700">
-          <span className="text-2xl font-medium text-white">{t('templateDialogTitle')}</span>
+          <span className="text-2xl font-medium text-white">模板</span>
           <button onClick={onCancel} className="absolute right-8 text-slate-400 hover:text-white"><X size={28} /></button>
         </div>
 
@@ -199,20 +211,20 @@ export default function NewStageDialog({
         {/* 自定义模板 tab 顶部的路径条 */}
         {activeTab === 'custom' && customTemplateDir && (
           <div className="flex items-center gap-3 px-8 py-2 border-b border-slate-700 bg-slate-900/40 text-xs">
-            <span className="text-slate-400">{t('templateDirLabel')}</span>
+            <span className="text-slate-400">模板目录：</span>
             <span className="flex-1 truncate text-slate-300" title={customTemplateDir}>{customTemplateDir}</span>
             <button
               onClick={() => setConfirmChangeDir(true)}
               className="px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-slate-300 flex items-center gap-1"
-              title={t('changeTemplateDir')}
+              title="更换目录"
             >
-              <FolderOpen size={12} /> {t('change')}
+              <FolderOpen size={12} /> 更换
             </button>
             <button
               onClick={handleImportClick}
               disabled={importing}
               className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed rounded text-slate-300 flex items-center gap-1"
-              title={t('importTemplateFromOtherDir')}
+              title="从其他模板目录导入"
             >
               <Upload size={12} /> {t('importTemplate')}
             </button>
@@ -225,10 +237,7 @@ export default function NewStageDialog({
             <>
               {courseTypeAtOpen && !hasMatchingBusinessTemplate && (
                 <div className="mb-4 rounded border border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-400">
-                  {t('presetNoBusinessTemplate').replace(
-                    '{category}',
-                    t(TEMPLATE_CATEGORY_LABEL_KEYS[presetCategory!]),
-                  )}
+                  当前{TEMPLATE_CATEGORY_LABELS[presetCategory!]}暂无匹配模板，仅显示空白关卡、视频关卡。
                 </div>
               )}
               <div className="grid grid-cols-4 gap-4">
@@ -263,12 +272,12 @@ export default function NewStageDialog({
             <>
               {!customTemplateDir ? (
                 <div className="flex flex-col items-center justify-center h-[280px] gap-4 text-center">
-                  <div className="text-base text-slate-400">{t('customTemplateDirMissing')}</div>
+                  <div className="text-base text-slate-400">尚未设置自定义模板的本地保存目录</div>
                   <button
                     onClick={onPickTemplateDir}
                     className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded text-white flex items-center gap-2"
                   >
-                    <FolderOpen size={16} /> {t('selectDir')}
+                    <FolderOpen size={16} /> 选择目录
                   </button>
                 </div>
               ) : customTemplates.filter((template) => supportsInternalPages || template.model !== 'internal-pages-v1').length === 0 ? (
@@ -299,7 +308,7 @@ export default function NewStageDialog({
                         <div
                           className={`px-2 py-1.5 text-xs ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}
                           onDoubleClick={(e) => { e.stopPropagation(); startRename(tmpl); }}
-                          title={t('doubleClickRename')}
+                          title="双击重命名"
                         >
                           {isRenaming ? (
                             <input
@@ -318,13 +327,8 @@ export default function NewStageDialog({
                             <div className="truncate font-medium">{tmpl.name}</div>
                           )}
                           <div className="text-[10px] text-slate-400">
-                            {tmpl.model === 'internal-pages-v1'
-                              ? `${t('templatePageCount').replace('{n}', String(tmpl.pageCount ?? 1))} · `
-                              : ''}
-                            {t('templateElementCount').replace(
-                              '{n}',
-                              String(tmpl.subPage ? [tmpl.subPage.elements, ...(tmpl.subPage.internalPages?.map((page) => page.elements) ?? [])].flat().length : tmpl.elements.length),
-                            )}
+                            {tmpl.model === 'internal-pages-v1' ? `${tmpl.pageCount ?? 1} 页 · ` : ''}
+                            {tmpl.subPage ? [tmpl.subPage.elements, ...(tmpl.subPage.internalPages?.map((page) => page.elements) ?? [])].flat().length : tmpl.elements.length} 元素
                           </div>
                         </div>
                         {!isRenaming && (
@@ -339,7 +343,7 @@ export default function NewStageDialog({
                             <button
                               onClick={(e) => { e.stopPropagation(); startRename(tmpl); }}
                               className="absolute top-1.5 right-9 p-1 bg-slate-700/80 hover:bg-slate-600 rounded text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                              title={t('rename')}
+                              title="重命名"
                             >
                               <Pencil size={14} />
                             </button>
@@ -394,7 +398,7 @@ export default function NewStageDialog({
                         </div>
                         <div className={`px-2 py-1.5 text-xs ${isSelected ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
                           <div className="truncate font-medium">{si + 1}-{sj + 1} {sp.name}</div>
-                          <div className="text-[10px] text-slate-400">{t('templateElementCount').replace('{n}', String(sp.elements.length))}</div>
+                          <div className="text-[10px] text-slate-400">{sp.elements.length} 元素</div>
                         </div>
                       </div>
                     );
@@ -430,9 +434,7 @@ export default function NewStageDialog({
           <div className="bg-slate-800 rounded-lg shadow-xl w-[460px] p-6" onClick={(e) => e.stopPropagation()}>
             <div className="text-base font-medium text-white mb-3">{t('deleteTemplate')}</div>
             <div className="text-sm text-slate-300 leading-relaxed mb-5">
-              {t('deleteTemplateConfirmPrefix')}
-              <span className="text-amber-400">"{confirmDeleteTemplate.name}"</span>
-              {t('deleteTemplateConfirmSuffix')}
+              确定删除模板 <span className="text-amber-400">"{confirmDeleteTemplate.name}"</span> 吗？删除后不可恢复。
             </div>
             <div className="flex gap-3">
               <button
@@ -464,16 +466,17 @@ export default function NewStageDialog({
           onClick={() => setConfirmChangeDir(false)}
         >
           <div className="bg-slate-800 rounded-lg shadow-xl w-[460px] p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="text-base font-medium text-white mb-3">{t('changeTemplateDir')}</div>
+            <div className="text-base font-medium text-white mb-3">更换模板目录</div>
             <div className="text-sm text-slate-300 leading-relaxed mb-5">
-              {t('changeTemplateDirConfirmBody')}
+              更换后将切到新目录读取模板，原目录的模板文件不会被删除，但<span className="text-amber-400">在编辑器中将不可见</span>。
+              建议保留原目录用作备份。
             </div>
             <div className="flex gap-3">
               <button
                 onClick={() => setConfirmChangeDir(false)}
                 className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded text-slate-300"
               >
-                {t('cancel')}
+                取消
               </button>
               <button
                 onClick={async () => {
@@ -482,7 +485,7 @@ export default function NewStageDialog({
                 }}
                 className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 rounded text-white"
               >
-                {t('continueSelectNewDir')}
+                继续选择新目录
               </button>
             </div>
           </div>
