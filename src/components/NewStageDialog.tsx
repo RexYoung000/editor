@@ -53,7 +53,6 @@ interface Props {
   onImportTemplates: () => Promise<ImportOutcome>;
   /** 置顶模板（移到列表第一位） */
   onPinTemplate: (templateId: string) => Promise<void>;
-  onOpenCourseSettings?: () => void;
   onCancel: () => void;
 }
 
@@ -76,7 +75,6 @@ export default function NewStageDialog({
   onRenameTemplate,
   onImportTemplates,
   onPinTemplate,
-  onOpenCourseSettings,
   onCancel,
 }: Props) {
   const { t } = useI18n();
@@ -225,20 +223,6 @@ export default function NewStageDialog({
         <div className="px-8 py-6 min-h-[360px] max-h-[560px] overflow-y-auto">
           {activeTab === 'preset' && (
             <>
-              {!courseTypeAtOpen && (
-                <div className="mb-4 flex items-center justify-between gap-3 rounded border border-slate-700 bg-slate-900/50 px-4 py-3">
-                  <div className="text-sm text-slate-400">{t('legacyCourseTypeMissing')}</div>
-                  {onOpenCourseSettings && (
-                    <button
-                      type="button"
-                      onClick={onOpenCourseSettings}
-                      className="shrink-0 rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-500"
-                    >
-                      {t('courseSettingsTitle')}
-                    </button>
-                  )}
-                </div>
-              )}
               {courseTypeAtOpen && !hasMatchingBusinessTemplate && (
                 <div className="mb-4 rounded border border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-400">
                   {t('presetNoBusinessTemplate').replace(

@@ -934,10 +934,6 @@ export default function PageList() {
           onRenameTemplate={renameCustomTemplate}
           onImportTemplates={handleImportTemplates}
           onPinTemplate={pinCustomTemplate}
-          onOpenCourseSettings={() => {
-            setNewStageDialog(null);
-            setShowCourseSettings(true);
-          }}
           onCancel={() => setNewStageDialog(null)}
         />
       )}

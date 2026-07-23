@@ -91,5 +91,5 @@ test('课件设置和模板弹窗新增文案走 i18n 翻译键', () => {
   assert.doesNotMatch(dialogSource, /[\p{Script=Han}]/u);
   assert.equal(translations.en.courseSettingsTitle, 'Course Settings');
   assert.equal(translations.en.templateDialogTitle, 'Templates');
-  assert.match(translations.en.legacyCourseTypeMissing, /global course type/);
+  assert.match(translations.en.presetNoBusinessTemplate, /No matching templates/);
 });
