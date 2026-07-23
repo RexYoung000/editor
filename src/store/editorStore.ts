@@ -52,6 +52,10 @@ export type { Element, SubPage, Stage, Course };
 // Backwards alias: many call sites still import `Page`
 export type { SubPage as Page } from '../types';
 
+export interface SetCourseTypeOptions {
+  confirmed?: boolean;
+}
+
 export interface ElementPasteResult {
   allIds: string[];
   selectedIds: string[];
@@ -94,7 +98,7 @@ interface EditorState {
 
   // Actions
   setCurrentCourse: (course: Course) => void;
-  setCourseType: (type: CourseType) => void;
+  setCourseType: (type: CourseType, options?: SetCourseTypeOptions) => boolean;
   setCurrentSubPage: (stageId: string, subPageId: string) => void;
   enterFocusWorkspace: (stageId: string, subPageId: string) => void;
   exitFocusWorkspace: () => void;
@@ -322,6 +326,11 @@ function renumberPreviewAll(course: Course): void {
   });
 }
 
+export function courseHasAuthoredContent(course: Course): boolean {
+  const stages = [...course.stages, ...(course.previewStages ?? [])];
+  return stages.some((stage) => stage.subPages.length > 0);
+}
+
 function subPageFromPreset(preset: (typeof PRESET_TEMPLATES)[number], name: string): SubPage {
   if (preset.editorModel === 'internal-pages') {
     const subPage = createInternalPagesSubPage(genId('subpage'), name);
@@ -461,14 +470,22 @@ export const useEditorStore = create<EditorState>()(
         rebuildSubPageCounters(allSubPages);
       }),
 
-    setCourseType: (type) =>
+    setCourseType: (type, options) => {
+      const course = get().currentCourse;
+      if (!course) return false;
+      if (course.type === type) return true;
+      if (courseHasAuthoredContent(course) && !options?.confirmed) return false;
+
       set((state) => {
         if (!state.currentCourse) return;
+        // type only drives preset template categorization; kind remains the immutable runtime/export mode.
         state.currentCourse.type = type;
-        // Keep the legacy runtime kind aligned with the new global template type.
-        state.currentCourse.kind = type;
+        // Deprecated risky behavior kept as a warning: syncing type into kind silently changes export/runtime mode.
+        // state.currentCourse.kind = type;
         get().saveHistory();
-      }),
+      });
+      return true;
+    },
 
     setCurrentSubPage: (stageId, subPageId) =>
       set((state) => {

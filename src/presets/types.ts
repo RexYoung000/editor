@@ -6,11 +6,11 @@ export type TemplateCourseCategory = 'classroom' | 'homework' | 'sEvaluation' | 
 
 export interface PresetTemplate {
   id: string;
-  /** i18n translation key for the label */
+  /** i18n translation key for the label. */
   labelKey: string;
-  /** Thumbnail image URL (from builtinAssets or direct path) */
+  /** Thumbnail image URL from builtinAssets or a direct path. */
   thumbnail: string;
-  /** Element list for this preset (cloned on instantiation) */
+  /** Element list for this preset, cloned on instantiation. */
   elements: Element[];
   /** noSubPages = this preset creates a whole stage and cannot be inserted as a sub-page. */
   noSubPages?: boolean;
@@ -22,7 +22,7 @@ export interface PresetTemplate {
   editorModel?: 'internal-pages';
   /** Business templates are hidden unless this category matches the course type. */
   category?: TemplateCourseCategory;
-  /** Permanent presets ignore course type filtering and stay visible for legacy courses. */
+  /** Permanent presets ignore course type filtering, but still obey dialog/runtime capability checks. */
   alwaysVisible?: boolean;
 }
 
@@ -34,20 +34,45 @@ export const COURSE_TYPE_TO_TEMPLATE_CATEGORY: Record<CourseType, TemplateCourse
   review: 'review',
 };
 
-export const COURSE_TYPE_LABELS: Record<CourseType, string> = {
-  normal: '预习 / 正课',
-  homework: '作业',
-  sEvaluation: '专题测评',
-  review: '复习课',
+export const COURSE_TYPE_LABEL_KEYS: Record<CourseType, string> = {
+  normal: 'courseTypeNormal',
+  homework: 'courseTypeHomework',
+  sEvaluation: 'courseTypeSEvaluation',
+  review: 'courseTypeReview',
 };
 
-export const TEMPLATE_CATEGORY_LABELS: Record<TemplateCourseCategory, string> = {
-  classroom: '课堂授课模板',
-  homework: '线上作业模板',
-  sEvaluation: '专题测评模板',
-  review: '复习课模板',
+export const TEMPLATE_CATEGORY_LABEL_KEYS: Record<TemplateCourseCategory, string> = {
+  classroom: 'templateCategoryClassroom',
+  homework: 'templateCategoryHomework',
+  sEvaluation: 'templateCategorySEvaluation',
+  review: 'templateCategoryReview',
 };
 
 export function templateCategoryForCourseType(type?: CourseType): TemplateCourseCategory | null {
   return type ? COURSE_TYPE_TO_TEMPLATE_CATEGORY[type] : null;
+}
+
+export function isPermanentPreset(preset: PresetTemplate): boolean {
+  return Boolean(preset.alwaysVisible || preset.editorModel === 'internal-pages');
+}
+
+export function isPresetEligibleForDialog(
+  preset: PresetTemplate,
+  options: { mode: 'stage' | 'subPage'; supportsInternalPages: boolean },
+): boolean {
+  // Structural and runtime constraints always win; permanent presets only bypass course type filtering.
+  if (options.mode === 'subPage' && preset.noSubPages) return false;
+  if (!options.supportsInternalPages && preset.editorModel === 'internal-pages') return false;
+  return true;
+}
+
+export function isPresetVisibleForCourseType(
+  preset: PresetTemplate,
+  courseType: CourseType | undefined,
+  options: { mode: 'stage' | 'subPage'; supportsInternalPages: boolean },
+): boolean {
+  if (!isPresetEligibleForDialog(preset, options)) return false;
+  if (isPermanentPreset(preset)) return true;
+  const category = templateCategoryForCourseType(courseType);
+  return Boolean(category && preset.category === category);
 }

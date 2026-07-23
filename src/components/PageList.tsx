@@ -1,4 +1,4 @@
-import { useEditorStore } from '../store/editorStore';
+import { courseHasAuthoredContent, useEditorStore } from '../store/editorStore';
 import { Plus, Trash2, Copy, ChevronDown, ChevronRight, ArrowUp, ArrowDown, BookmarkPlus, MoreHorizontal, PanelTopOpen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/context';
@@ -944,10 +944,15 @@ export default function PageList() {
       {showCourseSettings && (
         <CourseSettingsDialog
           initialType={currentCourse.type}
-          onConfirm={(type) => {
-            setCourseType(type);
+          requiresConfirmation={courseHasAuthoredContent(currentCourse)}
+          onConfirm={(type, confirmed) => {
+            const updated = setCourseType(type, { confirmed });
+            if (!updated) {
+              showToast(t('courseTypeChangeRejected'), 'error');
+              return;
+            }
             setShowCourseSettings(false);
-            showToast('课件类型已更新，请重新打开模板弹窗', 'success');
+            showToast(t('courseTypeUpdated'), 'success');
           }}
           onCancel={() => setShowCourseSettings(false)}
         />

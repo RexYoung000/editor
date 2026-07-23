@@ -1,5 +1,5 @@
 import { Undo, Redo, Languages, Download, X, Settings } from 'lucide-react';
-import { useEditorStore } from '../store/editorStore';
+import { courseHasAuthoredContent, useEditorStore } from '../store/editorStore';
 import { exportProject } from '../utils/exportProject';
 import { compileBuild } from '../utils/compileBuild';
 import { showToast } from '../utils/toast';
@@ -262,12 +262,12 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
             className="text-sm text-slate-400 cursor-pointer hover:text-blue-400 transition-colors"
             onClick={handleOpenCourseFolder}
           >{currentCourse.id}</div>
-          <button
-            type="button"
-            onClick={() => setShowCourseSettings(true)}
-            className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded"
-            title="课件设置"
-          >
+            <button
+              type="button"
+              onClick={() => setShowCourseSettings(true)}
+              className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded"
+              title={t('courseSettingsTitle')}
+            >
             <Settings size={15} />
           </button>
           <span className={`text-[10px] ml-1 ${isDirty ? 'text-amber-400' : 'text-emerald-400'}`}>{isDirty ? t('unsaved') : t('saved')}</span>
@@ -423,10 +423,15 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     {showCourseSettings && currentCourse && (
       <CourseSettingsDialog
         initialType={currentCourse.type}
-        onConfirm={(type) => {
-          setCourseType(type);
+        requiresConfirmation={courseHasAuthoredContent(currentCourse)}
+        onConfirm={(type, confirmed) => {
+          const updated = setCourseType(type, { confirmed });
+          if (!updated) {
+            showToast(t('courseTypeChangeRejected'), 'error');
+            return;
+          }
           setShowCourseSettings(false);
-          showToast('课件类型已更新', 'success');
+          showToast(t('courseTypeUpdated'), 'success');
         }}
         onCancel={() => setShowCourseSettings(false)}
       />
