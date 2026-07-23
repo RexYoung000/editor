@@ -6,6 +6,7 @@ import { showToast } from '../utils/toast';
 import { PRESET_TEMPLATES } from '../presets';
 import ConfirmDialog from './ConfirmDialog';
 import NewStageDialog from './NewStageDialog';
+import CourseSettingsDialog from './CourseSettingsDialog';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
 import { isInternalPagesSubPage } from '../utils/internalPages';
 import type { SubPage } from '../types';
@@ -133,6 +134,7 @@ export default function PageList() {
   const currentSubPageId = useEditorStore((state) => state.currentSubPageId);
   const pageThumbnails = useEditorStore((state) => state.pageThumbnails);
   const setCurrentSubPage = useEditorStore((state) => state.setCurrentSubPage);
+  const setCourseType = useEditorStore((state) => state.setCourseType);
   const toggleStageShrink = useEditorStore((state) => state.toggleStageShrink);
   const addStage = useEditorStore((state) => state.addStage);
   const addVideoStage = useEditorStore((state) => state.addVideoStage);
@@ -180,6 +182,7 @@ export default function PageList() {
   const [deleteStageConfirm, setDeleteStageConfirm] = useState<{ stageId: string; name: string; target: 'preview' | 'normal' } | null>(null);
   const [clearAllConfirm, setClearAllConfirm] = useState(false);
   const [newStageDialog, setNewStageDialog] = useState<'normalStage' | 'previewStage' | { mode: 'subPage'; stageId: string } | null>(null);
+  const [showCourseSettings, setShowCourseSettings] = useState(false);
   const [openSubPageActions, setOpenSubPageActions] = useState<string | null>(null);
 
   useEffect(() => {
@@ -931,7 +934,22 @@ export default function PageList() {
           onRenameTemplate={renameCustomTemplate}
           onImportTemplates={handleImportTemplates}
           onPinTemplate={pinCustomTemplate}
+          onOpenCourseSettings={() => {
+            setNewStageDialog(null);
+            setShowCourseSettings(true);
+          }}
           onCancel={() => setNewStageDialog(null)}
+        />
+      )}
+      {showCourseSettings && (
+        <CourseSettingsDialog
+          initialType={currentCourse.type}
+          onConfirm={(type) => {
+            setCourseType(type);
+            setShowCourseSettings(false);
+            showToast('课件类型已更新，请重新打开模板弹窗', 'success');
+          }}
+          onCancel={() => setShowCourseSettings(false)}
         />
       )}
     </>

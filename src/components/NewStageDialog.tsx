@@ -1,9 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { X, Trash2, FolderOpen, Pencil, Upload, Loader2, Pin } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import type { SubPage } from '../types';
 import type { CustomTemplate } from '../utils/customTemplateFs';
 import type { PresetTemplate } from '../presets';
+import { templateCategoryForCourseType, TEMPLATE_CATEGORY_LABELS } from '../presets';
+import type { CourseType } from '../presets/types';
+import { useEditorStore } from '../store/editorStore';
 
 type Mode = 'stage' | 'subPage';
 type Tab = 'preset' | 'custom' | 'copyable';
@@ -44,6 +47,7 @@ interface Props {
   onImportTemplates: () => Promise<ImportOutcome>;
   /** 置顶模板（移到列表第一位） */
   onPinTemplate: (templateId: string) => Promise<void>;
+  onOpenCourseSettings?: () => void;
   onCancel: () => void;
 }
 
@@ -66,9 +70,11 @@ export default function NewStageDialog({
   onRenameTemplate,
   onImportTemplates,
   onPinTemplate,
+  onOpenCourseSettings,
   onCancel,
 }: Props) {
   const { t } = useI18n();
+  const [courseTypeAtOpen] = useState<CourseType | undefined>(() => useEditorStore.getState().currentCourse?.type);
   const [activeTab, setActiveTab] = useState<Tab>('preset');
   const [selectedCopyId, setSelectedCopyId] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -92,6 +98,24 @@ export default function NewStageDialog({
     { key: 'copyable', label: t('copyableTemplate') },
   ];
   const copyableSubPages = allSubPages.filter((subPage) => supportsInternalPages || subPage.editorModel !== 'internal-pages');
+  const presetCategory = templateCategoryForCourseType(courseTypeAtOpen);
+  const isPermanentPreset = (preset: PresetTemplate) => preset.alwaysVisible || preset.editorModel === 'internal-pages';
+  const eligiblePresetTemplates = useMemo(
+    () => (presetTemplates ?? []).filter((p) => (
+      isPermanentPreset(p) || mode === 'stage' || !p.noSubPages
+    ) && (
+      isPermanentPreset(p) || supportsInternalPages || p.editorModel !== 'internal-pages'
+    )),
+    [mode, presetTemplates, supportsInternalPages],
+  );
+  const visiblePresetTemplates = useMemo(() => eligiblePresetTemplates.filter((preset) => {
+    if (isPermanentPreset(preset)) return true;
+    if (!presetCategory) return false;
+    return preset.category === presetCategory;
+  }), [eligiblePresetTemplates, presetCategory]);
+  const hasMatchingBusinessTemplate = Boolean(
+    presetCategory && eligiblePresetTemplates.some((preset) => !isPermanentPreset(preset) && preset.category === presetCategory),
+  );
 
   const canConfirm = activeTab === 'copyable' && selectedCopyId || activeTab === 'custom' && selectedTemplateId;
 
@@ -199,33 +223,52 @@ export default function NewStageDialog({
         {/* Content */}
         <div className="px-8 py-6 min-h-[360px] max-h-[560px] overflow-y-auto">
           {activeTab === 'preset' && (
-            <div className="grid grid-cols-4 gap-4">
-              <button
-                onClick={onConfirmBlank}
-                className="aspect-[4/3] bg-slate-700 hover:bg-slate-600 border border-transparent hover:border-blue-400 rounded-lg text-base text-white flex flex-col items-center justify-center gap-2"
-              >
-                <span className="w-12 h-12 bg-slate-600 rounded-full flex items-center justify-center text-2xl">+</span>
-                <div className="text-base font-medium">{t('blankLevel')}</div>
-                <div className="text-xs text-slate-400 px-2 text-center">{t('blankLevelDesc')}</div>
-              </button>
-              {presetTemplates
-                ?.filter((p) => (mode === 'stage' || !p.noSubPages) && (supportsInternalPages || p.editorModel !== 'internal-pages'))
-                .map((preset) => (
+            <>
+              {!courseTypeAtOpen && (
+                <div className="mb-4 flex items-center justify-between gap-3 rounded border border-slate-700 bg-slate-900/50 px-4 py-3">
+                  <div className="text-sm text-slate-400">当前课件尚未设置全局课件类型。请前往课件设置补充分类后重新打开模板弹窗；当前仅显示空白关卡、视频关卡和内部页面关卡。</div>
+                  {onOpenCourseSettings && (
+                    <button
+                      type="button"
+                      onClick={onOpenCourseSettings}
+                      className="shrink-0 rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-500"
+                    >
+                      课件设置
+                    </button>
+                  )}
+                </div>
+              )}
+              {courseTypeAtOpen && !hasMatchingBusinessTemplate && (
+                <div className="mb-4 rounded border border-slate-700 bg-slate-900/40 px-4 py-3 text-sm text-slate-400">
+                  当前{TEMPLATE_CATEGORY_LABELS[presetCategory!]}暂无匹配模板，仅显示空白关卡、视频关卡和内部页面关卡。
+                </div>
+              )}
+              <div className="grid grid-cols-4 gap-4">
                 <button
-                  key={preset.id}
-                  onClick={() => onConfirmPreset(preset.id)}
-                  className="aspect-[4/3] bg-slate-700 hover:bg-slate-600 border border-transparent hover:border-blue-400 rounded-lg text-base text-white flex flex-col overflow-hidden"
+                  onClick={onConfirmBlank}
+                  className="aspect-[4/3] bg-slate-700 hover:bg-slate-600 border border-transparent hover:border-blue-400 rounded-lg text-base text-white flex flex-col items-center justify-center gap-2"
                 >
-                  <div className="flex-1 bg-slate-900 flex items-center justify-center overflow-hidden">
-                    {preset.thumbnail
-                      ? <img src={preset.thumbnail} className="w-full h-full object-cover" alt="" />
-                      : <span className="text-2xl text-slate-500 font-medium">{t(preset.labelKey)}</span>
-                    }
-                  </div>
-                  <div className="w-full text-center px-2 py-1.5 text-xs bg-slate-700 text-slate-300 font-medium" style={{ textAlign: 'center' }}>{t(preset.labelKey)}</div>
+                  <span className="w-12 h-12 bg-slate-600 rounded-full flex items-center justify-center text-2xl">+</span>
+                  <div className="text-base font-medium">{t('blankLevel')}</div>
+                  <div className="text-xs text-slate-400 px-2 text-center">{t('blankLevelDesc')}</div>
                 </button>
-              ))}
-            </div>
+                {visiblePresetTemplates.map((preset) => (
+                  <button
+                    key={preset.id}
+                    onClick={() => onConfirmPreset(preset.id)}
+                    className="aspect-[4/3] bg-slate-700 hover:bg-slate-600 border border-transparent hover:border-blue-400 rounded-lg text-base text-white flex flex-col overflow-hidden"
+                  >
+                    <div className="flex-1 bg-slate-900 flex items-center justify-center overflow-hidden">
+                      {preset.thumbnail
+                        ? <img src={preset.thumbnail} className="w-full h-full object-cover" alt="" />
+                        : <span className="text-2xl text-slate-500 font-medium">{t(preset.labelKey)}</span>
+                      }
+                    </div>
+                    <div className="w-full text-center px-2 py-1.5 text-xs bg-slate-700 text-slate-300 font-medium" style={{ textAlign: 'center' }}>{t(preset.labelKey)}</div>
+                  </button>
+                ))}
+              </div>
+            </>
           )}
 
           {activeTab === 'custom' && (

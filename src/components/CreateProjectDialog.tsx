@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import { selectDirectory, pathExists } from '../utils/electronFs';
+import type { CourseType } from '../presets/types';
 
 interface Props {
-  onConfirm: (courseId: string, dirPath: string, kind: 'normal' | 'homework' | 'sEvaluation' | 'review') => void;
+  onConfirm: (courseId: string, dirPath: string, type: CourseType) => void;
   onCancel: () => void;
 }
 
@@ -14,7 +15,7 @@ export default function CreateProjectDialog({ onConfirm, onCancel }: Props) {
   const [dirPath, setDirPath] = useState<string | null>(null);
   const [dirDisplay, setDirDisplay] = useState('');
   const [error, setError] = useState('');
-  const [kind, setKind] = useState<'normal' | 'homework' | 'sEvaluation' | 'review'>('normal');
+  const [courseType, setCourseType] = useState<CourseType | null>(null);
 
   const handleSelectDir = async () => {
     const result = await selectDirectory();
@@ -28,13 +29,14 @@ export default function CreateProjectDialog({ onConfirm, onCancel }: Props) {
     const id = courseId.trim();
     if (!id) { setError(t('courseIdRequired')); return; }
     if (!/^[a-zA-Z0-9_-]+$/.test(id)) { setError(t('courseIdInvalid')); return; }
-    if (kind === 'homework' && !id.endsWith('_hw')) { setError(t('courseIdMustEndWithHw')); return; }
-    if (kind === 'sEvaluation' && !id.includes('_sse_')) { setError(t('courseIdMustContainSse')); return; }
-    if (kind === 'review' && !id.includes('_review_')) { setError(t('courseIdMustContainReview')); return; }
+    if (!courseType) { setError(t('courseTypeRequired')); return; }
+    if (courseType === 'homework' && !id.endsWith('_hw')) { setError(t('courseIdMustEndWithHw')); return; }
+    if (courseType === 'sEvaluation' && !id.includes('_sse_')) { setError(t('courseIdMustContainSse')); return; }
+    if (courseType === 'review' && !id.includes('_review_')) { setError(t('courseIdMustContainReview')); return; }
     if (!dirPath) { setError(t('selectSavePathFirst')); return; }
     const exists = await pathExists(`${dirPath}/${id}`);
     if (exists) { setError(t('courseDirAlreadyExists')); return; }
-    onConfirm(id, dirPath, kind);
+    onConfirm(id, dirPath, courseType);
   };
 
   const inputCls = 'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded text-sm text-white focus:outline-none focus:border-blue-500';
@@ -52,26 +54,26 @@ export default function CreateProjectDialog({ onConfirm, onCancel }: Props) {
             <label className="text-xs text-slate-400 mb-1 block">{t('courseType')}</label>
             <div className="flex gap-4">
               <label className="flex items-center gap-1.5 text-sm text-white cursor-pointer">
-                <input type="radio" checked={kind === 'normal'} onChange={() => { setKind('normal'); setError(''); }} className="accent-blue-500" />
+                <input type="radio" checked={courseType === 'normal'} onChange={() => { setCourseType('normal'); setError(''); }} className="accent-blue-500" />
                 {t('courseTypeNormal')}
               </label>
               <label className="flex items-center gap-1.5 text-sm text-white cursor-pointer">
-                <input type="radio" checked={kind === 'homework'} onChange={() => { setKind('homework'); setError(''); }} className="accent-blue-500" />
+                <input type="radio" checked={courseType === 'homework'} onChange={() => { setCourseType('homework'); setError(''); }} className="accent-blue-500" />
                 {t('courseTypeHomework')}
               </label>
               <label className="flex items-center gap-1.5 text-sm text-white cursor-pointer">
-                <input type="radio" checked={kind === 'sEvaluation'} onChange={() => { setKind('sEvaluation'); setError(''); }} className="accent-blue-500" />
+                <input type="radio" checked={courseType === 'sEvaluation'} onChange={() => { setCourseType('sEvaluation'); setError(''); }} className="accent-blue-500" />
                 {t('courseTypeSEvaluation')}
               </label>
               <label className="flex items-center gap-1.5 text-sm text-white cursor-pointer">
-                <input type="radio" checked={kind === 'review'} onChange={() => { setKind('review'); setError(''); }} className="accent-blue-500" />
+                <input type="radio" checked={courseType === 'review'} onChange={() => { setCourseType('review'); setError(''); }} className="accent-blue-500" />
                 {t('courseTypeReview')}
               </label>
             </div>
           </div>
           <div>
             <label className="text-xs text-slate-400 mb-1 block">{t('courseIdLabel')}</label>
-            <input className={inputCls} value={courseId} onChange={(e) => { setCourseId(e.target.value); setError(''); }} placeholder={kind === 'homework' ? 's8_v8_01_hw' : kind === 'sEvaluation' ? 's8_sse_v8_1-4' : kind === 'review' ? 's8_review_v8_01' : 's8_v8_01'} />
+            <input className={inputCls} value={courseId} onChange={(e) => { setCourseId(e.target.value); setError(''); }} placeholder={courseType === 'homework' ? 's8_v8_01_hw' : courseType === 'sEvaluation' ? 's8_sse_v8_1-4' : courseType === 'review' ? 's8_review_v8_01' : 's8_v8_01'} />
           </div>
           <div>
             <label className="text-xs text-slate-400 mb-1 block">{t('savePath')}</label>

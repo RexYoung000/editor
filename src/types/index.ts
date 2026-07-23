@@ -1,3 +1,5 @@
+import type { CourseType } from '../presets/types';
+
 export interface Action {
   id: string;
   event: string;        // 'onClick' | 'onLoad'
@@ -121,6 +123,8 @@ export interface Stage {
 
 export interface Course {
   id: string;
+  /** Global course type for template filtering; legacy files may omit it. */
+  type?: CourseType;
   kind?: 'normal' | 'homework' | 'sEvaluation' | 'review';  // 缺省 = 'normal'，旧数据兼容
   stages: Stage[];
   previewStages?: Stage[];     // 预习关卡，独立数组（可选以兼容旧数据）

@@ -2664,6 +2664,43 @@ export function mapGameZipEntryToProjectPath(entryPath: string, viewDir: string)
   return builtinExportToProjectPath(`game/${entryPath}`, viewDir);
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+/** 兜底写入 resourceMap 中的内置资源，避免 game.zip 精准解压漏文件时 scene 指向空路径。 */
+export async function copyBuiltinResourcesFromServer(
+  resourceMap: Map<string, string>,
+  destRoot: string,
+  eApi: typeof window.electronAPI,
+  serverUrl = getApiBaseUrl(),
+): Promise<void> {
+  for (const [from, to] of resourceMap) {
+    const rawPath = String(from);
+    const asset = lookupBuiltinByExportPath(rawPath)
+      ?? (rawPath.startsWith('/builtin/') ? lookupBuiltinBySrcPath(rawPath) : undefined);
+    if (!asset?.exportPath) continue;
+
+    const response = await fetch(`${serverUrl}/builtin/${asset.src}`);
+    if (!response.ok) {
+      throw new Error(`下载内置资源失败: ${asset.src} (${response.status})`);
+    }
+    const ok = await eApi.writeBinaryFile(
+      `${destRoot}/${String(to)}`,
+      arrayBufferToBase64(await response.arrayBuffer()),
+    );
+    if (!ok) {
+      throw new Error(`写入内置资源失败: ${String(to)}`);
+    }
+  }
+}
+
 // ─── Zip 下载解压工具 ───
 
 /** 从 vite 服务器下载 zip 并通过 IPC 写入本地磁盘 */
@@ -2876,6 +2913,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
         return `game_hw/image/${destDirName}/${entryPath.slice(topDir.length + 1)}`;
       },
     );
+    await copyBuiltinResourcesFromServer(resourceMap, `${projectRoot}/laya/assets`, eApi, serverUrl);
 
     for (const [from, to] of resourceMap) {
       const src = String(from);
@@ -2964,6 +3002,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
     (entryPath) => gameZipFiles.has(entryPath),
     (entryPath) => mapGameZipEntryToProjectPath(entryPath, 'game_lt'),
   );
+  await copyBuiltinResourcesFromServer(resourceMap, `${projectRoot}/laya/assets`, eApi, serverUrl);
 
   // 复制用户上传资源（images/xxx → game_lt/image/img/xxx）和 base64 图片
   for (const [from, to] of resourceMap) {

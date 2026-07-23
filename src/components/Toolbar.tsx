@@ -1,4 +1,4 @@
-import { Undo, Redo, Languages, Download, X } from 'lucide-react';
+import { Undo, Redo, Languages, Download, X, Settings } from 'lucide-react';
 import { useEditorStore } from '../store/editorStore';
 import { exportProject } from '../utils/exportProject';
 import { compileBuild } from '../utils/compileBuild';
@@ -10,12 +10,14 @@ import CreateProjectDialog from './CreateProjectDialog';
 import SaveAsDialog from './SaveAsDialog';
 import ConfirmDialog from './ConfirmDialog';
 import SyncSettings from './SyncSettings';
+import CourseSettingsDialog from './CourseSettingsDialog';
 import type { SyncConfig } from './SyncSettings';
 import { useI18n } from '../i18n/context';
 import { findMissingResourceElements, type ResourceMissingItem } from '../utils/checkResourceReady';
 import { ResourceMissingDialog } from './ResourceMissingDialog';
 import { isFlatLesson } from '../utils/courseKind';
 import { collectInternalPageIssues, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
+import type { CourseType } from '../presets/types';
 
 export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack?: () => void }) {
   const { language, setLanguage, t } = useI18n();
@@ -31,11 +33,13 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   ));
   const setCurrentCourse = useEditorStore((state) => state.setCurrentCourse);
   const setFeedback = useEditorStore((state) => state.setFeedback);
+  const setCourseType = useEditorStore((state) => state.setCourseType);
 
   const [publishError, setPublishError] = useState<string | null>(null);
   const [errorDialog, setErrorDialog] = useState<{ title: string; message: string } | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
+  const [showCourseSettings, setShowCourseSettings] = useState(false);
   const [showNewConfirm, setShowNewConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showSyncSettings, setShowSyncSettings] = useState(false);
@@ -55,9 +59,9 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     setShowCreateDialog(true);
   };
 
-  const handleCreateConfirm = async (courseId: string, dirPath: string, kind: 'normal' | 'homework' | 'sEvaluation' | 'review' = 'normal') => {
+  const handleCreateConfirm = async (courseId: string, dirPath: string, type: CourseType) => {
     try {
-      const { course } = await createProjectInDirectory(courseId, dirPath, kind);
+      const { course } = await createProjectInDirectory(courseId, dirPath, type);
       setShowCreateDialog(false);
       setCurrentCourse(course);
     } catch (e) {
@@ -258,6 +262,14 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
             className="text-sm text-slate-400 cursor-pointer hover:text-blue-400 transition-colors"
             onClick={handleOpenCourseFolder}
           >{currentCourse.id}</div>
+          <button
+            type="button"
+            onClick={() => setShowCourseSettings(true)}
+            className="p-1 text-slate-400 hover:text-white hover:bg-slate-700 rounded"
+            title="课件设置"
+          >
+            <Settings size={15} />
+          </button>
           <span className={`text-[10px] ml-1 ${isDirty ? 'text-amber-400' : 'text-emerald-400'}`}>{isDirty ? t('unsaved') : t('saved')}</span>
         </>
       )}
@@ -406,6 +418,17 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
         kind={currentCourse.kind ?? 'normal'}
         onConfirm={handleSaveAsConfirm}
         onCancel={() => setShowSaveAsDialog(false)}
+      />
+    )}
+    {showCourseSettings && currentCourse && (
+      <CourseSettingsDialog
+        initialType={currentCourse.type}
+        onConfirm={(type) => {
+          setCourseType(type);
+          setShowCourseSettings(false);
+          showToast('课件类型已更新', 'success');
+        }}
+        onCancel={() => setShowCourseSettings(false)}
       />
     )}
     {showSyncSettings && (

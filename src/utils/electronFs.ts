@@ -1,4 +1,5 @@
 import type { Course, Stage } from '../types';
+import type { CourseType } from '../presets/types';
 
 const api = () => window.electronAPI;
 
@@ -31,7 +32,7 @@ export async function selectDirectory(): Promise<string | null> {
 export async function createProjectInDirectory(
   courseId: string,
   parentPath: string,
-  kind: 'normal' | 'homework' | 'sEvaluation' | 'review' = 'normal',
+  type: CourseType,
 ): Promise<{ course: Course; filePath: string }> {
   const exists = await api().pathExists(`${parentPath}/${courseId}`);
   if (exists) throw new Error('DIR_ALREADY_EXISTS');
@@ -40,7 +41,9 @@ export async function createProjectInDirectory(
 
   const course: Course = {
     id: courseId,
-    kind,
+    type,
+    // Existing export/preview code still reads kind, so new courses mirror type into kind.
+    kind: type,
     stages: [],
   };
 

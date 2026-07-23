@@ -12,6 +12,7 @@ import {
   buildMathKeyboardInitCode,
   collectGameZipFiles,
   collectResources,
+  copyBuiltinResourcesFromServer,
   extractZipFromServer,
   getImageAtlasDirectory,
   isLocalSkPath,
@@ -605,6 +606,7 @@ export async function exportPreviewProject(course: Course): Promise<void> {
     (entryPath) => gameZipFiles.has(entryPath),
     (entryPath) => mapGameZipEntryToProjectPath(entryPath, 'game_preview'),
   );
+  await copyBuiltinResourcesFromServer(resourceMap, `${projectRoot}/laya/assets`, eApi, serverUrl);
 
   // 复制用户上传资源与 base64 图片
   for (const [from, to] of resourceMap) {

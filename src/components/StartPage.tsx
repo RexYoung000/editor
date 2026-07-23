@@ -4,6 +4,7 @@ import { useI18n } from '../i18n/context';
 import { showToast } from '../utils/toast';
 import { createProjectInDirectory, openProjectFromDirectory, selectDirectory } from '../utils/electronFs';
 import CreateProjectDialog from './CreateProjectDialog';
+import type { CourseType } from '../presets/types';
 
 interface Props {
   onEnterEditor: (course: import('../types').Course) => void;
@@ -49,7 +50,7 @@ export default function StartPage({ onEnterEditor }: Props) {
     }
   };
 
-  const handleCreateConfirm = async (courseId: string, dirPath: string, kind: 'normal' | 'homework' | 'sEvaluation' | 'review' = 'normal') => {
+  const handleCreateConfirm = async (courseId: string, dirPath: string, type: CourseType) => {
     try {
       // SVN 检查暂时禁用，后续需要时恢复
       // if (typeof dirPath === 'string' && !(await isSvnDirectory(dirPath))) {
@@ -57,7 +58,7 @@ export default function StartPage({ onEnterEditor }: Props) {
       //   return;
       // }
       saveConfig();
-      const { course } = await createProjectInDirectory(courseId, dirPath, kind);
+      const { course } = await createProjectInDirectory(courseId, dirPath, type);
       setShowCreateDialog(false);
       onEnterEditor(course);
     } catch (e) {

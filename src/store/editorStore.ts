@@ -16,6 +16,7 @@ import {
 } from '../utils/customTemplateFs';
 import { getCourseDirPath } from '../utils/electronFs';
 import { PRESET_TEMPLATES } from '../presets';
+import type { CourseType } from '../presets/types';
 import { getUniqueElementName, normalizeElementNames, createDefaultElement, elementMeta, rebuildSubPageCounters, getNextNumberedName, getNextItemNameForCenterMatch } from '../elements/elementMeta';
 import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
 import { getElementParentContainment, getFitContainerToChildrenUpdates } from '../utils/canvasGeometry';
@@ -93,6 +94,7 @@ interface EditorState {
 
   // Actions
   setCurrentCourse: (course: Course) => void;
+  setCourseType: (type: CourseType) => void;
   setCurrentSubPage: (stageId: string, subPageId: string) => void;
   enterFocusWorkspace: (stageId: string, subPageId: string) => void;
   exitFocusWorkspace: () => void;
@@ -457,6 +459,15 @@ export const useEditorStore = create<EditorState>()(
         ];
         allSubPages.forEach((subPage) => markInternalPagesFeature(course, subPage));
         rebuildSubPageCounters(allSubPages);
+      }),
+
+    setCourseType: (type) =>
+      set((state) => {
+        if (!state.currentCourse) return;
+        state.currentCourse.type = type;
+        // Keep the legacy runtime kind aligned with the new global template type.
+        state.currentCourse.kind = type;
+        get().saveHistory();
       }),
 
     setCurrentSubPage: (stageId, subPageId) =>
@@ -981,7 +992,7 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
+        // 内部页面预设是永久展示卡片，不再受复习课等课型限制。
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `预习 ${previewNum}`);
@@ -1237,7 +1248,7 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
+        // 内部页面预设是永久展示卡片，不再受复习课等课型限制。
         const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
@@ -1267,7 +1278,7 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
+        // 内部页面预设是永久展示卡片，不再受复习课等课型限制。
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (!stage) return;
         const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
