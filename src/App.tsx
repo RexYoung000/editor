@@ -33,6 +33,7 @@ function App() {
   const [phase, setPhase] = useState<'landing' | 'editor'>('landing');
   const [isDirty, setIsDirty] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [textCreateRequest, setTextCreateRequest] = useState(0);
   const [focusWidth, setFocusWidth] = useState(() => Math.min(440, Math.max(280, Number(localStorage.getItem('forge_focus_workspace_width')) || 320)));
   const internalPageWorkbenchReadonly = isInternalPagesWorkbenchReadonly(currentCourse, currentSubPageId, focusSubPageId);
 
@@ -104,9 +105,9 @@ function App() {
         return;
       }
 
-      if (mod && e.key === 'z' && !e.shiftKey) {
+      if (mod && e.key === 'z' && !e.shiftKey && !isInput) {
         e.preventDefault(); undo();
-      } else if (mod && (e.key === 'Z' || (e.shiftKey && e.key === 'z'))) {
+      } else if (mod && (e.key === 'Z' || (e.shiftKey && e.key === 'z')) && !isInput) {
         e.preventDefault(); redo();
       } else if (mod && e.key === 'c' && !isInput) {
         e.preventDefault(); copyElements();
@@ -206,7 +207,7 @@ function App() {
                 }}
               />
             ) : null}
-            canvas={<><ElementToolbar /><Canvas /></>}
+            canvas={<><ElementToolbar onCreateText={() => setTextCreateRequest((value) => value + 1)} /><Canvas textCreateRequest={textCreateRequest} /></>}
             propertyPanel={<PropertyPanel />}
           />
         </div>

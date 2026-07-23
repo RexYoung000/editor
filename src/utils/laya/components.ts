@@ -7,13 +7,54 @@ import { readFileAsDataUrl } from '../electronFs';
 import { getKeyboardPreset } from '../../elements/keyboardPresets';
 import { getCachedVideoThumbnail } from '../videoThumbnail';
 import { getDefaultSkins, generateButtonSkin, generateCheckboxSkin, generateRadioSkin, generateInputSkin } from '../skinGenerator';
-import { resolveElementFont } from '../fontLoader';
+import { renderTextToImage, type RenderTextProps } from '../textToImage';
 import { getEditorCanvasFillColor, isEditorCanvasHitThrough } from '../canvasComposite';
 import { isElementHidden } from '../layerState';
 
 function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string | null, stroke?: string, sw?: number) {
   if (stroke && sw && sw > 0) g.drawRect(x, y, w, h, fill, stroke, sw);
   else if (fill) g.drawRect(x, y, w, h, fill);
+}
+
+export function applyNewTextAreaRender(comp: LayaObj, element: Element): void {
+  const props: Record<string, unknown> = {
+    ...(elementMeta[element.type]?.defaultProps ?? {}),
+    ...(element.props ?? {}),
+  };
+  const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
+  const renderKey = JSON.stringify([element.width, element.height, props]);
+  const previousRenderWidth = Number(comp._forgeTextRenderWidth);
+  const previousRenderHeight = Number(comp._forgeTextRenderHeight);
+  comp._forgeTextRenderKey = renderKey;
+  // 新位图生成前保留旧文字的视觉尺寸，避免把旧纹理拉伸到新框体。
+  if (previousRenderWidth > 0 && element.width > 0) comp.scaleX = previousRenderWidth / element.width;
+  if (previousRenderHeight > 0 && element.height > 0) comp.scaleY = previousRenderHeight / element.height;
+  const applyRenderedText = (dataUrl: string) => {
+    if (comp._forgeTextRenderKey !== renderKey) return;
+    try {
+      comp.skin = dataUrl;
+      comp.scaleX = 1;
+      comp.scaleY = 1;
+      comp._forgeTextRenderWidth = element.width;
+      comp._forgeTextRenderHeight = element.height;
+    } catch { /* ignore */ }
+  };
+  renderTextToImage(
+    String(props.text ?? ''),
+    element.width,
+    element.height,
+    props as RenderTextProps,
+    2,
+    courseId,
+  ).then((dataUrl) => {
+    if (comp._forgeTextRenderKey !== renderKey) return;
+    const L = laya();
+    if (L?.loader && L.Handler) {
+      L.loader.load([{ url: dataUrl, type: 'image' }], L.Handler.create(null, () => applyRenderedText(dataUrl)));
+    } else {
+      applyRenderedText(dataUrl);
+    }
+  }).catch(() => {});
 }
 
 export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj | null {
@@ -25,6 +66,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
 
   if (element.layaType) {
     let resolvedType = element.layaType;
+    if (element.type === 'NewTextArea') resolvedType = 'Image';
     if (!preview) {
       // 编辑模式下若干 sdk_baiya 组件用 Laya 内置类替代，便于占位渲染
       if (resolvedType === 'TextInput') resolvedType = 'Box';
@@ -38,7 +80,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
       // MatchingGame 编辑模式下用 Box 替代，避免真实 runtime 的 init() 在 rightItemNames 未配置时崩溃
       // 导出时仍按原 layaType 输出
       else if (resolvedType === 'MatchingGame') resolvedType = 'Box';
-      // TextArea 编辑模式下用 Label 显示文字（live 渲染，配合双击 HTML 浮层做行内编辑）
+      // 其他 TextArea 编辑模式下用 Label 显示文字。
       else if (resolvedType === 'TextArea') resolvedType = 'Label';
       // SoundButton 编辑模式下用 Image 替代（类似图片组件，避免实例化真 SoundButton）
       else if (resolvedType === 'SoundButton') resolvedType = 'Image';
@@ -330,17 +372,8 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
     }
   }
 
-  // NewTextArea 编辑模式下被替换成 Label,需要把字体 face 写到 comp.font。
-  if (!isPreviewMode() && element.type === 'NewTextArea') {
-    try { comp.font = 'FZLanTingHei'; } catch { /* ignore */ }
-    const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
-    if (courseId) {
-      const fontLocalPath = (props.fontLocalPath as string | undefined) ?? '';
-      const fontLibraryId = (props.fontLibraryId as string | undefined) ?? '';
-      resolveElementFont(courseId, fontLocalPath, fontLibraryId)
-        .then((name) => { try { comp.font = name; } catch { /* ignore */ } })
-        .catch(() => {});
-    }
+  if (element.type === 'NewTextArea') {
+    applyNewTextAreaRender(comp, element);
   }
 
   // DropObj 编辑模式：用 Box 渲染，手动管理 skin + tipSkin 两个子 Image

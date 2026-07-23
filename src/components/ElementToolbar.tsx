@@ -106,7 +106,11 @@ function getMatchingLayout(direction: 0 | 1 | 2): MatchingLayout {
   ] };
 }
 
-export default function ElementToolbar() {
+interface ElementToolbarProps {
+  onCreateText?: () => void;
+}
+
+export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
   const { language } = useI18n();
   const addElement = useEditorStore((s) => s.addElement);
   const updateElement = useEditorStore((s) => s.updateElement);
@@ -187,6 +191,10 @@ export default function ElementToolbar() {
 
   const handleAdd = (type: string) => {
     if (frozen) return;
+    if (type === 'NewTextArea') {
+      onCreateText?.();
+      return;
+    }
     const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
     if (type === 'KlBaseKeyboard') {
       setPendingKeyboardInputId(null);

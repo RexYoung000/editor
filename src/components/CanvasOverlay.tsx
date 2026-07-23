@@ -1,11 +1,18 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { EditorLayerGroup, Element } from '../types';
 import { useEditorStore } from '../store/editorStore';
-import { getObject } from '../utils/layaBridge';
+import { getObject, removeObject } from '../utils/layaBridge';
+import { applyNewTextAreaRender } from '../utils/laya/components';
 import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
 import { resolveElementFont } from '../utils/fontLoader';
+import { caretOffsetAtPoint, layoutText, normalizeTextSizingMode } from '../utils/textLayout';
+import type { RenderTextProps } from '../utils/textToImage';
+import { decrementSubPageCounter } from '../elements/elementMeta';
 import {
   getElementWorldBounds,
+  getElementWorldMatrix,
+  invertMatrix,
+  transformPoint,
   type CanvasPoint,
 } from '../utils/canvasGeometry';
 import {
@@ -173,6 +180,10 @@ interface CanvasOverlayProps {
   showSnapGuides: boolean;
   distanceHintsEnabled: boolean;
   setEditingId: (id: string | null) => void;
+  newTextId: string | null;
+  textCaretPoint: { x: number; y: number } | null;
+  setTextCaretPoint: (point: { x: number; y: number } | null) => void;
+  onTextSessionEnd: (id: string) => void;
 }
 
 export default function CanvasOverlay({
@@ -188,6 +199,10 @@ export default function CanvasOverlay({
   showSnapGuides,
   distanceHintsEnabled,
   setEditingId,
+  newTextId,
+  textCaretPoint,
+  setTextCaretPoint,
+  onTextSessionEnd,
 }: CanvasOverlayProps) {
   const interactionRef = useRef<PointerInteraction | null>(null);
   const [localMarquee, setLocalMarqueeState] = useState<MarqueeState | null>(null);
@@ -198,6 +213,23 @@ export default function CanvasOverlay({
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [spacingHints, setSpacingHints] = useState<EqualSpacingHint[]>([]);
   const [distanceHint, setDistanceHint] = useState<DistanceHint | null>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textResizeFrameRef = useRef<number | null>(null);
+  const pendingTextResizeRef = useRef<{ element: Element; width: number; height: number } | null>(null);
+  const caretAppliedForRef = useRef<string | null>(null);
+  const committedTextSessionRef = useRef<string | null>(null);
+  const [textDraftState, setTextDraftState] = useState({ id: '', value: '' });
+  const editingTextId = editingElement?.type === 'NewTextArea' ? editingElement.id : null;
+  const textDraft = editingTextId && textDraftState.id === editingTextId
+    ? textDraftState.value
+    : editingElement?.type === 'NewTextArea'
+      ? String(editingElement.props.text ?? '')
+      : '';
+
+  useEffect(() => {
+    committedTextSessionRef.current = null;
+    caretAppliedForRef.current = null;
+  }, [editingTextId]);
   const worldRef = useRef(world);
   const currentPageRef = useRef(currentPage);
   const snapRef = useRef(snap);
@@ -215,6 +247,40 @@ export default function CanvasOverlay({
   const setLocalMarquee = useCallback((value: MarqueeState | null) => {
     localMarqueeRef.current = value;
     setLocalMarqueeState(value);
+  }, []);
+
+  const cancelTextResizePreview = useCallback(() => {
+    if (textResizeFrameRef.current !== null) {
+      cancelAnimationFrame(textResizeFrameRef.current);
+      textResizeFrameRef.current = null;
+    }
+    pendingTextResizeRef.current = null;
+  }, []);
+
+  const scheduleTextResizePreview = useCallback((element: Element, width: number, height: number) => {
+    const renderPreview = (pending: { element: Element; width: number; height: number }) => {
+      const object = getObject(pending.element.id);
+      if (!object) return;
+      object.width = pending.width;
+      object.height = pending.height;
+      applyNewTextAreaRender(object, {
+        ...pending.element,
+        width: pending.width,
+        height: pending.height,
+      });
+    };
+    if (textResizeFrameRef.current !== null) {
+      pendingTextResizeRef.current = { element, width, height };
+      return;
+    }
+    renderPreview({ element, width, height });
+    textResizeFrameRef.current = requestAnimationFrame(() => {
+      textResizeFrameRef.current = null;
+      const pending = pendingTextResizeRef.current;
+      pendingTextResizeRef.current = null;
+      if (!pending) return;
+      renderPreview(pending);
+    });
   }, []);
 
   const [resolvedFont, setResolvedFont] = useState<{ elementId: string; fontFamily: string } | null>(null);
@@ -238,6 +304,84 @@ export default function CanvasOverlay({
   const overlayFontFamily = resolvedFont && resolvedFont.elementId === editingElement?.id
     ? resolvedFont.fontFamily
     : 'FZLanTingHei';
+
+  useEffect(() => {
+    if (!editingElement || editingElement.type !== 'NewTextArea') return;
+    const object = getObject(editingElement.id);
+    if (!object) return;
+    const previousVisible = object.visible;
+    object.visible = false;
+    return () => { object.visible = previousVisible; };
+  }, [editingElement]);
+
+  const finishTextEditing = useCallback(() => {
+    if (!editingElement || editingElement.type !== 'NewTextArea') return;
+    if (committedTextSessionRef.current === editingElement.id) return;
+    committedTextSessionRef.current = editingElement.id;
+    const props = editingElement.props as Record<string, unknown>;
+    const nextProps = { ...props, text: textDraft };
+    const layout = layoutText(textDraft, editingElement.width, editingElement.height, nextProps as RenderTextProps, overlayFontFamily);
+    const mode = normalizeTextSizingMode(props.textSizingMode);
+    const isNewEmpty = newTextId === editingElement.id && textDraft.length === 0;
+    if (isNewEmpty) {
+      const store = useEditorStore.getState();
+      store.removeElementsWithoutHistory([editingElement.id]);
+      decrementSubPageCounter(store.currentSubPageId ?? undefined, 'NewTextArea');
+      removeObject(editingElement.id);
+      setEditingId(null);
+      onTextSessionEnd(editingElement.id);
+      return;
+    }
+    const changed = textDraft !== String(props.text ?? '')
+      || (mode !== 'fixed' && (layout.width !== editingElement.width || layout.height !== editingElement.height));
+    if (changed) {
+      useEditorStore.getState().updateElement(editingElement.id, {
+        width: layout.width,
+        height: layout.height,
+        props: nextProps,
+      });
+      useEditorStore.getState().saveHistory();
+    }
+    setEditingId(null);
+    onTextSessionEnd(editingElement.id);
+  }, [editingElement, newTextId, onTextSessionEnd, overlayFontFamily, setEditingId, textDraft]);
+
+  useLayoutEffect(() => {
+    const textarea = textAreaRef.current;
+    if (!textarea || !editingElement || editingElement.type !== 'NewTextArea') return;
+    if (caretAppliedForRef.current === editingElement.id) return;
+    caretAppliedForRef.current = editingElement.id;
+    textarea.focus();
+    if (textCaretPoint) {
+      const props = editingElement.props as Record<string, unknown>;
+      textarea.setSelectionRange(
+        caretOffsetAtPoint(textDraft, editingElement.width, props, textCaretPoint.x, textCaretPoint.y, overlayFontFamily),
+        caretOffsetAtPoint(textDraft, editingElement.width, props, textCaretPoint.x, textCaretPoint.y, overlayFontFamily),
+      );
+    } else {
+      textarea.setSelectionRange(textDraft.length, textDraft.length);
+    }
+  }, [editingElement, overlayFontFamily, textCaretPoint, textDraft]);
+
+  // CanvasOverlay 阻止画布默认 pointer 行为时，浏览器不会替 textarea 自然触发失焦。
+  // 在文档捕获阶段主动提交，保证点击画布、属性面板或工具栏都能结束编辑。
+  useEffect(() => {
+    if (!editingTextId) return;
+    const handleDocumentPointerDown = (event: Event) => {
+      const textarea = textAreaRef.current;
+      const target = event.target;
+      if (!textarea || !(target instanceof Node)) return;
+      const editor = textarea.closest('[data-text-editor]');
+      if (editor?.contains(target)) return;
+      textarea.blur();
+    };
+    document.addEventListener('pointerdown', handleDocumentPointerDown, true);
+    document.addEventListener('mousedown', handleDocumentPointerDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handleDocumentPointerDown, true);
+      document.removeEventListener('mousedown', handleDocumentPointerDown, true);
+    };
+  }, [editingTextId]);
 
   const pointerToWorld = useCallback((clientX: number, clientY: number) => {
     const host = layaHostRef.current;
@@ -282,6 +426,7 @@ export default function CanvasOverlay({
   const finishInteraction = useCallback((commit: boolean) => {
     const interaction = interactionRef.current;
     if (!interaction) return;
+    cancelTextResizePreview();
     interactionRef.current = null;
     setPreviewTransforms(null);
     setPreviewFrame(null);
@@ -294,6 +439,14 @@ export default function CanvasOverlay({
     const store = useEditorStore.getState();
     if (!commit) {
       restorePreview(interaction);
+      if (interaction.kind === 'resize') {
+        const page = currentPageRef.current;
+        for (const root of interaction.transaction.roots) {
+          const element = page?.elements.find((item) => item.id === root.id);
+          const object = element ? getObject(element.id) : undefined;
+          if (element?.type === 'NewTextArea' && object) applyNewTextAreaRender(object, element);
+        }
+      }
       if (interaction.kind === 'move' && interaction.duplicateIds) {
         store.removeElementsWithoutHistory(interaction.duplicateIds);
         store.selectElements(interaction.originalSelection);
@@ -351,7 +504,7 @@ export default function CanvasOverlay({
       interaction.toggle,
       editorLayerGroupIds,
     ));
-  }, [commitPageTurnPosition, restorePreview, setLocalMarquee]);
+  }, [cancelTextResizePreview, commitPageTurnPosition, restorePreview, setLocalMarquee]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || interactionRef.current) return;
@@ -762,6 +915,18 @@ export default function CanvasOverlay({
         interaction.snapLocks = snapResult.locks;
         setSnapGuides(showSnapGuidesRef.current ? snapResult.guides : []);
       }
+      if (nextTransaction.handle === 'e' || nextTransaction.handle === 'w') {
+        const root = nextTransaction.preview.length === 1 ? nextTransaction.preview[0] : null;
+        const element = root ? page.elements.find((item) => item.id === root.id) : null;
+        if (root && element?.type === 'NewTextArea' && normalizeTextSizingMode(element.props.textSizingMode) === 'fixed-width') {
+          const measured = layoutText(String(element.props.text ?? ''), root.width, root.height, element.props, overlayFontFamily);
+          nextTransaction = {
+            ...nextTransaction,
+            preview: nextTransaction.preview.map((item) => item.id === root.id ? { ...item, height: measured.height } : item),
+            previewFrame: { ...nextTransaction.previewFrame, height: measured.height },
+          };
+        }
+      }
       setSpacingHints([]);
       setDistanceHint(null);
       interaction.transaction = nextTransaction;
@@ -779,17 +944,23 @@ export default function CanvasOverlay({
     for (const preview of interaction.transaction.preview) {
       const object = getObject(preview.id);
       if (object) {
+        const element = page.elements.find((item) => item.id === preview.id);
+        const preserveTextMetrics = interaction.kind === 'resize' && element?.type === 'NewTextArea';
         object.x = preview.x;
         object.y = preview.y;
-        object.width = preview.width;
-        object.height = preview.height;
+        if (!preserveTextMetrics) {
+          object.width = preview.width;
+          object.height = preview.height;
+        } else if (element) {
+          scheduleTextResizePreview(element, preview.width, preview.height);
+        }
         object.rotation = preview.rotation;
       }
     }
     setPreviewTransforms(interaction.transaction.preview);
     setPreviewFrame(interaction.transaction.previewFrame);
     setPreviewAngle(interaction.kind === 'rotate' ? interaction.transaction.angleDelta : null);
-  }, [pageHeight, pageWidth, pointerToWorld, setLocalMarquee, updateHoverDistance]);
+  }, [overlayFontFamily, pageHeight, pageWidth, pointerToWorld, scheduleTextResizePreview, setLocalMarquee, updateHoverDistance]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (interactionRef.current?.pointerId !== event.pointerId) return;
@@ -831,8 +1002,13 @@ export default function CanvasOverlay({
     if (!page || !point) return;
     const hit = findTopElementAtPoint(page.elements, point, useEditorStore.getState().selectedElementIds);
     const elementMap = new Map(page.elements.map((element) => [element.id, element]));
-    if (hit && !isElementLocked(hit, elementMap) && (hit.type === 'NewTextArea' || hit.type === 'Video')) setEditingId(hit.id);
-  }, [pointerToWorld, setEditingId]);
+    if (!hit || isElementLocked(hit, elementMap) || (hit.type !== 'NewTextArea' && hit.type !== 'Video')) return;
+    if (hit.type === 'NewTextArea') {
+      const inverse = invertMatrix(getElementWorldMatrix(hit, page.elements));
+      setTextCaretPoint(inverse ? transformPoint(inverse, point) : null);
+    } else setTextCaretPoint(null);
+    setEditingId(hit.id);
+  }, [pointerToWorld, setEditingId, setTextCaretPoint]);
 
   const elements = currentPage?.elements ?? [];
   const previewMap = new Map((previewTransforms ?? []).map((snapshot) => [snapshot.id, snapshot]));
@@ -867,9 +1043,23 @@ export default function CanvasOverlay({
     editorLayerGroupIds,
   });
   const canTransform = getTransformRootIds(displayElements, selectedIds, editorLayerGroupIds).length > 0;
-  const resizeHandleDefinitions = selectedElement && isChoiceOption(selectedElement, displayElements)
-    ? HANDLE_DEFS.filter((definition) => definition.id === 'e' || definition.id === 'w')
-    : HANDLE_DEFS;
+  const selectedTextMode = selectedElement?.type === 'NewTextArea'
+    ? normalizeTextSizingMode(selectedElement.props.textSizingMode)
+    : null;
+  const resizeHandleDefinitions = selectedTextMode === 'auto'
+    ? []
+    : selectedTextMode === 'fixed-width' || (selectedElement && isChoiceOption(selectedElement, displayElements))
+      ? HANDLE_DEFS.filter((definition) => definition.id === 'e' || definition.id === 'w')
+      : HANDLE_DEFS;
+  const selectedTextOverflow = selectedElement?.type === 'NewTextArea'
+    ? layoutText(
+      String(selectedElement.props.text ?? ''),
+      selectedElement.width,
+      selectedElement.height,
+      selectedElement.props,
+      overlayFontFamily,
+    ).overflow
+    : false;
 
   const groupColors = new Map<string, string>();
   const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -1162,7 +1352,10 @@ export default function CanvasOverlay({
             top: origin.top,
             width: frameWidth,
             height: frameHeight,
-            border: canTransform ? '1px solid #3b82f6' : '1px solid #f59e0b',
+            border: selectedElement?.type === 'NewTextArea' ? '1px solid #fff' : canTransform ? '1px solid #3b82f6' : '1px solid #f59e0b',
+            boxShadow: selectedElement?.type === 'NewTextArea'
+              ? `0 0 0 2px ${selectedTextOverflow ? '#f97316' : '#1677ff'}, 0 2px 8px rgba(0, 0, 0, 0.9)`
+              : undefined,
             boxSizing: 'border-box',
             pointerEvents: 'none',
             transform: `rotate(${selectionFrame.rotation}deg)`,
@@ -1179,6 +1372,7 @@ export default function CanvasOverlay({
                   height: HANDLE_SIZE,
                   background: '#fff',
                   border: '2px solid #3b82f6',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.9)',
                   cursor: definition.cursor,
                   pointerEvents: 'auto',
                   boxSizing: 'border-box',
@@ -1293,55 +1487,57 @@ export default function CanvasOverlay({
         const props = editingElement.props as Record<string, unknown>;
         const fontSize = (props.fontSize as number) ?? 16;
         const leading = (props.leading as number) ?? 0;
-        const verticalAlign = (props.valign as string) ?? 'top';
+        const liveLayout = layoutText(textDraft, editingElement.width, editingElement.height, props, overlayFontFamily);
+        const matrix = getElementWorldMatrix(editingElement, elements);
         return (
-          <div data-canvas-interactive style={{
+          <div data-canvas-interactive data-text-editor style={{
             position: 'absolute',
-            left: editingElement.x * zoom + panX,
-            top: editingElement.y * zoom + panY,
-            width: editingElement.width,
-            height: editingElement.height,
-            transform: `scale(${zoom})`,
+            left: matrix.tx * zoom + panX,
+            top: matrix.ty * zoom + panY,
+            width: liveLayout.width,
+            height: liveLayout.height,
+            transform: `matrix(${matrix.a * zoom}, ${matrix.b * zoom}, ${matrix.c * zoom}, ${matrix.d * zoom}, 0, 0)`,
             transformOrigin: '0 0',
             zIndex: 50,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: verticalAlign === 'middle' ? 'center' : verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
-            background: '#ffffff',
-            border: '1px solid #3b82f6',
+            opacity: editingElement.opacity,
+            background: 'transparent',
+            backgroundColor: 'transparent',
+            outline: '2px solid #1677ff',
+            boxShadow: '0 0 0 1px #fff, 0 2px 7px rgba(0, 0, 0, 0.9)',
             boxSizing: 'border-box',
             pointerEvents: 'auto',
           }}>
             <textarea
-              autoFocus
-              value={(props.text as string) ?? ''}
-              onFocus={(event) => event.currentTarget.select()}
-              onChange={(event) => useEditorStore.getState().updateElement(editingElement.id, {
-                props: { ...props, text: event.target.value },
-              })}
+              ref={textAreaRef}
+              value={textDraft}
+              onChange={(event) => setTextDraftState({ id: editingElement.id, value: event.target.value })}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === 'Escape' || (event.key === 'Enter' && (event.ctrlKey || event.metaKey))) {
                   event.preventDefault();
                   event.currentTarget.blur();
                 }
               }}
-              onBlur={() => {
-                setEditingId(null);
-                useEditorStore.getState().saveHistory();
-              }}
+              onBlur={finishTextEditing}
               style={{
+                display: 'block',
                 width: '100%',
-                flexShrink: 0,
-                maxHeight: '100%',
+                height: '100%',
                 margin: 0,
                 padding: 0,
                 border: 'none',
                 outline: 'none',
                 background: 'transparent',
+                backgroundColor: 'transparent',
+                backgroundImage: 'none',
+                appearance: 'none',
+                WebkitAppearance: 'none',
                 resize: 'none',
-                overflow: 'auto',
+                overflow: normalizeTextSizingMode(props.textSizingMode) === 'fixed' ? 'auto' : 'hidden',
                 fontFamily: `"${overlayFontFamily}"`,
                 fontSize,
+                fontWeight: props.bold ? 700 : 400,
+                fontStyle: props.italic ? 'italic' : 'normal',
                 lineHeight: `${fontSize + leading}px`,
                 color: (props.color as string) ?? '#333',
                 textAlign: (props.align as 'left' | 'center' | 'right') ?? 'left',

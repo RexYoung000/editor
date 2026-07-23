@@ -95,6 +95,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 [exportProject.ts:21-44](../src/utils/exportProject.ts#L21-L44)。`structuredClone` 深拷 course，把所有 `NewTextArea` 元素就地替换成 `Image`，`skin` = `renderTextToImage` 渲染出的 `data:image/png;base64,...`。后续流程对它一无所知，data URL 走 `data:image` 通道。
 
+文本的编辑器画布、编辑结束后的画布、编辑器预览和正式导出共享同一套字体测量、换行、行高、粗体/斜体和尺寸模式规则。编辑态只暂时覆盖底层文本图像，退出编辑时一次提交文本与自动计算后的尺寸；预览和导出继续使用同一 PNG 烘焙路径。这样不会出现“编辑器看起来能放下、预览或发布却换行/裁切不同”的三套排版结果。
+
 ### 4.2 资源收集 `collectResources(course, viewDir, stages, options)`
 
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用该入口，通过 `viewDir` 和待遍历 stages 决定课程命名空间，遍历所有元素的 `props` / `actions` / `exportChildren` / `_keyboardPreset.children`，产出 `Map<src, dest>`：
