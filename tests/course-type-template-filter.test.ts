@@ -66,7 +66,6 @@ test('永久模板只跳过课型过滤但不跳过形态和运行能力约束',
     thumbnail: '',
     elements: [],
     editorModel: 'internal-pages',
-    alwaysVisible: true,
   };
   const homeworkPreset: PresetTemplate = {
     id: 'homework',
@@ -79,6 +78,7 @@ test('永久模板只跳过课型过滤但不跳过形态和运行能力约束',
   assert.equal(isPresetVisibleForCourseType(videoPreset, 'homework', { mode: 'stage', supportsInternalPages: true }), true);
   assert.equal(isPresetVisibleForCourseType(videoPreset, 'homework', { mode: 'subPage', supportsInternalPages: true }), false);
   assert.equal(isPresetVisibleForCourseType(internalPreset, 'review', { mode: 'stage', supportsInternalPages: false }), false);
+  assert.equal(isPresetVisibleForCourseType(internalPreset, 'homework', { mode: 'stage', supportsInternalPages: true }), false);
   assert.equal(isPresetVisibleForCourseType(homeworkPreset, 'normal', { mode: 'stage', supportsInternalPages: true }), false);
   assert.equal(isPresetVisibleForCourseType(homeworkPreset, 'homework', { mode: 'stage', supportsInternalPages: true }), true);
 });

@@ -53,7 +53,8 @@ export function templateCategoryForCourseType(type?: CourseType): TemplateCourse
 }
 
 export function isPermanentPreset(preset: PresetTemplate): boolean {
-  return Boolean(preset.alwaysVisible || preset.editorModel === 'internal-pages');
+  // Only an explicit alwaysVisible flag can bypass course type filtering.
+  return Boolean(preset.alwaysVisible);
 }
 
 export function isPresetEligibleForDialog(

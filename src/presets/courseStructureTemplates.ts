@@ -333,7 +333,6 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
     thumbnail: '',
     elements: [],
     editorModel: 'internal-pages',
-    alwaysVisible: true,
     defaultStageName: '内部页面关卡',
     defaultSubPageName: '内部页面关卡',
   },
