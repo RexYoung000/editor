@@ -16,6 +16,47 @@ function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string
   else if (fill) g.drawRect(x, y, w, h, fill);
 }
 
+export function applyNewTextAreaRender(comp: LayaObj, element: Element): void {
+  const props: Record<string, unknown> = {
+    ...(elementMeta[element.type]?.defaultProps ?? {}),
+    ...(element.props ?? {}),
+  };
+  const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
+  const renderKey = JSON.stringify([element.width, element.height, props]);
+  const previousRenderWidth = Number(comp._forgeTextRenderWidth);
+  const previousRenderHeight = Number(comp._forgeTextRenderHeight);
+  comp._forgeTextRenderKey = renderKey;
+  // 新位图生成前保留旧文字的视觉尺寸，避免把旧纹理拉伸到新框体。
+  if (previousRenderWidth > 0 && element.width > 0) comp.scaleX = previousRenderWidth / element.width;
+  if (previousRenderHeight > 0 && element.height > 0) comp.scaleY = previousRenderHeight / element.height;
+  const applyRenderedText = (dataUrl: string) => {
+    if (comp._forgeTextRenderKey !== renderKey) return;
+    try {
+      comp.skin = dataUrl;
+      comp.scaleX = 1;
+      comp.scaleY = 1;
+      comp._forgeTextRenderWidth = element.width;
+      comp._forgeTextRenderHeight = element.height;
+    } catch { /* ignore */ }
+  };
+  renderTextToImage(
+    String(props.text ?? ''),
+    element.width,
+    element.height,
+    props as RenderTextProps,
+    2,
+    courseId,
+  ).then((dataUrl) => {
+    if (comp._forgeTextRenderKey !== renderKey) return;
+    const L = laya();
+    if (L?.loader && L.Handler) {
+      L.loader.load([{ url: dataUrl, type: 'image' }], L.Handler.create(null, () => applyRenderedText(dataUrl)));
+    } else {
+      applyRenderedText(dataUrl);
+    }
+  }).catch(() => {});
+}
+
 export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj | null {
   const cu = classUtils();
   if (!cu) { console.warn('[laya-bridge] ClassUtils not ready'); return null; }
@@ -332,28 +373,7 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
   }
 
   if (element.type === 'NewTextArea') {
-    const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
-    const renderKey = JSON.stringify([element.width, element.height, props]);
-    comp._forgeTextRenderKey = renderKey;
-    renderTextToImage(
-      String(props.text ?? ''),
-      element.width,
-      element.height,
-      props as RenderTextProps,
-      2,
-      courseId,
-    ).then((dataUrl) => {
-      if (comp._forgeTextRenderKey !== renderKey) return;
-      const L = laya();
-      if (L?.loader && L.Handler) {
-        L.loader.load([{ url: dataUrl, type: 'image' }], L.Handler.create(null, () => {
-          if (comp._forgeTextRenderKey !== renderKey) return;
-          try { comp.skin = dataUrl; } catch { /* ignore */ }
-        }));
-      } else {
-        try { comp.skin = dataUrl; } catch { /* ignore */ }
-      }
-    }).catch(() => {});
+    applyNewTextAreaRender(comp, element);
   }
 
   // DropObj 编辑模式：用 Box 渲染，手动管理 skin + tipSkin 两个子 Image

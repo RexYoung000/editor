@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import type { EditorLayerGroup, Element } from '../types';
 import { useEditorStore } from '../store/editorStore';
 import { getObject, removeObject } from '../utils/layaBridge';
+import { applyNewTextAreaRender } from '../utils/laya/components';
 import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
 import { resolveElementFont } from '../utils/fontLoader';
 import { caretOffsetAtPoint, layoutText, normalizeTextSizingMode } from '../utils/textLayout';
@@ -213,6 +214,8 @@ export default function CanvasOverlay({
   const [spacingHints, setSpacingHints] = useState<EqualSpacingHint[]>([]);
   const [distanceHint, setDistanceHint] = useState<DistanceHint | null>(null);
   const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textResizeFrameRef = useRef<number | null>(null);
+  const pendingTextResizeRef = useRef<{ element: Element; width: number; height: number } | null>(null);
   const caretAppliedForRef = useRef<string | null>(null);
   const committedTextSessionRef = useRef<string | null>(null);
   const [textDraftState, setTextDraftState] = useState({ id: '', value: '' });
@@ -244,6 +247,40 @@ export default function CanvasOverlay({
   const setLocalMarquee = useCallback((value: MarqueeState | null) => {
     localMarqueeRef.current = value;
     setLocalMarqueeState(value);
+  }, []);
+
+  const cancelTextResizePreview = useCallback(() => {
+    if (textResizeFrameRef.current !== null) {
+      cancelAnimationFrame(textResizeFrameRef.current);
+      textResizeFrameRef.current = null;
+    }
+    pendingTextResizeRef.current = null;
+  }, []);
+
+  const scheduleTextResizePreview = useCallback((element: Element, width: number, height: number) => {
+    const renderPreview = (pending: { element: Element; width: number; height: number }) => {
+      const object = getObject(pending.element.id);
+      if (!object) return;
+      object.width = pending.width;
+      object.height = pending.height;
+      applyNewTextAreaRender(object, {
+        ...pending.element,
+        width: pending.width,
+        height: pending.height,
+      });
+    };
+    if (textResizeFrameRef.current !== null) {
+      pendingTextResizeRef.current = { element, width, height };
+      return;
+    }
+    renderPreview({ element, width, height });
+    textResizeFrameRef.current = requestAnimationFrame(() => {
+      textResizeFrameRef.current = null;
+      const pending = pendingTextResizeRef.current;
+      pendingTextResizeRef.current = null;
+      if (!pending) return;
+      renderPreview(pending);
+    });
   }, []);
 
   const [resolvedFont, setResolvedFont] = useState<{ elementId: string; fontFamily: string } | null>(null);
@@ -389,6 +426,7 @@ export default function CanvasOverlay({
   const finishInteraction = useCallback((commit: boolean) => {
     const interaction = interactionRef.current;
     if (!interaction) return;
+    cancelTextResizePreview();
     interactionRef.current = null;
     setPreviewTransforms(null);
     setPreviewFrame(null);
@@ -401,6 +439,14 @@ export default function CanvasOverlay({
     const store = useEditorStore.getState();
     if (!commit) {
       restorePreview(interaction);
+      if (interaction.kind === 'resize') {
+        const page = currentPageRef.current;
+        for (const root of interaction.transaction.roots) {
+          const element = page?.elements.find((item) => item.id === root.id);
+          const object = element ? getObject(element.id) : undefined;
+          if (element?.type === 'NewTextArea' && object) applyNewTextAreaRender(object, element);
+        }
+      }
       if (interaction.kind === 'move' && interaction.duplicateIds) {
         store.removeElementsWithoutHistory(interaction.duplicateIds);
         store.selectElements(interaction.originalSelection);
@@ -458,7 +504,7 @@ export default function CanvasOverlay({
       interaction.toggle,
       editorLayerGroupIds,
     ));
-  }, [commitPageTurnPosition, restorePreview, setLocalMarquee]);
+  }, [cancelTextResizePreview, commitPageTurnPosition, restorePreview, setLocalMarquee]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || interactionRef.current) return;
@@ -898,17 +944,23 @@ export default function CanvasOverlay({
     for (const preview of interaction.transaction.preview) {
       const object = getObject(preview.id);
       if (object) {
+        const element = page.elements.find((item) => item.id === preview.id);
+        const preserveTextMetrics = interaction.kind === 'resize' && element?.type === 'NewTextArea';
         object.x = preview.x;
         object.y = preview.y;
-        object.width = preview.width;
-        object.height = preview.height;
+        if (!preserveTextMetrics) {
+          object.width = preview.width;
+          object.height = preview.height;
+        } else if (element) {
+          scheduleTextResizePreview(element, preview.width, preview.height);
+        }
         object.rotation = preview.rotation;
       }
     }
     setPreviewTransforms(interaction.transaction.preview);
     setPreviewFrame(interaction.transaction.previewFrame);
     setPreviewAngle(interaction.kind === 'rotate' ? interaction.transaction.angleDelta : null);
-  }, [overlayFontFamily, pageHeight, pageWidth, pointerToWorld, setLocalMarquee, updateHoverDistance]);
+  }, [overlayFontFamily, pageHeight, pageWidth, pointerToWorld, scheduleTextResizePreview, setLocalMarquee, updateHoverDistance]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (interactionRef.current?.pointerId !== event.pointerId) return;
