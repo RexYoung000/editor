@@ -7,7 +7,7 @@ import { readFileAsDataUrl } from '../electronFs';
 import { getKeyboardPreset } from '../../elements/keyboardPresets';
 import { getCachedVideoThumbnail } from '../videoThumbnail';
 import { getDefaultSkins, generateButtonSkin, generateCheckboxSkin, generateRadioSkin, generateInputSkin } from '../skinGenerator';
-import { resolveElementFont } from '../fontLoader';
+import { renderTextToImage, type RenderTextProps } from '../textToImage';
 import { getEditorCanvasFillColor, isEditorCanvasHitThrough } from '../canvasComposite';
 import { isElementHidden } from '../layerState';
 
@@ -25,6 +25,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
 
   if (element.layaType) {
     let resolvedType = element.layaType;
+    if (element.type === 'NewTextArea') resolvedType = 'Image';
     if (!preview) {
       // 编辑模式下若干 sdk_baiya 组件用 Laya 内置类替代，便于占位渲染
       if (resolvedType === 'TextInput') resolvedType = 'Box';
@@ -38,7 +39,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
       // MatchingGame 编辑模式下用 Box 替代，避免真实 runtime 的 init() 在 rightItemNames 未配置时崩溃
       // 导出时仍按原 layaType 输出
       else if (resolvedType === 'MatchingGame') resolvedType = 'Box';
-      // TextArea 编辑模式下用 Label 显示文字（live 渲染，配合双击 HTML 浮层做行内编辑）
+      // 其他 TextArea 编辑模式下用 Label 显示文字。
       else if (resolvedType === 'TextArea') resolvedType = 'Label';
       // SoundButton 编辑模式下用 Image 替代（类似图片组件，避免实例化真 SoundButton）
       else if (resolvedType === 'SoundButton') resolvedType = 'Image';
@@ -330,17 +331,29 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
     }
   }
 
-  // NewTextArea 编辑模式下被替换成 Label,需要把字体 face 写到 comp.font。
-  if (!isPreviewMode() && element.type === 'NewTextArea') {
-    try { comp.font = 'FZLanTingHei'; } catch { /* ignore */ }
+  if (element.type === 'NewTextArea') {
     const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
-    if (courseId) {
-      const fontLocalPath = (props.fontLocalPath as string | undefined) ?? '';
-      const fontLibraryId = (props.fontLibraryId as string | undefined) ?? '';
-      resolveElementFont(courseId, fontLocalPath, fontLibraryId)
-        .then((name) => { try { comp.font = name; } catch { /* ignore */ } })
-        .catch(() => {});
-    }
+    const renderKey = JSON.stringify([element.width, element.height, props]);
+    comp._forgeTextRenderKey = renderKey;
+    renderTextToImage(
+      String(props.text ?? ''),
+      element.width,
+      element.height,
+      props as RenderTextProps,
+      2,
+      courseId,
+    ).then((dataUrl) => {
+      if (comp._forgeTextRenderKey !== renderKey) return;
+      const L = laya();
+      if (L?.loader && L.Handler) {
+        L.loader.load([{ url: dataUrl, type: 'image' }], L.Handler.create(null, () => {
+          if (comp._forgeTextRenderKey !== renderKey) return;
+          try { comp.skin = dataUrl; } catch { /* ignore */ }
+        }));
+      } else {
+        try { comp.skin = dataUrl; } catch { /* ignore */ }
+      }
+    }).catch(() => {});
   }
 
   // DropObj 编辑模式：用 Box 渲染，手动管理 skin + tipSkin 两个子 Image

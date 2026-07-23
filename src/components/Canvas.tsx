@@ -13,6 +13,7 @@ import { useI18n } from '../i18n/context';
 import CanvasRuler, { RULER_PX } from './CanvasRuler';
 import { LockKeyhole, PanelTopOpen } from 'lucide-react';
 import { createDefaultElement } from '../elements/elementMeta';
+import { layoutText } from '../utils/textLayout';
 import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
@@ -80,7 +81,11 @@ function sortChildrenParentFirst(children: Element[], topLevelIds: Set<string>):
   return result;
 }
 
-export default function Canvas() {
+interface CanvasProps {
+  textCreateRequest?: number;
+}
+
+export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
   const { t } = useI18n();
   const currentCourse    = useEditorStore((s) => s.currentCourse);
   const currentStageId = useEditorStore((s) => s.currentStageId);
@@ -91,6 +96,7 @@ export default function Canvas() {
   const clearSelection = useEditorStore((s) => s.clearSelection);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement    = useEditorStore((s) => s.selectElement);
+  const addElement       = useEditorStore((s) => s.addElement);
   const updateElement    = useEditorStore((s) => s.updateElement);
   const deleteElement    = useEditorStore((s) => s.deleteElement);
   const saveHistory      = useEditorStore((s) => s.saveHistory);
@@ -102,6 +108,9 @@ export default function Canvas() {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [layaReady, setLayaReady] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [newTextId, setNewTextId] = useState<string | null>(null);
+  const [textCaretPoint, setTextCaretPoint] = useState<{ x: number; y: number } | null>(null);
+  const handledTextCreateRequest = useRef(0);
   const [showReadonlyTip, setShowReadonlyTip] = useState(false);
   const readonlyTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevPageIdRef = useRef<string | null>(null);
@@ -137,6 +146,32 @@ export default function Canvas() {
     [currentCourse, currentSubPageId, currentInternalPageId],
   );
   const workbenchReadonly = isInternalPagesWorkbenchReadonly(currentCourse, currentSubPageId, focusSubPageId);
+
+  useEffect(() => {
+    if (textCreateRequest <= handledTextCreateRequest.current) return;
+    if (!currentPage || currentPage.frozen || workbenchReadonly || !layaReady) return;
+    handledTextCreateRequest.current = textCreateRequest;
+
+    const element = createDefaultElement('NewTextArea', currentSubPageId ?? undefined);
+    const layout = layoutText('', element.width, element.height, element.props);
+    element.width = layout.width;
+    element.height = layout.height;
+    const viewport = worldRef.current;
+    const centerX = (workspaceSize.width / 2 - viewport.panX) / viewport.zoom;
+    const centerY = (workspaceSize.height / 2 - viewport.panY) / viewport.zoom;
+    element.x = Math.round(Math.max(0, Math.min(CANVAS_W - element.width, centerX - element.width / 2)));
+    element.y = Math.round(Math.max(0, Math.min(CANVAS_H - element.height, centerY - element.height / 2)));
+
+    const object = createLayaComponent(element);
+    if (object) registerObject(element.id, object);
+    addElement(element, false);
+    selectElement(element.id, false);
+    queueMicrotask(() => {
+      setNewTextId(element.id);
+      setTextCaretPoint({ x: 0, y: 0 });
+      setEditingId(element.id);
+    });
+  }, [addElement, currentPage, currentSubPageId, layaReady, selectElement, textCreateRequest, workbenchReadonly, workspaceSize.height, workspaceSize.width]);
 
   useEffect(() => {
     if (!workbenchReadonly) return;
@@ -1022,6 +1057,13 @@ export default function Canvas() {
               showSnapGuides={assistPreferences.showSnapGuides}
               distanceHintsEnabled={assistPreferences.showDistanceHints}
               setEditingId={setEditingId}
+              newTextId={newTextId}
+              textCaretPoint={textCaretPoint}
+              setTextCaretPoint={setTextCaretPoint}
+              onTextSessionEnd={(id) => {
+                if (id === newTextId) setNewTextId(null);
+                setTextCaretPoint(null);
+              }}
             />
           </div>
         )}

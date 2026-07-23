@@ -12,7 +12,7 @@
 - 所有组件统一声明在 `src/elements/elementMeta.ts`。`runtime`、`exportChildren`、`exportWrapper` 和 `placeholderImage` 同时承担编辑、预览与导出能力，不建立旁路元数据。
 - 新组件字段写入 `Element.props` 并在 metadata 中声明；`_` 前缀属性只用于编辑器皮肤生成，导出前必须剥离。
 - `src/utils/laya/core.ts` 持有 Laya 对象单例 map 和 `_previewMode`；编辑模式通过 `src/utils/laya/components.ts` 的 `createLayaComponent` 避免真实 sdk 组件崩溃、自动播放或干扰编辑，预览模式由 `setPreviewMode(true)` 实例化真实组件。
-- `TextInput`、`DragViewBox`、`DropObj` 编辑时使用 `Box` 占位；`TextArea` 使用 `Label`；`SoundButton` 使用 `Image`；`Spine` 使用原生 `Laya.Skeleton`。带 `meta.placeholderImage` 的组件统一使用 `Image`。
+- `TextInput`、`DragViewBox`、`DropObj` 编辑时使用 `Box` 占位；普通 `TextArea` 使用 `Label`，`NewTextArea` 使用共享文字烘焙得到的 `Image`；`SoundButton` 使用 `Image`；`Spine` 使用原生 `Laya.Skeleton`。带 `meta.placeholderImage` 的组件统一使用 `Image`。
 - `NewTextArea` 导出时由 `bakeTextElements()` 烘焙成 PNG，最终课件不保留 `TextArea`。
 - `applyKlProps` 必须在 `skin` 前应用 `stateNum` 和 `sizeGrid`，因为 sdk_baiya 的 `skin` 赋值会触发内部渲染。
 - `share/comp/...` 皮肤前缀表示自动生成默认皮肤，其他路径按真实资源处理。
@@ -732,6 +732,16 @@
 | color | String | 文字颜色 |
 | editable | Boolean | 是否可编辑 |
 | vScrollBarSkin | String | 滚动条皮肤 |
+
+### forge NewTextArea 编辑约定
+
+`NewTextArea` 是编辑器中的可视化文本工具，发布前仍由 `bakeTextElements()` 烘焙为 PNG，不在运行时保留可编辑文本控件。
+
+- 工具栏名称为“文本”。点击后在当前可见画布中央创建空文本并立即获得输入焦点；未输入内容直接退出时取消创建。
+- 默认宽度为 `800px`，默认尺寸模式为“固定宽度、自动高度”。尺寸模式保存在 `props.textSizingMode`：`auto`（自动宽高，无手柄）、`fixed-width`（固定宽度自动高度，仅左右手柄）、`fixed`（固定宽高，八个手柄）。缺失该字段的历史 `NewTextArea` 按 `fixed` 解释。
+- 编辑态使用原生光标、选区、中文输入法和浏览器撤销；`Cmd/Ctrl+Enter`、`Esc` 或点击外部退出。编辑态拖动用于选择文字，不能移动组件；选中态拖动文本框内部可移动组件；双击按点击位置放置光标。
+- 一次进入到退出只产生一条画布历史。普通文本保持透明，不增加会发布的默认底板。编辑辅助框使用蓝白双层描边、深色投影和高对比手柄；固定宽高发生溢出时使用橙色外描边提示。
+- 支持整段字体、字号、颜色、粗体、斜体、左中右对齐和行距；不支持局部混排、列表、链接、下划线和完整富文本。
 
 ### KlTab
 

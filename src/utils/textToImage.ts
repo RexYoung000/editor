@@ -7,6 +7,7 @@
 import { resolveElementFont } from './fontLoader';
 import { DEFAULT_FONT_ID } from '../elements/fontLibrary';
 import { loadLibraryFont } from './fontLoader';
+import { layoutText } from './textLayout';
 
 export interface RenderTextProps {
   fontSize?: number;
@@ -17,6 +18,9 @@ export interface RenderTextProps {
   leading?: number;
   fontLibraryId?: string;
   fontLocalPath?: string;
+  bold?: boolean;
+  italic?: boolean;
+  textSizingMode?: 'auto' | 'fixed-width' | 'fixed';
 }
 
 /**
@@ -47,7 +51,6 @@ export async function renderTextToImage(
   const color = props.color ?? '#333333';
   const align = props.align ?? 'left';
   const valign = props.valign ?? 'top';
-  const wordWrap = props.wordWrap !== false;
   const leading = props.leading ?? 0;
   const lineHeight = fontSize + leading;
 
@@ -56,22 +59,11 @@ export async function renderTextToImage(
   canvas.height = Math.max(1, Math.ceil(height * scale));
   const ctx = canvas.getContext('2d')!;
   ctx.scale(scale, scale);
-  ctx.font = `${fontSize}px "${fontFace}"`;
+  ctx.font = `${props.italic ? 'italic ' : ''}${props.bold ? '700 ' : '400 '}${fontSize}px "${fontFace}"`;
   ctx.textBaseline = 'top';
   ctx.fillStyle = color;
 
-  const rawLines = text.split('\n');
-  const lines: string[] = [];
-  for (const raw of rawLines) {
-    if (!wordWrap || raw.length === 0) { lines.push(raw); continue; }
-    let cur = '';
-    for (const ch of raw) {
-      const w = ctx.measureText(cur + ch).width;
-      if (w > width && cur.length > 0) { lines.push(cur); cur = ch; }
-      else { cur = cur + ch; }
-    }
-    lines.push(cur);
-  }
+  const lines = layoutText(text, width, height, props, fontFace).lines;
 
   const totalHeight = lines.length * lineHeight;
   let startY: number;

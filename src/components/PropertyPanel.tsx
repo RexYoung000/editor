@@ -33,6 +33,7 @@ import {
   isChoiceOption,
 } from '../utils/choiceAnswerRules';
 import { isQuickTemplateConfirm } from '../utils/quickTemplateConfirm';
+import { layoutText, normalizeTextSizingMode } from '../utils/textLayout';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -528,6 +529,16 @@ export default function PropertyPanel() {
       if (el.type === 'KlInputImage' && key === '_judgeAnswer') {
         newProps.place = String(value ?? '').length + 1;
       }
+      if (el.type === 'NewTextArea') {
+        const mode = normalizeTextSizingMode(newProps.textSizingMode);
+        const measured = layoutText(String(newProps.text ?? ''), el.width, el.height, newProps);
+        updateElement(el.id, {
+          props: newProps,
+          ...(mode === 'auto' ? { width: measured.width, height: measured.height } : {}),
+          ...(mode === 'fixed-width' ? { height: measured.height } : {}),
+        } as Partial<Element>);
+        return;
+      }
       updateElement(el.id, { props: newProps } as Partial<Element>);
     });
   };
@@ -535,6 +546,16 @@ export default function PropertyPanel() {
   const handleTransformChange = (key: string, value: unknown) => {
     selectedElements.forEach((el) => {
       if (getElementLayerState(el, elementMap).effectiveLocked) return;
+      if (el.type === 'NewTextArea' && (key === 'width' || key === 'height')) {
+        const mode = normalizeTextSizingMode(el.props.textSizingMode);
+        if (mode === 'auto' || (mode === 'fixed-width' && key === 'height')) return;
+        if (mode === 'fixed-width' && key === 'width') {
+          const width = Math.max(1, Number(value) || 1);
+          const measured = layoutText(String(el.props.text ?? ''), width, el.height, el.props);
+          updateElement(el.id, { width, height: measured.height });
+          return;
+        }
+      }
       updateElement(el.id, { [key]: value } as Partial<Element>);
     });
     // MatchingItem 宽高变化时，需要从 store 读取最新状态后同步图片子节点尺寸

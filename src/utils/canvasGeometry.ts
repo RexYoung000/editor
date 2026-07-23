@@ -68,7 +68,7 @@ function getLocalMatrix(element: Element): Matrix2D {
   };
 }
 
-function invertMatrix(matrix: Matrix2D): Matrix2D | null {
+export function invertMatrix(matrix: Matrix2D): Matrix2D | null {
   const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
   if (Math.abs(determinant) < 0.0000001) return null;
   return {

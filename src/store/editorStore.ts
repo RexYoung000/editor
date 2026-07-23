@@ -142,7 +142,7 @@ interface EditorState {
   renameSubPage: (subPageId: string, name: string) => void;
   renameStage: (stageId: string, name: string) => void;
 
-  addElement: (element: Element) => void;
+  addElement: (element: Element, saveToHistory?: boolean) => void;
   updateElement: (id: string, updates: Partial<Element>) => void;
   setElementEditorHidden: (id: string, hidden: boolean) => void;
   setElementsEditorHidden: (ids: string[], hidden: boolean) => void;
@@ -1425,7 +1425,7 @@ export const useEditorStore = create<EditorState>()(
         }
       }),
 
-    addElement: (element) =>
+    addElement: (element, saveToHistory = true) =>
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
@@ -1441,7 +1441,7 @@ export const useEditorStore = create<EditorState>()(
           element.props.var = getUniqueElementName(baseVar, page.elements.map((e) => (e.props?.var as string) || ''));
         }
         page.elements.push(element);
-        get().saveHistory();
+        if (saveToHistory) get().saveHistory();
       }),
 
     updateElement: (id, updates) =>
