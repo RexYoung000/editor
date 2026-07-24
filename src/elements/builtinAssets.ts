@@ -54,6 +54,10 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'preset.img1',          src: 'editor/img_1.png' },
   { id: 'preset.img2',          src: 'editor/img_2.png' },
   { id: 'preset.video',         src: 'editor/video-placeholder.png' },
+  { id: 'preset.s8Demo01Hw.bg', src: 'runtime/game/preset/s8_demo_01_hw/img_056c29.jpg', exportPath: 'game/preset/s8_demo_01_hw/img_056c29.jpg' },
+  { id: 'preset.s4Demo01Hw.bg', src: 'runtime/game/preset/s4_demo_01_hw/img_78b188.jpg', exportPath: 'game/preset/s4_demo_01_hw/img_78b188.jpg' },
+  { id: 'preset.s4Demo01Hw.banner', src: 'runtime/game/preset/s4_demo_01_hw/img_3426e0.png', exportPath: 'game/preset/s4_demo_01_hw/img_3426e0.png' },
+  { id: 'preset.s8SseTest01.bg', src: 'runtime/game/preset/s8_sse_test_01/img_056c29.jpg', exportPath: 'game/preset/s8_sse_test_01/img_056c29.jpg' },
 
   // 键盘预设1：数字键盘（参考 LessonZK 模板）
   { id: 'keyboard.preset1.bg',          src: 'runtime/game/jpL11/jp_3.png',       exportPath: 'game/jpL11/jp_3.png' },

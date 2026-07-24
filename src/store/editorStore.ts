@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+﻿import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { Element, SubPage, Stage, Course, InternalPage, InternalPageKind, DialogSettings, EditorLayerGroup } from '../types';
 import {
@@ -15,6 +15,7 @@ import {
   pinTemplate,
 } from '../utils/customTemplateFs';
 import { getCourseDirPath } from '../utils/electronFs';
+import type { CourseKind } from '../utils/courseKind';
 import { PRESET_TEMPLATES } from '../presets';
 import { getUniqueElementName, normalizeElementNames, createDefaultElement, elementMeta, rebuildSubPageCounters, getNextNumberedName, getNextItemNameForCenterMatch } from '../elements/elementMeta';
 import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
@@ -88,7 +89,7 @@ interface EditorState {
   historyIndex: number;
   pageThumbnails: Record<string, string>;
   customTemplates: CustomTemplate[];
-  /** 自定义模板根目录（localStorage 持久化），未设置时点选自定义模板 tab 会引导选择 */
+  /** 鑷畾涔夋ā鏉挎牴鐩綍锛坙ocalStorage 鎸佷箙鍖栵級锛屾湭璁剧疆鏃剁偣閫夎嚜瀹氫箟妯℃澘 tab 浼氬紩瀵奸€夋嫨 */
   customTemplateDir: string | null;
 
   // Actions
@@ -113,7 +114,7 @@ interface EditorState {
   setPageThumbnail: (subPageId: string, dataUrl: string) => void;
 
   addStage: () => void;
-  addVideoStage: () => void;  // 复习课专用：添加视频关卡
+  addVideoStage: () => void;  // 澶嶄範璇句笓鐢細娣诲姞瑙嗛鍏冲崱
   addStageFromSubPage: (sourceSubPageId: string) => void;
   addStageFromTemplate: (templateId: string) => Promise<void>;
   addStageFromPreset: (presetId: string) => void;
@@ -199,9 +200,9 @@ interface EditorState {
   addFillBlankInput: (klInputBoxId: string) => void;
   removeFillBlankInput: (klInputBoxId: string) => void;
 
-  /** 连线题：添加一对连线项（左 camp1 + 右 camp2） */
+  /** 杩炵嚎棰橈細娣诲姞涓€瀵硅繛绾块」锛堝乏 camp1 + 鍙?camp2锛?*/
   addMatchingPair: (matchingGameId: string) => void;
-  /** 连线题：删除最后一对连线项 */
+  /** 杩炵嚎棰橈細鍒犻櫎鏈€鍚庝竴瀵硅繛绾块」 */
   removeMatchingPair: (matchingGameId: string) => void;
 
   addDropObj: (dragViewBoxId: string) => void;
@@ -214,13 +215,13 @@ interface EditorState {
   alignDropObjToSkin: (elementId: string, propKey: 'skin' | 'tipSkin') => void;
 }
 
-/** 在 course 上根据 subPageId 找到 SubPage（同时遍历 stages 和 previewStages），找不到返回 null。
- *  实现位于 utils/findSubPage.ts（避免 selection.ts ↔ editorStore.ts 循环 import）。
- *  re-export 让 store 内部和组件都能从同一处用。 */
+/** 鍦?course 涓婃牴鎹?subPageId 鎵惧埌 SubPage锛堝悓鏃堕亶鍘?stages 鍜?previewStages锛夛紝鎵句笉鍒拌繑鍥?null銆?
+ *  瀹炵幇浣嶄簬 utils/findSubPage.ts锛堥伩鍏?selection.ts 鈫?editorStore.ts 寰幆 import锛夈€?
+ *  re-export 璁?store 鍐呴儴鍜岀粍浠堕兘鑳戒粠鍚屼竴澶勭敤銆?*/
 import { findSubPage } from '../utils/findSubPage';
 export { findSubPage };
 
-/** 在 state 上根据当前 currentSubPageId 找到 SubPage（mutable 引用），找不到返回 null */
+/** 鍦?state 涓婃牴鎹綋鍓?currentSubPageId 鎵惧埌 SubPage锛坢utable 寮曠敤锛夛紝鎵句笉鍒拌繑鍥?null */
 function findCurrentSubPage(state: EditorState): SubPage | InternalPage | null {
   const subPage = findSubPage(state.currentCourse, state.currentSubPageId);
   if (!subPage) return null;
@@ -245,8 +246,11 @@ function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${(_idSeq++).toString(36)}`;
 }
 
-/** 深拷贝元素数组并为每个元素重新分配 ID，同时改写元素间引用。
- *  用于 duplicateSubPage / addSubPageFromTemplate 等需要克隆整页元素的场景，避免出现重复 React key。 */
+function isPresetAllowedForCourse(preset: { courseKinds?: CourseKind[] }, kind?: CourseKind): boolean {
+  return !preset.courseKinds?.length || !kind || preset.courseKinds.includes(kind);
+}
+
+/** 娣辨嫹璐濆厓绱犳暟缁勫苟涓烘瘡涓厓绱犻噸鏂板垎閰?ID锛屽悓鏃舵敼鍐欏厓绱犻棿寮曠敤銆? *  鐢ㄤ簬 duplicateSubPage / addSubPageFromTemplate 绛夐渶瑕佸厠闅嗘暣椤靛厓绱犵殑鍦烘櫙锛岄伩鍏嶅嚭鐜伴噸澶?React key銆?*/
 function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[] {
   const cloned: Element[] = JSON.parse(JSON.stringify(elements));
   const idMap = new Map<string, string>();
@@ -270,15 +274,15 @@ function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[
   return cloned;
 }
 
-/** 确保 course 至少有 1 个 stage、每个 stage 至少有 1 个 subPage。
- *  对老数据（旧 `pages` 字段）做最小迁移：把每个旧 page 包装成一个独立大关卡，避免直接崩溃。 */
+/** 纭繚 course 鑷冲皯鏈?1 涓?stage銆佹瘡涓?stage 鑷冲皯鏈?1 涓?subPage銆?
+ *  瀵硅€佹暟鎹紙鏃?`pages` 瀛楁锛夊仛鏈€灏忚縼绉伙細鎶婃瘡涓棫 page 鍖呰鎴愪竴涓嫭绔嬪ぇ鍏冲崱锛岄伩鍏嶇洿鎺ュ穿婧冦€?*/
 function ensureCourseShape(course: Course): Course {
   const legacy = (course as unknown as { pages?: SubPage[] }).pages;
   if ((!course.stages || course.stages.length === 0) && Array.isArray(legacy) && legacy.length > 0) {
     course.stages = legacy.map((page, i) => ({
       id: genId('stage'),
-      name: `关卡 ${i + 1}`,
-      subPages: [{ ...page, name: `小关卡 ${i + 1}-1` }],
+      name: `鍏冲崱 ${i + 1}`,
+      subPages: [{ ...page, name: `灏忓叧鍗?${i + 1}-1` }],
     }));
     delete (course as unknown as { pages?: SubPage[] }).pages;
   }
@@ -293,20 +297,20 @@ function ensureCourseShape(course: Course): Course {
   return course;
 }
 
-/** 默认关卡命名格式正则。重命名时只覆盖默认格式，保留用户自定义名称。 */
-const STAGE_DEFAULT_RE = /^关卡\s+\d+$/;
-const SUBPAGE_DEFAULT_RE = /^小关卡\s+\d+-\d+$/;
-const PREVIEW_STAGE_DEFAULT_RE = /^预习\s+\d+$/;
+/** 榛樿鍏冲崱鍛藉悕鏍煎紡姝ｅ垯銆傞噸鍛藉悕鏃跺彧瑕嗙洊榛樿鏍煎紡锛屼繚鐣欑敤鎴疯嚜瀹氫箟鍚嶇О銆?*/
+const STAGE_DEFAULT_RE = /^鍏冲崱\s+\d+$/;
+const SUBPAGE_DEFAULT_RE = /^灏忓叧鍗s+\d+-\d+$/;
+const PREVIEW_STAGE_DEFAULT_RE = /^棰勪範\s+\d+$/;
 
-/** 按位置重排关卡序号，仅覆盖默认命名格式 */
+/** 鎸変綅缃噸鎺掑叧鍗″簭鍙凤紝浠呰鐩栭粯璁ゅ懡鍚嶆牸寮?*/
 function renumberAll(course: Course): void {
   course.stages.forEach((stage, si) => {
     if (STAGE_DEFAULT_RE.test(stage.name)) {
-      stage.name = `关卡 ${si + 1}`;
+      stage.name = `鍏冲崱 ${si + 1}`;
     }
     stage.subPages.forEach((sp, sj) => {
       if (SUBPAGE_DEFAULT_RE.test(sp.name)) {
-        sp.name = `小关卡 ${si + 1}-${sj + 1}`;
+        sp.name = `灏忓叧鍗?${si + 1}-${sj + 1}`;
       }
     });
   });
@@ -315,7 +319,7 @@ function renumberAll(course: Course): void {
 function renumberPreviewAll(course: Course): void {
   course.previewStages?.forEach((stage, si) => {
     if (PREVIEW_STAGE_DEFAULT_RE.test(stage.name)) {
-      stage.name = `预习 ${si + 1}`;
+      stage.name = `棰勪範 ${si + 1}`;
     }
   });
 }
@@ -450,7 +454,7 @@ export const useEditorStore = create<EditorState>()(
         state.selectedEditorLayerGroupId = null;
         state.history = [JSON.parse(JSON.stringify(course))];
         state.historyIndex = 0;
-        // 重建所有 SubPage 的局部类型计数器，让新建组件按局部序号命名
+        // 閲嶅缓鎵€鏈?SubPage 鐨勫眬閮ㄧ被鍨嬭鏁板櫒锛岃鏂板缓缁勪欢鎸夊眬閮ㄥ簭鍙峰懡鍚?
         const allSubPages = [
           ...course.stages.flatMap(s => s.subPages),
           ...(course.previewStages?.flatMap(s => s.subPages) ?? []),
@@ -463,7 +467,7 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         state.currentStageId = stageId;
         state.currentSubPageId = subPageId;
-        // frozen 页面切换进入时自动选中锁定元素
+        // frozen 椤甸潰鍒囨崲杩涘叆鏃惰嚜鍔ㄩ€変腑閿佸畾鍏冪礌
         const stage = state.currentCourse?.stages.find(s => s.id === stageId)
           ?? (state.currentCourse?.previewStages ?? []).find(s => s.id === stageId);
         const page = stage?.subPages.find(sp => sp.id === subPageId);
@@ -532,7 +536,7 @@ export const useEditorStore = create<EditorState>()(
           closeButton.name = 'btn_close';
           closeButton.x = 1540;
           closeButton.y = 180;
-          closeButton.props = { ...closeButton.props, label: '关闭' };
+          closeButton.props = { ...closeButton.props, label: '鍏抽棴' };
           closeButton.actions = [{ id: genId('action'), event: 'onClick', actionType: 'closeInternalDialog' }];
           page.elements.push(closeButton);
         }
@@ -591,8 +595,8 @@ export const useEditorStore = create<EditorState>()(
         const source = subPage.internalPages[index];
         const copy = cloneInternalPageWithinSubPage(source, genId);
         let suffix = 2;
-        let name = `${source.name} 副本`;
-        while (subPage.internalPages.some((item) => item.name === name)) name = `${source.name} 副本 ${suffix++}`;
+        let name = `${source.name} 鍓湰`;
+        while (subPage.internalPages.some((item) => item.name === name)) name = `${source.name} 鍓湰 ${suffix++}`;
         copy.name = name;
         copy.noEntryDeferred = false;
         subPage.internalPages.splice(index + 1, 0, copy);
@@ -718,16 +722,16 @@ export const useEditorStore = create<EditorState>()(
     },
 
     moveInternalPage: (pageId, targetSubPageId, targetIndex) => {
-      let result: { ok: boolean; error?: string } = { ok: false, error: '未找到页面' };
+      let result: { ok: boolean; error?: string } = { ok: false, error: 'PAGE_NOT_FOUND' };
       set((state) => {
         if (!state.currentCourse || !state.currentSubPageId) return;
         const sourceSubPage = findSubPage(state.currentCourse, state.currentSubPageId);
         const targetSubPage = findSubPage(state.currentCourse, targetSubPageId);
         if (!isInternalPagesSubPage(sourceSubPage) || !isInternalPagesSubPage(targetSubPage)) return;
-        if (sourceSubPage.templateId !== targetSubPage.templateId) { result = { ok: false, error: '题型结构不同，不能移入' }; return; }
+        if (sourceSubPage.templateId !== targetSubPage.templateId) { result = { ok: false, error: 'TEMPLATE_STRUCTURE_MISMATCH' }; return; }
         const sourceArea = state.currentCourse.previewStages?.some((stage) => stage.subPages.some((sub) => sub.id === sourceSubPage.id));
         const targetArea = state.currentCourse.previewStages?.some((stage) => stage.subPages.some((sub) => sub.id === targetSubPage.id));
-        if (sourceArea !== targetArea) { result = { ok: false, error: '正课与预习区域之间不能移动内部页面' }; return; }
+        if (sourceArea !== targetArea) { result = { ok: false, error: 'CROSS_AREA_MOVE_BLOCKED' }; return; }
         const sourceIndex = sourceSubPage.internalPages.findIndex((page) => page.id === pageId);
         if (sourceIndex < 0) return;
         const page = sourceSubPage.internalPages[sourceIndex];
@@ -770,13 +774,13 @@ export const useEditorStore = create<EditorState>()(
     toggleStageShrink: (stageId) =>
       set((state) => {
         if (!state.currentCourse) return;
-        // 先从预习关卡查找
+        // 鍏堜粠棰勪範鍏冲崱鏌ユ壘
         const previewStage = state.currentCourse.previewStages?.find((s) => s.id === stageId);
         if (previewStage) {
           previewStage.shrinked = !previewStage.shrinked;
           return;
         }
-        // 再从正课关卡查找
+        // 鍐嶄粠姝ｈ鍏冲崱鏌ユ壘
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (stage) stage.shrinked = !stage.shrinked;
       }),
@@ -787,12 +791,12 @@ export const useEditorStore = create<EditorState>()(
         const stageNum = state.currentCourse.stages.length + 1;
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `小关卡 ${stageNum}-1`,
+          name: `灏忓叧鍗?${stageNum}-1`,
           elements: [],
         };
         const newStage: Stage = {
           id: genId('stage'),
-          name: `关卡 ${stageNum}`,
+          name: `鍏冲崱 ${stageNum}`,
           subPages: [newSub],
         };
         state.currentCourse.stages.push(newStage);
@@ -826,13 +830,13 @@ export const useEditorStore = create<EditorState>()(
         };
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: '视频关卡',
+          name: '瑙嗛鍏冲崱',
           frozen: true,
           elements: [videoEl],
         };
         const newStage: Stage = {
           id: genId('stage'),
-          name: `视频${stageNum}`,
+          name: `瑙嗛${stageNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -857,11 +861,11 @@ export const useEditorStore = create<EditorState>()(
         if (!sourceSub) return;
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
-        newSub.name = `小关卡 0-0`;
+        newSub.name = `灏忓叧鍗?0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: `关卡 0`,
+          name: `鍏冲崱 0`,
           subPages: [newSub],
         };
         state.currentCourse.stages.push(newStage);
@@ -879,7 +883,7 @@ export const useEditorStore = create<EditorState>()(
       if (!state0.currentCourse) return;
       const template = state0.customTemplates.find((t) => t.id === templateId);
       if (!template) return;
-      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('复习课和视频关卡不支持内部页面模板');
+      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('INTERNAL_PAGES_UNSUPPORTED_FOR_REVIEW');
       const courseDir = getCourseDirPath(state0.currentCourse.id);
       if (!courseDir) throw new Error('NO_DIR_PATH');
       const applied = await applyTemplate({
@@ -890,11 +894,11 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         if (!state.currentCourse) return;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
-        newSub.name = `小关卡 0-0`;
+        newSub.name = `灏忓叧鍗?0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: `关卡 0`,
+          name: `鍏冲崱 0`,
           subPages: [newSub],
         };
         state.currentCourse.stages.push(newStage);
@@ -957,12 +961,12 @@ export const useEditorStore = create<EditorState>()(
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `预习 ${previewNum}`,
+          name: `棰勪範 ${previewNum}`,
           elements: [],
         };
         const newStage: Stage = {
           id: genId('stage'),
-          name: `预习 ${previewNum}`,
+          name: `棰勪範 ${previewNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -981,14 +985,15 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
+        if (!isPresetAllowedForCourse(preset, state.currentCourse.kind)) return;
         if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `预习 ${previewNum}`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `棰勪範 ${previewNum}`);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: preset.defaultStageName ?? `预习 ${previewNum}`,
+          name: preset.defaultStageName ?? `棰勪範 ${previewNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -997,7 +1002,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedStageTarget = 'preview';
-        // frozen 页面自动选中锁定元素
+        // frozen 椤甸潰鑷姩閫変腑閿佸畾鍏冪礌
         if (preset.frozen) {
           state.selectedElementIds = newSub.elements.filter(e => e.locked).map(e => e.id);
         } else {
@@ -1028,11 +1033,11 @@ export const useEditorStore = create<EditorState>()(
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
-        newSub.name = `预习 ${previewNum}`;
+        newSub.name = `棰勪範 ${previewNum}`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: `预习 ${previewNum}`,
+          name: `棰勪範 ${previewNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -1051,7 +1056,7 @@ export const useEditorStore = create<EditorState>()(
       if (!state0.currentCourse) return;
       const template = state0.customTemplates.find((t) => t.id === templateId);
       if (!template) return;
-      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('复习课和视频关卡不支持内部页面模板');
+      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('INTERNAL_PAGES_UNSUPPORTED_FOR_REVIEW');
       const courseDir = getCourseDirPath(state0.currentCourse.id);
       if (!courseDir) throw new Error('NO_DIR_PATH');
       const applied = await applyTemplate({
@@ -1064,11 +1069,11 @@ export const useEditorStore = create<EditorState>()(
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
-        newSub.name = `预习 ${previewNum}`;
+        newSub.name = `棰勪範 ${previewNum}`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: `预习 ${previewNum}`,
+          name: `棰勪範 ${previewNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -1159,7 +1164,7 @@ export const useEditorStore = create<EditorState>()(
         const stageIdx = state.currentCourse.stages.indexOf(stage);
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `小关卡 ${stageIdx + 1}-${stage.subPages.length + 1}`,
+          name: `灏忓叧鍗?${stageIdx + 1}-${stage.subPages.length + 1}`,
           elements: [],
         };
         stage.subPages.push(newSub);
@@ -1191,7 +1196,7 @@ export const useEditorStore = create<EditorState>()(
         if (!sourceSub) return;
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
-        newSub.name = `小关卡 0-0`;
+        newSub.name = `灏忓叧鍗?0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
@@ -1207,7 +1212,7 @@ export const useEditorStore = create<EditorState>()(
       if (!state0.currentCourse) return;
       const template = state0.customTemplates.find((t) => t.id === templateId);
       if (!template) return;
-      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('复习课和视频关卡不支持内部页面模板');
+      if (state0.currentCourse.kind === 'review' && template.model === 'internal-pages-v1') throw new Error('INTERNAL_PAGES_UNSUPPORTED_FOR_REVIEW');
       const courseDir = getCourseDirPath(state0.currentCourse.id);
       if (!courseDir) throw new Error('NO_DIR_PATH');
       const applied = await applyTemplate({
@@ -1220,7 +1225,7 @@ export const useEditorStore = create<EditorState>()(
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (!stage) return;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
-        newSub.name = `小关卡 0-0`;
+        newSub.name = `灏忓叧鍗?0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
@@ -1237,12 +1242,13 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
+        if (!isPresetAllowedForCourse(preset, state.currentCourse.kind)) return;
         if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `灏忓叧鍗?0-0`);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: preset.defaultStageName ?? `关卡 0`,
+          name: preset.defaultStageName ?? `鍏冲崱 0`,
           noSubPages: preset.noSubPages ?? false,
           subPages: [newSub],
         };
@@ -1251,7 +1257,7 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedStageTarget = 'normal';
-        // frozen 页面自动选中锁定元素
+        // frozen 椤甸潰鑷姩閫変腑閿佸畾鍏冪礌
         if (preset.frozen) {
           state.selectedElementIds = newSub.elements.filter(e => e.locked).map(e => e.id);
         } else {
@@ -1267,16 +1273,17 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
+        if (!isPresetAllowedForCourse(preset, state.currentCourse.kind)) return;
         if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (!stage) return;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `灏忓叧鍗?0-0`);
         markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
-        // frozen 页面自动选中锁定元素
+        // frozen 椤甸潰鑷姩閫変腑閿佸畾鍏冪礌
         if (preset.frozen) {
           state.selectedElementIds = newSub.elements.filter(e => e.locked).map(e => e.id);
         } else {
@@ -1301,7 +1308,7 @@ export const useEditorStore = create<EditorState>()(
         if (idx === -1) return;
         stage.subPages.splice(idx, 1);
 
-        // 若删完最后一个 sub-page，连大关卡一起删
+        // 鑻ュ垹瀹屾渶鍚庝竴涓?sub-page锛岃繛澶у叧鍗′竴璧峰垹
         if (stage.subPages.length === 0) {
           if (target === 'preview') {
             const stageIdx = state.currentCourse.previewStages!.indexOf(stage);
@@ -1312,7 +1319,7 @@ export const useEditorStore = create<EditorState>()(
           }
         }
 
-        // 当前选中的 subPage 若被删，重新选中
+        // 褰撳墠閫変腑鐨?subPage 鑻ヨ鍒狅紝閲嶆柊閫変腑
         if (state.currentSubPageId === subPageId) {
           if (target === 'preview' && state.currentCourse.previewStages && state.currentCourse.previewStages.length > 0) {
             const first = state.currentCourse.previewStages[0];
@@ -1354,9 +1361,8 @@ export const useEditorStore = create<EditorState>()(
         const sp = stage.subPages.find((s) => s.id === subPageId);
         if (!sp) return;
         const newSub = cloneSubPageWithNewIds(sp, genId);
-        // 用合法默认格式占位，下面 renumberAll 会按位置正确编号；
-        // 若原 sub 是用户自定义名，则保留“副本”格式不被自动重命名覆盖
-        newSub.name = SUBPAGE_DEFAULT_RE.test(sp.name) ? `小关卡 0-0` : `${sp.name} 副本`;
+        // 鐢ㄥ悎娉曢粯璁ゆ牸寮忓崰浣嶏紝涓嬮潰 renumberAll 浼氭寜浣嶇疆姝ｇ‘缂栧彿锛?        // 鑻ュ師 sub 鏄敤鎴疯嚜瀹氫箟鍚嶏紝鍒欎繚鐣欌€滃壇鏈€濇牸寮忎笉琚嚜鍔ㄩ噸鍛藉悕瑕嗙洊
+        newSub.name = SUBPAGE_DEFAULT_RE.test(sp.name) ? `灏忓叧鍗?0-0` : `${sp.name} 鍓湰`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const subIdx = stage.subPages.indexOf(sp);
         stage.subPages.splice(subIdx + 1, 0, newSub);
@@ -1431,11 +1437,11 @@ export const useEditorStore = create<EditorState>()(
         if (!page) return;
         if ('frozen' in page && page.frozen) return;
         if (!element.name?.trim()) element.name = `${element.layaType || element.type}_1`;
-        // 确保 name 在同一父节点下唯一（局部作用域）
+        // 纭繚 name 鍦ㄥ悓涓€鐖惰妭鐐逛笅鍞竴锛堝眬閮ㄤ綔鐢ㄥ煙锛?
         const siblings = page.elements.filter(e => e.parentId === element.parentId);
         const existingNames = siblings.map(e => e.name ?? '');
         element.name = getUniqueElementName(element.name, existingNames);
-        // 确保 var 唯一（如果需要）— var 仍然是全局唯一标识符
+        // 纭繚 var 鍞竴锛堝鏋滈渶瑕侊級鈥?var 浠嶇劧鏄叏灞€鍞竴鏍囪瘑绗?
         if (elementMeta[element.type]?.varFromName) {
           const baseVar = element.name;
           element.props.var = getUniqueElementName(baseVar, page.elements.map((e) => (e.props?.var as string) || ''));
@@ -1686,31 +1692,31 @@ export const useEditorStore = create<EditorState>()(
     },
 
     moveElementIntoParent: (id) => {
-      let result: ContainerGeometryActionResult = { ok: false, error: '未找到子元素' };
+      let result: ContainerGeometryActionResult = { ok: false, error: '鏈壘鍒板瓙鍏冪礌' };
       let changed = false;
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
         const element = page.elements.find((item) => item.id === id);
         if (!element?.parentId) {
-          result = { ok: false, error: '当前元素不在容器中' };
+          result = { ok: false, error: 'ELEMENT_NOT_IN_CONTAINER' };
           return;
         }
         if (isElementLocked(element, new Map(page.elements.map((item) => [item.id, item])))) {
-          result = { ok: false, error: '元素或父容器已锁定，无法移动' };
+          result = { ok: false, error: '鍏冪礌鎴栫埗瀹瑰櫒宸查攣瀹氾紝鏃犳硶绉诲姩' };
           return;
         }
         const containment = getElementParentContainment(element, page.elements);
         if (!containment) {
-          result = { ok: false, error: '无法读取父容器范围' };
+          result = { ok: false, error: 'CANNOT_READ_PARENT_CONTAINER' };
           return;
         }
         if (!containment.isOverflowing) {
-          result = { ok: false, error: '子元素已在父容器范围内' };
+          result = { ok: false, error: 'CHILD_ALREADY_IN_PARENT_SCOPE' };
           return;
         }
         if (!containment.canFit) {
-          result = { ok: false, error: '子元素尺寸超过父容器，请先扩展容器' };
+          result = { ok: false, error: 'CHILD_EXCEEDS_PARENT_BOUNDS' };
           return;
         }
         element.x += containment.correction.x;
@@ -1723,27 +1729,27 @@ export const useEditorStore = create<EditorState>()(
     },
 
     fitContainerToChildren: (id) => {
-      let result: ContainerGeometryActionResult = { ok: false, error: '未找到父容器' };
+      let result: ContainerGeometryActionResult = { ok: false, error: '鏈壘鍒扮埗瀹瑰櫒' };
       let changed = false;
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
         const container = page.elements.find((item) => item.id === id);
         if (!container || !isContainerElementType(container.type)) {
-          result = { ok: false, error: '目标元素不是可扩展容器' };
+          result = { ok: false, error: 'TARGET_NOT_EXPANDABLE_CONTAINER' };
           return;
         }
         if (isElementLocked(container, new Map(page.elements.map((item) => [item.id, item])))) {
-          result = { ok: false, error: '父容器已锁定，无法扩展' };
+          result = { ok: false, error: 'PARENT_CONTAINER_LOCKED' };
           return;
         }
         const updates = getFitContainerToChildrenUpdates(container, page.elements);
         if (!updates) {
-          result = { ok: false, error: '父容器中没有可适应的内容' };
+          result = { ok: false, error: 'NO_ADAPTABLE_CONTENT_IN_PARENT' };
           return;
         }
         if (updates.length === 0) {
-          result = { ok: false, error: '全部内容已在父容器范围内' };
+          result = { ok: false, error: '鍏ㄩ儴鍐呭宸插湪鐖跺鍣ㄨ寖鍥村唴' };
           return;
         }
         for (const update of updates) {
@@ -1799,7 +1805,7 @@ export const useEditorStore = create<EditorState>()(
       if (removedChoiceAnswers > 0 && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('forge:toast', {
           detail: {
-            message: '已删除正确选项，答案配置已同步更新，可撤销恢复',
+            message: '宸插垹闄ゆ纭€夐」锛岀瓟妗堥厤缃凡鍚屾鏇存柊锛屽彲鎾ら攢鎭㈠',
             type: 'warning',
           },
         }));
@@ -1904,31 +1910,31 @@ export const useEditorStore = create<EditorState>()(
           removedChoiceAnswers = removeChoiceAnswerRefs(page.elements, new Set([element.id]));
         }
 
-        // [新增] 调整数组位置：子元素排在父容器所有现有子元素之后
+        // [鏂板] 璋冩暣鏁扮粍浣嶇疆锛氬瓙鍏冪礌鎺掑湪鐖跺鍣ㄦ墍鏈夌幇鏈夊瓙鍏冪礌涔嬪悗
         if (newParentId) {
-          // 1. 找到父容器在数组中的索引
+          // 1. 鎵惧埌鐖跺鍣ㄥ湪鏁扮粍涓殑绱㈠紩
           const parentIdx = page.elements.findIndex(e => e.id === newParentId);
 
-          // 2. 找到该容器的所有现有子元素（不包括当前元素）
+          // 2. 鎵惧埌璇ュ鍣ㄧ殑鎵€鏈夌幇鏈夊瓙鍏冪礌锛堜笉鍖呮嫭褰撳墠鍏冪礌锛?
           const siblings = page.elements.filter(e =>
             e.parentId === newParentId && e.id !== id
           );
 
-          // 3. 确定插入位置
+          // 3. 纭畾鎻掑叆浣嶇疆
           let insertIdx;
           if (siblings.length > 0) {
-            // 有子元素：插在最后一个子元素之后
+            // 鏈夊瓙鍏冪礌锛氭彃鍦ㄦ渶鍚庝竴涓瓙鍏冪礌涔嬪悗
             const lastSibling = siblings[siblings.length - 1];
             insertIdx = page.elements.findIndex(e => e.id === lastSibling.id) + 1;
           } else {
-            // 无子元素：插在父容器紧邻的下一个位置
+            // 鏃犲瓙鍏冪礌锛氭彃鍦ㄧ埗瀹瑰櫒绱ч偦鐨勪笅涓€涓綅缃?
             insertIdx = parentIdx + 1;
           }
 
-          // 4. 调整数组：先移除，再插入
+          // 4. 璋冩暣鏁扮粍锛氬厛绉婚櫎锛屽啀鎻掑叆
           const currentIdx = page.elements.findIndex(e => e.id === id);
           const [removed] = page.elements.splice(currentIdx, 1);
-          // 如果插入位置在移除位置之后，移除操作会让插入索引向前偏移 1
+          // 濡傛灉鎻掑叆浣嶇疆鍦ㄧЩ闄や綅缃箣鍚庯紝绉婚櫎鎿嶄綔浼氳鎻掑叆绱㈠紩鍚戝墠鍋忕Щ 1
           if (insertIdx > currentIdx) insertIdx--;
           page.elements.splice(insertIdx, 0, removed);
         }
@@ -1939,7 +1945,7 @@ export const useEditorStore = create<EditorState>()(
       if (removedChoiceAnswers > 0 && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('forge:toast', {
           detail: {
-            message: '选项已移出原选择题，正确答案配置已同步更新，可撤销恢复',
+            message: '閫夐」宸茬Щ鍑哄師閫夋嫨棰橈紝姝ｇ‘绛旀閰嶇疆宸插悓姝ユ洿鏂帮紝鍙挙閿€鎭㈠',
             type: 'warning',
           },
         }));
@@ -1958,7 +1964,7 @@ export const useEditorStore = create<EditorState>()(
           : [id];
 
         if (multi) {
-          // frozen 页面不允许取消锁定元素的选中
+          // frozen 椤甸潰涓嶅厑璁稿彇娑堥攣瀹氬厓绱犵殑閫変腑
           if (page && 'frozen' in page && page.frozen && page.elements.some(e => e.locked && state.selectedElementIds.includes(e.id))) {
             if (targetIds.some((targetId) => state.selectedElementIds.includes(targetId) && page.elements.find((item) => item.id === targetId)?.locked)) return;
           }
@@ -2001,7 +2007,6 @@ export const useEditorStore = create<EditorState>()(
     clearSelection: () =>
       set((state) => {
         const page = findCurrentSubPage(state);
-        // frozen 页面不允许清空选中（锁定元素必须保持选中）
         if (page && 'frozen' in page && page.frozen) return;
         state.selectedEditorLayerGroupId = null;
         state.selectedElementIds = [];
@@ -2021,13 +2026,13 @@ export const useEditorStore = create<EditorState>()(
         const page = findCurrentSubPage(state);
         if (!page) return;
         const selected = new Set(state.selectedElementIds);
-        // 递归收集选中元素的所有后代元素（子、孙、曾孙...）
+        // 閫掑綊鏀堕泦閫変腑鍏冪礌鐨勬墍鏈夊悗浠ｅ厓绱狅紙瀛愩€佸瓩銆佹浘瀛?..锛?
         const toCopy = new Set<string>(selected);
         const addDescendants = (parentId: string) => {
           for (const el of page.elements) {
             if (el.parentId === parentId && !toCopy.has(el.id)) {
               toCopy.add(el.id);
-              addDescendants(el.id); // 递归收集子元素的子元素
+              addDescendants(el.id); // 閫掑綊鏀堕泦瀛愬厓绱犵殑瀛愬厓绱?
             }
           }
         };
@@ -2081,15 +2086,15 @@ export const useEditorStore = create<EditorState>()(
           page.elements.map((element) => getLayerDisplayName(element, elementMeta[element.type]?.label)),
         );
 
-        // MatchingItem / DragObj / DropObj 走"扫描已用序号 + 最大+1"规则；
-        // 其他类型沿用 getUniqueElementName（按父节点局部去重，含 _2/_3 后缀）。
+        // MatchingItem / DragObj / DropObj 璧?鎵弿宸茬敤搴忓彿 + 鏈€澶?1"瑙勫垯锛?
+        // 鍏朵粬绫诲瀷娌跨敤 getUniqueElementName锛堟寜鐖惰妭鐐瑰眬閮ㄥ幓閲嶏紝鍚?_2/_3 鍚庣紑锛夈€?
         const FIXED_NAME_TYPES = new Set(['MatchingItem', 'DragObj', 'DropObj']);
 
         state.clipboard.forEach((el) => {
           const newEl = JSON.parse(JSON.stringify(el));
           newEl.id = idMap.get(el.id)!;
           if (newEl.groupId && groupIdMap.has(newEl.groupId)) newEl.groupId = groupIdMap.get(newEl.groupId);
-          // 先重映射父级和动作引用，让后续 name 生成能扫到正确父节点下的兄弟
+          // 鍏堥噸鏄犲皠鐖剁骇鍜屽姩浣滃紩鐢紝璁╁悗缁?name 鐢熸垚鑳芥壂鍒版纭埗鑺傜偣涓嬬殑鍏勫紵
           if (newEl.parentId && idMap.has(newEl.parentId)) newEl.parentId = idMap.get(newEl.parentId);
           if (newEl.actions) {
             newEl.actions.forEach((a: { id: string; targetId?: string; judgeTargetId?: string; groupId?: string; branchId?: string }) => {
@@ -2103,9 +2108,9 @@ export const useEditorStore = create<EditorState>()(
           remapInputRelationRefs(newEl, idMap, genId);
           remapChoiceAnswerRefs(newEl, idMap);
 
-          // 生成唯一的 name
+          // 鐢熸垚鍞竴鐨?name
           if (FIXED_NAME_TYPES.has(newEl.type)) {
-            // 固定格式命名：保留前缀，重新生成序号
+            // 鍥哄畾鏍煎紡鍛藉悕锛氫繚鐣欏墠缂€锛岄噸鏂扮敓鎴愬簭鍙?
             if (newEl.type === 'DropObj') {
               newEl.name = getNextNumberedName('dj', page.elements, newEl.parentId);
             } else if (newEl.type === 'DragObj') {
@@ -2118,7 +2123,7 @@ export const useEditorStore = create<EditorState>()(
               } else if (originalPrefix && ['l', 'r', 't', 'b'].includes(originalPrefix)) {
                 newEl.name = getNextNumberedName(originalPrefix, page.elements, newEl.parentId);
               } else {
-                // 前缀异常 → 走通用兜底
+                // 鍓嶇紑寮傚父 鈫?璧伴€氱敤鍏滃簳
                 const siblings = page.elements.filter(e => e.parentId === newEl.parentId);
                 const reservedNames = new Set(siblings.map(e => e.name ?? '').filter(Boolean));
                 const baseName = (newEl.name?.trim() || '').replace(/_\d+$/, '') || 'item';
@@ -2126,7 +2131,7 @@ export const useEditorStore = create<EditorState>()(
               }
             }
           } else if (newEl.name?.trim()) {
-            // 通用：按父节点分组去重（保留旧行为）
+            // 閫氱敤锛氭寜鐖惰妭鐐瑰垎缁勫幓閲嶏紙淇濈暀鏃ц涓猴級
             const siblings = page.elements.filter(e => e.parentId === newEl.parentId);
             const reservedNames = new Set(siblings.map(e => e.name ?? '').filter(Boolean));
             const baseName = newEl.name.trim();
@@ -2134,7 +2139,7 @@ export const useEditorStore = create<EditorState>()(
             newEl.name = getUniqueElementName(baseNameWithoutNumber, reservedNames);
           }
 
-          // 生成唯一的 var（如果元素需要 var）— var 仍然是全局唯一
+          // 鐢熸垚鍞竴鐨?var锛堝鏋滃厓绱犻渶瑕?var锛夆€?var 浠嶇劧鏄叏灞€鍞竴
           if (elementMeta[newEl.type]?.varFromName) {
             const reservedVars = page.elements.map((e) => (e.props?.var as string) || '').filter(Boolean);
             const baseVar = newEl.name?.trim() || newEl.layaType || newEl.type;
@@ -2147,7 +2152,7 @@ export const useEditorStore = create<EditorState>()(
           newEl.props = withLayerLabel(newEl.props ?? {}, copiedLayerName);
           reservedLayerNames.add(copiedLayerName);
 
-          // 原位复制：不偏移位置
+          // 鍘熶綅澶嶅埗锛氫笉鍋忕Щ浣嶇疆
           page.elements.push(newEl);
           newIds.push(newEl.id);
         });
@@ -2317,7 +2322,7 @@ export const useEditorStore = create<EditorState>()(
         const gid = genId('layer-group');
         const runtimeParentId = [...selectedIds].map((id) => elementMap.get(id)?.parentId)[0];
         const groups = getEditorLayerGroups(page);
-        groups.push({ id: gid, name: '图层组', runtimeParentId });
+        groups.push({ id: gid, name: 'layer-group', runtimeParentId });
         page.editorLayerGroups = groups;
         page.elements.forEach((e) => {
           if (selectedIds.has(e.id)) e.groupId = gid;
@@ -2364,7 +2369,7 @@ export const useEditorStore = create<EditorState>()(
       const state0 = get();
       if (!state0.currentCourse) return { ok: false, error: 'NO_COURSE' };
       if (!state0.customTemplateDir) return { ok: false, error: 'NO_TEMPLATE_DIR' };
-      // 跨 stages 找小关卡
+      // 璺?stages 鎵惧皬鍏冲崱
       let sourceSub: SubPage | null = null;
       for (const stage of state0.currentCourse.stages) {
         const found = stage.subPages.find((sp) => sp.id === subPageId);
@@ -2424,7 +2429,7 @@ export const useEditorStore = create<EditorState>()(
       set((state) => { state.customTemplates = list; });
     },
 
-      /** 翻页：切换页面索引，切换 ContainerBox visible */
+      /** 缈婚〉锛氬垏鎹㈤〉闈㈢储寮曪紝鍒囨崲 ContainerBox visible */
       switchPageTurnPage: (elementId: string, newIndex: number) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2440,7 +2445,7 @@ export const useEditorStore = create<EditorState>()(
         set((state) => {
           const p = findCurrentSubPage(state);
           if (!p) return state;
-          // 遍历所有页面，选中的设成 true，其他设成 false
+          // 閬嶅巻鎵€鏈夐〉闈紝閫変腑鐨勮鎴?true锛屽叾浠栬鎴?false
           pageBoxes.forEach((box, i) => {
             const el = p.elements.find(e => e.id === box.id);
             if (el) el.props = { ...el.props, visible: i === newIndex };
@@ -2453,7 +2458,7 @@ export const useEditorStore = create<EditorState>()(
           if (ptEl) ptEl.props = { ...ptEl.props, currentPageIndex: newIndex };
           return state;
         });
-        // 同步 Laya 实例侧的 visible
+        // 鍚屾 Laya 瀹炰緥渚х殑 visible
         pageBoxes.forEach((box, i) => {
           const obj = getObject(box.id);
           if (obj) obj.visible = (i === newIndex);
@@ -2464,7 +2469,7 @@ export const useEditorStore = create<EditorState>()(
         });
       },
 
-      /** 翻页:添加新页面(ContainerBox + 同步创建标签按钮如果 buttonType 包含 tabs) */
+      /** 缈婚〉:娣诲姞鏂伴〉闈?ContainerBox + 鍚屾鍒涘缓鏍囩鎸夐挳濡傛灉 buttonType 鍖呭惈 tabs) */
       addPageTurnPage: (elementId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2490,7 +2495,7 @@ export const useEditorStore = create<EditorState>()(
         if (needTab) {
           newTab = createDefaultElement('SpeechSelectableObj', subPageId ?? undefined);
           newTab.parentId = elementId;
-          // 紧贴最后一个标签按钮右侧;没有就放默认位置
+          // 绱ц创鏈€鍚庝竴涓爣绛炬寜閽彸渚?娌℃湁灏辨斁榛樿浣嶇疆
           if (lastTab) {
             newTab.x = lastTab.x + lastTab.width + 10;
             newTab.y = lastTab.y;
@@ -2498,7 +2503,7 @@ export const useEditorStore = create<EditorState>()(
             newTab.x = 466;
             newTab.y = 366;
           }
-          // 默认 1 对 1：第 newIdx 个 SelectableObj 跳到第 newIdx 个 ContainerBox
+          // 榛樿 1 瀵?1锛氱 newIdx 涓?SelectableObj 璺冲埌绗?newIdx 涓?ContainerBox
           newTab.actions = [{
             id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             event: 'onClick',
@@ -2512,19 +2517,19 @@ export const useEditorStore = create<EditorState>()(
         set((state) => {
           const p = findCurrentSubPage(state);
           if (!p) return state;
-          // 把所有旧页面都设成 false
+          // 鎶婃墍鏈夋棫椤甸潰閮借鎴?false
           pageBoxes.forEach(box => {
             const el = p.elements.find(e2 => e2.id === box.id);
             if (el) el.props = { ...el.props, visible: false };
           });
-          // 新 ContainerBox 插入到最后一个分页 ContainerBox 后面
+          // 鏂?ContainerBox 鎻掑叆鍒版渶鍚庝竴涓垎椤?ContainerBox 鍚庨潰
           if (lastPageBox) {
             const insertAt = p.elements.findIndex(e2 => e2.id === lastPageBox.id) + 1;
             p.elements.splice(insertAt, 0, newBox);
           } else {
             p.elements.push(newBox);
           }
-          // 标签按钮插入到最后一个 SelectableObj 后面;没有就放在 elements 末尾
+          // 鏍囩鎸夐挳鎻掑叆鍒版渶鍚庝竴涓?SelectableObj 鍚庨潰;娌℃湁灏辨斁鍦?elements 鏈熬
           if (newTab) {
             if (lastTab) {
               const insertAt = p.elements.findIndex(e2 => e2.id === lastTab.id) + 1;
@@ -2533,7 +2538,7 @@ export const useEditorStore = create<EditorState>()(
               p.elements.push(newTab);
             }
           }
-          // 同步所有标签按钮 isSelected
+          // 鍚屾鎵€鏈夋爣绛炬寜閽?isSelected
           const allTabs = p.elements.filter(e2 => e2.parentId === elementId && e2.type === 'SpeechSelectableObj');
           allTabs.forEach((tab, i) => {
             const el = p.elements.find(e2 => e2.id === tab.id);
@@ -2550,7 +2555,7 @@ export const useEditorStore = create<EditorState>()(
           const tabObj = createLayaComponent(newTab, ptObj);
           if (tabObj) registerObject(newTab.id, tabObj);
         }
-        // 同步 Laya 实例侧的 visible：所有旧页面 false，新页面 true
+        // 鍚屾 Laya 瀹炰緥渚х殑 visible锛氭墍鏈夋棫椤甸潰 false锛屾柊椤甸潰 true
         const finalSp = findActiveElementPage(get().currentCourse, subPageId, get().currentInternalPageId);
         const finalPageBoxes = finalSp?.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox') ?? [];
         finalPageBoxes.forEach((box, i) => {
@@ -2564,7 +2569,7 @@ export const useEditorStore = create<EditorState>()(
         });
       },
 
-      /** 翻页:删除页面(ContainerBox + 子元素 + 对应标签按钮) */
+      /** 缈婚〉:鍒犻櫎椤甸潰(ContainerBox + 瀛愬厓绱?+ 瀵瑰簲鏍囩鎸夐挳) */
       removePageTurnPage: (elementId: string, pageIndex: number) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2578,7 +2583,7 @@ export const useEditorStore = create<EditorState>()(
         if (pageIndex < 0 || pageIndex >= pageBoxes.length || pageBoxes.length <= 1) return;
 
         const boxToRemove = pageBoxes[pageIndex];
-        const tabToRemove = tabBtns[pageIndex]; // 第 i 个标签按钮对应第 i 个分页;可能 undefined
+        const tabToRemove = tabBtns[pageIndex]; // 绗?i 涓爣绛炬寜閽搴旂 i 涓垎椤?鍙兘 undefined
         const idsToDelete = new Set<string>();
         idsToDelete.add(boxToRemove.id);
         if (tabToRemove) idsToDelete.add(tabToRemove.id);
@@ -2603,7 +2608,7 @@ export const useEditorStore = create<EditorState>()(
               if (el) el.props = { ...el.props, visible: i === newIdx };
             });
           }
-          // 同步剩余标签按钮的 isSelected
+          // 鍚屾鍓╀綑鏍囩鎸夐挳鐨?isSelected
           const remainingTabs = p.elements.filter(e => e.parentId === elementId && e.type === 'SpeechSelectableObj');
           remainingTabs.forEach((tab, i) => {
             const el = p.elements.find(e2 => e2.id === tab.id);
@@ -2613,7 +2618,7 @@ export const useEditorStore = create<EditorState>()(
           return state;
         });
         for (const id of idsToDelete) removeObject(id);
-        // 同步 Laya 实例侧的 visible
+        // 鍚屾 Laya 瀹炰緥渚х殑 visible
         const finalSp = findActiveElementPage(get().currentCourse, subPageId, get().currentInternalPageId);
         const finalPageBoxes = finalSp?.elements.filter(e => e.parentId === elementId && e.type === 'ContainerBox') ?? [];
         const finalNewIdx = (finalSp?.elements.find(e => e.id === elementId)?.props as Record<string, unknown> | undefined)?.currentPageIndex as number ?? 0;
@@ -2623,7 +2628,7 @@ export const useEditorStore = create<EditorState>()(
         });
       },
 
-      /** 翻页:切换按钮类型(arrows / tabs / both) */
+      /** 缈婚〉:鍒囨崲鎸夐挳绫诲瀷(arrows / tabs / both) */
       changePageTurnButtonType: (elementId: string, newType: 'arrows' | 'tabs' | 'both') => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2648,11 +2653,11 @@ export const useEditorStore = create<EditorState>()(
         const idsToDelete = new Set<string>();
         const elementsToAdd: Element[] = [];
 
-        // 删多余的箭头
+        // 鍒犲浣欑殑绠ご
         if (!wantArrows) {
           for (const a of arrows) idsToDelete.add(a.id);
         } else if (arrows.length === 0) {
-          // 补齐箭头：注入默认 actions（不设置初始 visible，由运行时 initView 根据当前页决定）
+          // 琛ラ綈绠ご锛氭敞鍏ラ粯璁?actions锛堜笉璁剧疆鍒濆 visible锛岀敱杩愯鏃?initView 鏍规嵁褰撳墠椤靛喅瀹氾級
           const leftBtn = createDefaultElement('PageTurnLeftBtn', subPageId ?? undefined);
           leftBtn.parentId = elementId;
           leftBtn.actions = [{
@@ -2674,11 +2679,11 @@ export const useEditorStore = create<EditorState>()(
           elementsToAdd.push(leftBtn, rightBtn);
         }
 
-        // 删多余的标签 / 补齐缺失的标签
+        // 鍒犲浣欑殑鏍囩 / 琛ラ綈缂哄け鐨勬爣绛?
         if (!wantTabs) {
           for (const t of tabs) idsToDelete.add(t.id);
         } else {
-          // 每页都要有标签
+          // 姣忛〉閮借鏈夋爣绛?
           const need = pageBoxes.length;
           if (tabs.length < need) {
             for (let i = tabs.length; i < need; i++) {
@@ -2693,7 +2698,7 @@ export const useEditorStore = create<EditorState>()(
                 tab.y = 366;
               }
               tab.props = { ...tab.props, isSelected: i === currentIndex };
-              // 默认 1 对 1：第 i 个 SelectableObj 跳到第 i 个 ContainerBox
+              // 榛樿 1 瀵?1锛氱 i 涓?SelectableObj 璺冲埌绗?i 涓?ContainerBox
               tab.actions = [{
                 id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 event: 'onClick',
@@ -2705,7 +2710,7 @@ export const useEditorStore = create<EditorState>()(
               elementsToAdd.push(tab);
             }
           } else if (tabs.length > need) {
-            // 多余的删掉(从尾部开始)
+            // 澶氫綑鐨勫垹鎺?浠庡熬閮ㄥ紑濮?
             for (let i = need; i < tabs.length; i++) idsToDelete.add(tabs[i].id);
           }
         }
@@ -2727,7 +2732,7 @@ export const useEditorStore = create<EditorState>()(
         }
       },
 
-      /** 翻页:把所有翻页按钮(左/右箭头 + 标签按钮)在 elements 数组里移到 ContainerBox 的最前或最后 */
+      /** 缈婚〉:鎶婃墍鏈夌炕椤垫寜閽?宸?鍙崇澶?+ 鏍囩鎸夐挳)鍦?elements 鏁扮粍閲岀Щ鍒?ContainerBox 鐨勬渶鍓嶆垨鏈€鍚?*/
       movePageTurnButtons: (elementId: string, position: 'top' | 'bottom') => {
         set((state) => {
           const p = findCurrentSubPage(state);
@@ -2739,7 +2744,7 @@ export const useEditorStore = create<EditorState>()(
             (e.type === 'PageTurnLeftBtn' || e.type === 'PageTurnRightBtn' || e.type === 'SpeechSelectableObj');
           const isPage = (e: Element) =>
             e.parentId === elementId && e.type === 'ContainerBox';
-          // 收集子元素的位置索引(子元素 = buttons + pages)
+          // 鏀堕泦瀛愬厓绱犵殑浣嶇疆绱㈠紩(瀛愬厓绱?= buttons + pages)
           const childIndices: number[] = [];
           for (let i = 0; i < p.elements.length; i++) {
             const e = p.elements[i];
@@ -2749,7 +2754,7 @@ export const useEditorStore = create<EditorState>()(
           const buttons = p.elements.filter(isBtn);
           const pages = p.elements.filter(isPage);
           const ordered = position === 'top' ? [...buttons, ...pages] : [...pages, ...buttons];
-          // 把 ordered 写回到原 childIndices 位置(保持其他元素位置不变)
+          // 鎶?ordered 鍐欏洖鍒板師 childIndices 浣嶇疆(淇濇寔鍏朵粬鍏冪礌浣嶇疆涓嶅彉)
           for (let k = 0; k < childIndices.length; k++) {
             p.elements[childIndices[k]] = ordered[k];
           }
@@ -2757,7 +2762,7 @@ export const useEditorStore = create<EditorState>()(
         });
       },
 
-      /** 口才课选择题：添加选项 */
+      /** 鍙ｆ墠璇鹃€夋嫨棰橈細娣诲姞閫夐」 */
       addChoiceOption: (choiceBoxId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2766,7 +2771,7 @@ export const useEditorStore = create<EditorState>()(
         if (!page) return;
         const existingOptions = page.elements.filter(e => e.parentId === choiceBoxId && e.type === 'SpeechSelectableObj');
         const existingNames = new Set(existingOptions.map(e => e.name));
-        // a-z 用完后继续 aa-zz；预期足够支撑任何合理课件
+        // a-z 鐢ㄥ畬鍚庣户缁?aa-zz锛涢鏈熻冻澶熸敮鎾戜换浣曞悎鐞嗚浠?
         const letters = 'abcdefghijklmnopqrstuvwxyz';
         let nextName: string | undefined;
         for (const c of letters) {
@@ -2796,7 +2801,7 @@ export const useEditorStore = create<EditorState>()(
           _correctSkin: assetExport('choiceOption.correct'),
           _wrongSkin: assetExport('choiceOption.wrong'),
         };
-        // 横向追加：上一个选项右侧 +10；与一键创建的横向布局一致
+        // 妯悜杩藉姞锛氫笂涓€涓€夐」鍙充晶 +10锛涗笌涓€閿垱寤虹殑妯悜甯冨眬涓€鑷?
         newOpt.x = lastOpt ? lastOpt.x + lastOpt.width + 10 : 50;
         newOpt.y = lastOpt ? lastOpt.y : 50;
         set((state) => {
@@ -2810,7 +2815,7 @@ export const useEditorStore = create<EditorState>()(
         get().saveHistory();
       },
 
-      /** 口才课选择题：删除最后一个选项 */
+      /** 鍙ｆ墠璇鹃€夋嫨棰橈細鍒犻櫎鏈€鍚庝竴涓€夐」 */
       removeChoiceOption: (choiceBoxId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2835,7 +2840,7 @@ export const useEditorStore = create<EditorState>()(
         if (changed) get().saveHistory();
       },
 
-      /** 填空题：添加输入格 */
+      /** 濉┖棰橈細娣诲姞杈撳叆鏍?*/
       addFillBlankInput: (klInputBoxId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2848,7 +2853,7 @@ export const useEditorStore = create<EditorState>()(
         newInput.parentId = klInputBoxId;
         newInput.x = lastOpt ? lastOpt.x + lastOpt.width + 10 : 0;
         newInput.y = lastOpt ? lastOpt.y : 0;
-        // 继承同组键盘 camp
+        // 缁ф壙鍚岀粍閿洏 camp
         if (lastOpt) {
           const lastProps = lastOpt.props as Record<string, unknown>;
           if (lastProps.camp) newInput.props = { ...newInput.props, camp: lastProps.camp };
@@ -2863,7 +2868,7 @@ export const useEditorStore = create<EditorState>()(
         if (obj) registerObject(newInput.id, obj);
       },
 
-      /** 填空题：删除最后一个输入格 */
+      /** 濉┖棰橈細鍒犻櫎鏈€鍚庝竴涓緭鍏ユ牸 */
       removeFillBlankInput: (klInputBoxId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2876,7 +2881,7 @@ export const useEditorStore = create<EditorState>()(
         get().deleteElement(lastOpt.id);
       },
 
-      /** 连线题：添加一对连线项（左 camp1 + 右 camp2），位置紧跟各阵营最后一个 item 之后 */
+      /** 杩炵嚎棰橈細娣诲姞涓€瀵硅繛绾块」锛堝乏 camp1 + 鍙?camp2锛夛紝浣嶇疆绱ц窡鍚勯樀钀ユ渶鍚庝竴涓?item 涔嬪悗 */
       addMatchingPair: (matchingGameId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2892,24 +2897,24 @@ export const useEditorStore = create<EditorState>()(
         const camp2Items = items.filter(e => (e.props as Record<string, unknown>).camp === 'camp2');
         const direction = (matchingGame.props as Record<string, unknown>).direction ?? 0;
 
-        // 各阵营起始位置（阵营为空时用默认值）
-        // 默认值与 getMatchingLayout(direction=0/1/2) 第一个 item 的位置一致
+        // 鍚勯樀钀ヨ捣濮嬩綅缃紙闃佃惀涓虹┖鏃剁敤榛樿鍊硷級
+        // 榛樿鍊间笌 getMatchingLayout(direction=0/1/2) 绗竴涓?item 鐨勪綅缃竴鑷?
         let leftDefaultX: number, leftDefaultY: number, rightDefaultX: number, rightDefaultY: number;
-        // 沿着哪个方向追加
+        // 娌跨潃鍝釜鏂瑰悜杩藉姞
         let appendDir: 'down' | 'right';
         if (direction === 1) {
-          // 上下连线：上方阵营 (860,300) 起始，横向追加（x+100）
+          // 涓婁笅杩炵嚎锛氫笂鏂归樀钀?(860,300) 璧峰锛屾í鍚戣拷鍔狅紙x+100锛?
           leftDefaultX = 860; leftDefaultY = 300;
           rightDefaultX = 860; rightDefaultY = 780;
           appendDir = 'right';
         } else {
-          // 左右 / 中心点连线：左侧阵营 (750,450) 起始，纵向追加（y+90）
+          // 宸﹀彸 / 涓績鐐硅繛绾匡細宸︿晶闃佃惀 (750,450) 璧峰锛岀旱鍚戣拷鍔狅紙y+90锛?
           leftDefaultX = 750; leftDefaultY = 450;
           rightDefaultX = 1130; rightDefaultY = 450;
           appendDir = 'down';
         }
 
-        // 命名规则：扫描 matchBox 下已用序号，取最大+1（中心点模式下奇偶分流，每边步进 2）
+        // 鍛藉悕瑙勫垯锛氭壂鎻?matchBox 涓嬪凡鐢ㄥ簭鍙凤紝鍙栨渶澶?1锛堜腑蹇冪偣妯″紡涓嬪鍋跺垎娴侊紝姣忚竟姝ヨ繘 2锛?
         let leftName: string, rightName: string;
         if (direction === 1) {
           leftName = getNextNumberedName('t', page.elements, matchBox.id);
@@ -2922,7 +2927,7 @@ export const useEditorStore = create<EditorState>()(
           rightName = getNextNumberedName('r', page.elements, matchBox.id);
         }
 
-        // 紧跟各阵营最后一个 item：纵向 +90，横向 +100
+        // 绱ц窡鍚勯樀钀ユ渶鍚庝竴涓?item锛氱旱鍚?+90锛屾í鍚?+100
         const lastLeft = camp1Items[camp1Items.length - 1];
         const lastRight = camp2Items[camp2Items.length - 1];
         const leftX = lastLeft ? (appendDir === 'down' ? lastLeft.x : lastLeft.x + 100) : leftDefaultX;
@@ -2947,11 +2952,11 @@ export const useEditorStore = create<EditorState>()(
         set((state) => {
           const sp = findCurrentSubPage(state);
           if (!sp) return state;
-          // 元素列表顺序：左 item 插入到 camp1 最后一个之后；右 item 插入到 camp2 最后一个之后
-          // camp1 为空时插入到 matchBox 之后；camp2 为空时插入到 leftItem 之后
+          // 鍏冪礌鍒楄〃椤哄簭锛氬乏 item 鎻掑叆鍒?camp1 鏈€鍚庝竴涓箣鍚庯紱鍙?item 鎻掑叆鍒?camp2 鏈€鍚庝竴涓箣鍚?
+          // camp1 涓虹┖鏃舵彃鍏ュ埌 matchBox 涔嬪悗锛沜amp2 涓虹┖鏃舵彃鍏ュ埌 leftItem 涔嬪悗
           const arr = sp.elements;
           const matchBoxIdx = arr.findIndex(e => e.id === matchBox.id);
-          // 计算 leftItem 插入位置
+          // 璁＄畻 leftItem 鎻掑叆浣嶇疆
           let leftInsertIdx: number;
           if (camp1Items.length > 0) {
             const lastCamp1Id = camp1Items[camp1Items.length - 1].id;
@@ -2960,13 +2965,13 @@ export const useEditorStore = create<EditorState>()(
             leftInsertIdx = matchBoxIdx + 1;
           }
           arr.splice(leftInsertIdx, 0, leftItem);
-          // 计算 rightItem 插入位置（leftItem 已插入，索引可能后移）
+          // 璁＄畻 rightItem 鎻掑叆浣嶇疆锛坙eftItem 宸叉彃鍏ワ紝绱㈠紩鍙兘鍚庣Щ锛?
           let rightInsertIdx: number;
           if (camp2Items.length > 0) {
             const lastCamp2Id = camp2Items[camp2Items.length - 1].id;
             rightInsertIdx = arr.findIndex(e => e.id === lastCamp2Id) + 1;
           } else {
-            // camp2 为空：放在 leftItem 之后
+            // camp2 涓虹┖锛氭斁鍦?leftItem 涔嬪悗
             rightInsertIdx = arr.findIndex(e => e.id === leftItem.id) + 1;
           }
           arr.splice(rightInsertIdx, 0, rightItem);
@@ -2979,7 +2984,7 @@ export const useEditorStore = create<EditorState>()(
         if (rightObj) registerObject(rightItem.id, rightObj);
       },
 
-      /** 连线题：删除最后一对连线项（camp1 最后一个 + camp2 最后一个） */
+      /** 杩炵嚎棰橈細鍒犻櫎鏈€鍚庝竴瀵硅繛绾块」锛坈amp1 鏈€鍚庝竴涓?+ camp2 鏈€鍚庝竴涓級 */
       removeMatchingPair: (matchingGameId: string) => {
         const course = get().currentCourse;
         const subPageId = get().currentSubPageId;
@@ -2991,9 +2996,9 @@ export const useEditorStore = create<EditorState>()(
         const items = page.elements.filter(e => e.parentId === matchBox.id && e.type === 'MatchingItem');
         const camp1Items = items.filter(e => (e.props as Record<string, unknown>).camp === 'camp1');
         const camp2Items = items.filter(e => (e.props as Record<string, unknown>).camp === 'camp2');
-        // 两边都为空时无可删项
+        // 涓よ竟閮戒负绌烘椂鏃犲彲鍒犻」
         if (camp1Items.length === 0 && camp2Items.length === 0) return;
-        // 各自删除最后一个（允许全删）
+        // 鍚勮嚜鍒犻櫎鏈€鍚庝竴涓紙鍏佽鍏ㄥ垹锛?
         if (camp1Items.length > 0) {
           get().deleteElement(camp1Items[camp1Items.length - 1].id);
         }
@@ -3076,7 +3081,7 @@ export const useEditorStore = create<EditorState>()(
         if (!subPageId) return;
         const trimmed = (skinValue ?? '').trim();
 
-        // 更新 props.skin
+        // 鏇存柊 props.skin
         set((state) => {
           const sp = findSubPage(state.currentCourse, subPageId);
           const p = sp ? getElementPage(sp, internalPageId).elements.find(e => e.id === parentId) : undefined;
@@ -3088,7 +3093,7 @@ export const useEditorStore = create<EditorState>()(
 
         if (!trimmed) return;
 
-        // 读取当前 token
+        // 璇诲彇褰撳墠 token
         const getToken = () => {
           const cur = get().currentCourse;
           if (!cur) return -1;
@@ -3235,7 +3240,7 @@ export const useEditorStore = create<EditorState>()(
   }))
 );
 
-/** 工具函数：从当前 store 状态找到当前 SubPage（外部读取用，请勿修改返回值） */
+/** 宸ュ叿鍑芥暟锛氫粠褰撳墠 store 鐘舵€佹壘鍒板綋鍓?SubPage锛堝閮ㄨ鍙栫敤锛岃鍕夸慨鏀硅繑鍥炲€硷級 */
 export function getCurrentSubPage(state: { currentCourse: Course | null; currentSubPageId: string | null }): SubPage | null {
   if (!state.currentCourse || !state.currentSubPageId) return null;
   for (const stage of state.currentCourse.stages) {
@@ -3249,7 +3254,7 @@ export function getCurrentSubPage(state: { currentCourse: Course | null; current
   return null;
 }
 
-/** 工具函数：从课件中找到包含指定 subPage 的 stage */
+/** 宸ュ叿鍑芥暟锛氫粠璇句欢涓壘鍒板寘鍚寚瀹?subPage 鐨?stage */
 export function getStageOfSubPage(course: Course | null, subPageId: string | null): Stage | null {
   return findStageOfSubPage(course, subPageId);
 }
