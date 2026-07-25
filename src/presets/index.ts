@@ -292,11 +292,11 @@ export interface PresetTemplate {
   thumbnail: string;
   /** Element list for this preset (cloned on instantiation) */
   elements: Element[];
-  /** noSubPages = 璇ュ叧鍗′笉鍏佽娣诲姞灏忓叧鍗?*/
+  /** noSubPages = 该关卡不允许添加小关卡 */
   noSubPages?: boolean;
-  /** frozen = 璇ュ叧鍗＄殑鐢诲竷涓嶅厑璁告坊鍔犳柊缁勪欢 */
+  /** frozen = 该关卡的画布不允许添加新组件 */
   frozen?: boolean;
-  /** 鍒涘缓鍏冲崱鏃剁殑榛樿鍚嶅瓧锛堜笉鍖归厤 renumberAll 姝ｅ垯鍒欎笉浼氳閲嶇紪鍙疯鐩栵級 */
+  /** 创建关卡时的默认名字（不匹配 renumberAll 正则则不会被重编号覆盖） */
   defaultStageName?: string;
   defaultSubPageName?: string;
   editorModel?: 'internal-pages';
@@ -329,8 +329,8 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
     elements: [],
     editorModel: 'internal-pages',
     courseKinds: ['normal', 'homework', 'sEvaluation'],
-    defaultStageName: '鍐呴儴椤甸潰鍏冲崱',
-    defaultSubPageName: '鍐呴儴椤甸潰鍏冲崱',
+    defaultStageName: '关卡 0',
+    defaultSubPageName: '小关卡 0-0',
   },
   {
     id: 'video',
@@ -340,16 +340,16 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
     noSubPages: true,
     frozen: true,
     courseKinds: ['review'],
-    defaultStageName: '瑙嗛鍏冲崱',
-    defaultSubPageName: '瑙嗛鍏冲崱',
+    defaultStageName: '视频关卡',
+    defaultSubPageName: '视频关卡',
   },
   {
     id: 'homework-stage-1',
     labelKey: 'presetHomeworkStage1',
     thumbnail: assetSrc('preset.s8Demo01Hw.bg'),
     elements: homeworkStage1Elements,
-    defaultStageName: '关卡 1',
-    defaultSubPageName: '小关卡 1-1',
+    defaultStageName: '作业关卡 1',
+    defaultSubPageName: '作业关卡 1',
     courseKinds: ['homework'],
   },
   {
@@ -357,8 +357,8 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
     labelKey: 'presetHomeworkStage2',
     thumbnail: assetSrc('preset.s4Demo01Hw.bg'),
     elements: homeworkStage2Elements,
-    defaultStageName: '作业关卡2',
-    defaultSubPageName: '作业关卡2',
+    defaultStageName: '作业关卡 2',
+    defaultSubPageName: '作业关卡 2',
     courseKinds: ['homework'],
   },
   {
@@ -366,8 +366,8 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
     labelKey: 'presetSEvaluationStage1',
     thumbnail: assetSrc('preset.s8SseTest01.bg'),
     elements: sEvaluationStage1Elements,
-    defaultStageName: '专题测评关卡1',
-    defaultSubPageName: '专题测评关卡1',
+    defaultStageName: '随堂测评关卡 1',
+    defaultSubPageName: '随堂测评关卡 1',
     courseKinds: ['sEvaluation'],
   },
 ];

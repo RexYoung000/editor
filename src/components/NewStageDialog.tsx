@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Trash2, FolderOpen, Pencil, Upload, Loader2, Pin } from 'lucide-react';
+import { X, Trash2, FolderOpen, Pencil, Upload, Loader2, Pin, Layers3 } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import type { SubPage } from '../types';
 import type { CustomTemplate } from '../utils/customTemplateFs';
@@ -226,7 +226,11 @@ export default function NewStageDialog({
                   <div className="flex-1 bg-slate-900 flex items-center justify-center overflow-hidden">
                     {preset.thumbnail
                       ? <img src={preset.thumbnail} className="w-full h-full object-cover" alt="" />
-                      : <span className="text-2xl text-slate-500 font-medium">{t(preset.labelKey)}</span>
+                      : (
+                        <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-slate-700/80 text-slate-400">
+                          <Layers3 size={26} />
+                        </div>
+                      )
                     }
                   </div>
                   <div className="w-full text-center px-2 py-1.5 text-xs bg-slate-700 text-slate-300 font-medium" style={{ textAlign: 'center' }}>{t(preset.labelKey)}</div>

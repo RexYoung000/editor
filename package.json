@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "encode-check": "node scripts/encode-check.js",
+    "check": "pnpm encode-check && pnpm lint && pnpm test && pnpm build",
+    "verify": "pnpm encode-check && pnpm lint && pnpm test && pnpm build && pnpm pack-template && pnpm pack-game",
     "test": "node scripts/run-unit-tests.mjs",
+    "pack-template": "node scripts/pack-template-zips.mjs",
     "pack-game": "node scripts/pack-game-zip.mjs",
     "electron:dev": "electron .",
     "electron:start": "electron .",

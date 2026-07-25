@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { Element, SubPage, Stage, Course, InternalPage, InternalPageKind, DialogSettings, EditorLayerGroup } from '../types';
 import {
@@ -114,7 +114,7 @@ interface EditorState {
   setPageThumbnail: (subPageId: string, dataUrl: string) => void;
 
   addStage: () => void;
-  addVideoStage: () => void;  // 澶嶄範璇句笓鐢細娣诲姞瑙嗛鍏冲崱
+  addVideoStage: () => void;  // 复习课专用：添加视频关卡
   addStageFromSubPage: (sourceSubPageId: string) => void;
   addStageFromTemplate: (templateId: string) => Promise<void>;
   addStageFromPreset: (presetId: string) => void;
@@ -275,14 +275,14 @@ function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[
 }
 
 /** 纭繚 course 鑷冲皯鏈?1 涓?stage銆佹瘡涓?stage 鑷冲皯鏈?1 涓?subPage銆?
- *  瀵硅€佹暟鎹紙鏃?`pages` 瀛楁锛夊仛鏈€灏忚縼绉伙細鎶婃瘡涓棫 page 鍖呰鎴愪竴涓嫭绔嬪ぇ鍏冲崱锛岄伩鍏嶇洿鎺ュ穿婧冦€?*/
+ *  对老数据（旧 `pages` 字段）做最小迁移：把每个旧 page 包装成一个独立大关卡，避免直接崩溃。 */
 function ensureCourseShape(course: Course): Course {
   const legacy = (course as unknown as { pages?: SubPage[] }).pages;
   if ((!course.stages || course.stages.length === 0) && Array.isArray(legacy) && legacy.length > 0) {
     course.stages = legacy.map((page, i) => ({
       id: genId('stage'),
-      name: `鍏冲崱 ${i + 1}`,
-      subPages: [{ ...page, name: `灏忓叧鍗?${i + 1}-1` }],
+      name: `关卡 ${i + 1}`,
+      subPages: [{ ...page, name: `小关卡 ${i + 1}-1` }],
     }));
     delete (course as unknown as { pages?: SubPage[] }).pages;
   }
@@ -297,20 +297,20 @@ function ensureCourseShape(course: Course): Course {
   return course;
 }
 
-/** 榛樿鍏冲崱鍛藉悕鏍煎紡姝ｅ垯銆傞噸鍛藉悕鏃跺彧瑕嗙洊榛樿鏍煎紡锛屼繚鐣欑敤鎴疯嚜瀹氫箟鍚嶇О銆?*/
-const STAGE_DEFAULT_RE = /^鍏冲崱\s+\d+$/;
-const SUBPAGE_DEFAULT_RE = /^灏忓叧鍗s+\d+-\d+$/;
-const PREVIEW_STAGE_DEFAULT_RE = /^棰勪範\s+\d+$/;
+/** Default naming patterns; only generated names are renumbered. */
+const STAGE_DEFAULT_RE = /^\u5173\u5361\s+\d+$/;
+const SUBPAGE_DEFAULT_RE = /^\u5c0f\u5173\u5361\s+\d+-\d+$/;
+const PREVIEW_STAGE_DEFAULT_RE = /^\u9884\u4e60\s+\d+$/;
 
 /** 鎸変綅缃噸鎺掑叧鍗″簭鍙凤紝浠呰鐩栭粯璁ゅ懡鍚嶆牸寮?*/
 function renumberAll(course: Course): void {
   course.stages.forEach((stage, si) => {
     if (STAGE_DEFAULT_RE.test(stage.name)) {
-      stage.name = `鍏冲崱 ${si + 1}`;
+      stage.name = `关卡 ${si + 1}`;
     }
     stage.subPages.forEach((sp, sj) => {
       if (SUBPAGE_DEFAULT_RE.test(sp.name)) {
-        sp.name = `灏忓叧鍗?${si + 1}-${sj + 1}`;
+        sp.name = `小关卡 ${si + 1}-${sj + 1}`;
       }
     });
   });
@@ -319,7 +319,7 @@ function renumberAll(course: Course): void {
 function renumberPreviewAll(course: Course): void {
   course.previewStages?.forEach((stage, si) => {
     if (PREVIEW_STAGE_DEFAULT_RE.test(stage.name)) {
-      stage.name = `棰勪範 ${si + 1}`;
+      stage.name = `\u9884\u4e60 ${si + 1}`;
     }
   });
 }
@@ -791,12 +791,12 @@ export const useEditorStore = create<EditorState>()(
         const stageNum = state.currentCourse.stages.length + 1;
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `灏忓叧鍗?${stageNum}-1`,
+          name: `小关卡 ${stageNum}-1`,
           elements: [],
         };
         const newStage: Stage = {
           id: genId('stage'),
-          name: `鍏冲崱 ${stageNum}`,
+          name: `关卡 ${stageNum}`,
           subPages: [newSub],
         };
         state.currentCourse.stages.push(newStage);
@@ -830,13 +830,13 @@ export const useEditorStore = create<EditorState>()(
         };
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: '瑙嗛鍏冲崱',
+          name: '视频关卡',
           frozen: true,
           elements: [videoEl],
         };
         const newStage: Stage = {
           id: genId('stage'),
-          name: `瑙嗛${stageNum}`,
+          name: `视频${stageNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -861,11 +861,11 @@ export const useEditorStore = create<EditorState>()(
         if (!sourceSub) return;
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
-        newSub.name = `灏忓叧鍗?0-0`;
+        newSub.name = `小关卡 0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: `鍏冲崱 0`,
+          name: `关卡 0`,
           subPages: [newSub],
         };
         state.currentCourse.stages.push(newStage);
@@ -894,11 +894,11 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         if (!state.currentCourse) return;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
-        newSub.name = `灏忓叧鍗?0-0`;
+        newSub.name = `小关卡 0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: `鍏冲崱 0`,
+          name: `关卡 0`,
           subPages: [newSub],
         };
         state.currentCourse.stages.push(newStage);
@@ -961,12 +961,12 @@ export const useEditorStore = create<EditorState>()(
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `棰勪範 ${previewNum}`,
+          name: `\u9884\u4e60 ${previewNum}`,
           elements: [],
         };
         const newStage: Stage = {
           id: genId('stage'),
-          name: `棰勪範 ${previewNum}`,
+          name: `\u9884\u4e60 ${previewNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -989,11 +989,11 @@ export const useEditorStore = create<EditorState>()(
         if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `棰勪範 ${previewNum}`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `\u9884\u4e60 ${previewNum}`);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: preset.defaultStageName ?? `棰勪範 ${previewNum}`,
+          name: preset.defaultStageName ?? `\u9884\u4e60 ${previewNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -1033,11 +1033,11 @@ export const useEditorStore = create<EditorState>()(
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
-        newSub.name = `棰勪範 ${previewNum}`;
+        newSub.name = `\u9884\u4e60 ${previewNum}`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: `棰勪範 ${previewNum}`,
+          name: `\u9884\u4e60 ${previewNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -1069,11 +1069,11 @@ export const useEditorStore = create<EditorState>()(
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
-        newSub.name = `棰勪範 ${previewNum}`;
+        newSub.name = `\u9884\u4e60 ${previewNum}`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: `棰勪範 ${previewNum}`,
+          name: `\u9884\u4e60 ${previewNum}`,
           noSubPages: true,
           subPages: [newSub],
         };
@@ -1164,7 +1164,7 @@ export const useEditorStore = create<EditorState>()(
         const stageIdx = state.currentCourse.stages.indexOf(stage);
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `灏忓叧鍗?${stageIdx + 1}-${stage.subPages.length + 1}`,
+          name: `小关卡 ${stageIdx + 1}-${stage.subPages.length + 1}`,
           elements: [],
         };
         stage.subPages.push(newSub);
@@ -1196,7 +1196,7 @@ export const useEditorStore = create<EditorState>()(
         if (!sourceSub) return;
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
-        newSub.name = `灏忓叧鍗?0-0`;
+        newSub.name = `小关卡 0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
@@ -1225,7 +1225,7 @@ export const useEditorStore = create<EditorState>()(
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (!stage) return;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
-        newSub.name = `灏忓叧鍗?0-0`;
+        newSub.name = `小关卡 0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
@@ -1244,11 +1244,11 @@ export const useEditorStore = create<EditorState>()(
         if (!state.currentCourse) return;
         if (!isPresetAllowedForCourse(preset, state.currentCourse.kind)) return;
         if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `灏忓叧鍗?0-0`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
-          name: preset.defaultStageName ?? `鍏冲崱 0`,
+          name: preset.defaultStageName ?? `关卡 0`,
           noSubPages: preset.noSubPages ?? false,
           subPages: [newSub],
         };
@@ -1277,7 +1277,7 @@ export const useEditorStore = create<EditorState>()(
         if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (!stage) return;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `灏忓叧鍗?0-0`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
         markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
         state.currentStageId = stage.id;
@@ -1362,7 +1362,7 @@ export const useEditorStore = create<EditorState>()(
         if (!sp) return;
         const newSub = cloneSubPageWithNewIds(sp, genId);
         // 鐢ㄥ悎娉曢粯璁ゆ牸寮忓崰浣嶏紝涓嬮潰 renumberAll 浼氭寜浣嶇疆姝ｇ‘缂栧彿锛?        // 鑻ュ師 sub 鏄敤鎴疯嚜瀹氫箟鍚嶏紝鍒欎繚鐣欌€滃壇鏈€濇牸寮忎笉琚嚜鍔ㄩ噸鍛藉悕瑕嗙洊
-        newSub.name = SUBPAGE_DEFAULT_RE.test(sp.name) ? `灏忓叧鍗?0-0` : `${sp.name} 鍓湰`;
+        newSub.name = SUBPAGE_DEFAULT_RE.test(sp.name) ? `小关卡 0-0` : `${sp.name} 副本`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const subIdx = stage.subPages.indexOf(sp);
         stage.subPages.splice(subIdx + 1, 0, newSub);
