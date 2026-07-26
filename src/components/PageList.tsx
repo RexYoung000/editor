@@ -866,6 +866,7 @@ export default function PageList() {
           customTemplateDir={customTemplateDir}
           pageThumbnails={pageThumbnails}
           presetTemplates={PRESET_TEMPLATES}
+          courseKind={kind ?? 'normal'}
           supportsInternalPages={kind !== 'review'}
           stageIndexOf={(spId) => {
             for (let i = 0; i < currentCourse.stages.length; i++) {

@@ -15,7 +15,7 @@ import {
   pinTemplate,
 } from '../utils/customTemplateFs';
 import { getCourseDirPath } from '../utils/electronFs';
-import { PRESET_TEMPLATES } from '../presets';
+import { isPresetTemplateAvailable, PRESET_TEMPLATES } from '../presets';
 import { getUniqueElementName, normalizeElementNames, createDefaultElement, elementMeta, rebuildSubPageCounters, getNextNumberedName, getNextItemNameForCenterMatch } from '../elements/elementMeta';
 import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
 import { getElementParentContainment, getFitContainerToChildrenUpdates } from '../utils/canvasGeometry';
@@ -981,7 +981,11 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
+        if (!isPresetTemplateAvailable(preset, {
+          courseKind: state.currentCourse.kind ?? 'normal',
+          mode: 'stage',
+          supportsInternalPages: state.currentCourse.kind !== 'review',
+        })) return;
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `预习 ${previewNum}`);
@@ -1237,7 +1241,11 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
+        if (!isPresetTemplateAvailable(preset, {
+          courseKind: state.currentCourse.kind ?? 'normal',
+          mode: 'stage',
+          supportsInternalPages: state.currentCourse.kind !== 'review',
+        })) return;
         const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
@@ -1267,7 +1275,11 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
+        if (!isPresetTemplateAvailable(preset, {
+          courseKind: state.currentCourse.kind ?? 'normal',
+          mode: 'subPage',
+          supportsInternalPages: state.currentCourse.kind !== 'review',
+        })) return;
         const stage = state.currentCourse.stages.find((s) => s.id === stageId);
         if (!stage) return;
         const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
