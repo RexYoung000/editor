@@ -4,10 +4,16 @@ import { join } from 'node:path';
 import test from 'node:test';
 import JSZip from 'jszip';
 import type { Course, Element } from '../src/types';
+import { translations } from '../src/i18n/translations';
 import {
   filterPresetTemplates,
   PRESET_TEMPLATES,
 } from '../src/presets';
+import {
+  buildExportRegressionArtifacts,
+  collectGameZipFiles,
+} from '../src/utils/exportProject';
+import type { CourseKind } from '../src/utils/courseKind';
 
 const storage = new Map<string, string>();
 Object.assign(globalThis, {
@@ -20,6 +26,51 @@ Object.assign(globalThis, {
 });
 
 const newPresetIds = ['question-layout-aqua-01', 'question-layout-blue-01'];
+
+const presetExportCases: Array<{
+  presetId: string;
+  kind: Extract<CourseKind, 'homework' | 'sEvaluation'>;
+  assets: Array<{ source: string; width: number; height: number }>;
+}> = [
+  {
+    presetId: 'question-layout-aqua-01',
+    kind: 'homework',
+    assets: [
+      {
+        source: 'game/preset/question-layout-aqua-01/background.jpg',
+        width: 1920,
+        height: 1080,
+      },
+    ],
+  },
+  {
+    presetId: 'question-layout-aqua-01',
+    kind: 'sEvaluation',
+    assets: [
+      {
+        source: 'game/preset/question-layout-aqua-01/background.jpg',
+        width: 1920,
+        height: 1080,
+      },
+    ],
+  },
+  {
+    presetId: 'question-layout-blue-01',
+    kind: 'homework',
+    assets: [
+      {
+        source: 'game/preset/question-layout-blue-01/background.jpg',
+        width: 1920,
+        height: 1080,
+      },
+      {
+        source: 'game/preset/question-layout-blue-01/title-paper.png',
+        width: 1841,
+        height: 520,
+      },
+    ],
+  },
+];
 
 function visiblePresetIds(
   courseKind: 'normal' | 'homework' | 'sEvaluation' | 'review',
@@ -88,6 +139,19 @@ test('两套题目版式拥有稳定 ID、正确归属和可编辑边界', () =>
   }
 });
 
+test('两套题目版式使用老师可见的中文模板名称', () => {
+  const expectedNames: Record<string, string> = {
+    'question-layout-aqua-01': '青色题目版式',
+    'question-layout-blue-01': '蓝色题目版式',
+  };
+
+  for (const [presetId, expectedName] of Object.entries(expectedNames)) {
+    const preset = PRESET_TEMPLATES.find((candidate) => candidate.id === presetId);
+    assert.ok(preset);
+    assert.equal(translations.zh[preset.labelKey], expectedName);
+  }
+});
+
 test('套用模板生成独立元素 ID，修改实例不会污染母版或后续实例', async () => {
   const { useEditorStore } = await import('../src/store/editorStore');
   const course: Course = {
@@ -134,6 +198,66 @@ test('不属于当前课件类型的模板即使绕过界面也不能套用', as
   useEditorStore.getState().setCurrentCourse(course);
   useEditorStore.getState().addStageFromPreset('question-layout-aqua-01');
   assert.equal(useEditorStore.getState().currentCourse!.stages.length, 0);
+});
+
+test('保存重开后两套版式保持布局，并进入作业与专题测评导出资源', () => {
+  for (const { presetId, kind, assets } of presetExportCases) {
+    const preset = PRESET_TEMPLATES.find((candidate) => candidate.id === presetId);
+    assert.ok(preset);
+
+    const course: Course = {
+      id: `preset-export-${kind}-${presetId}`,
+      kind,
+      stages: [
+        {
+          id: 'stage-1',
+          name: '关卡 1',
+          noSubPages: preset.noSubPages ?? false,
+          subPages: [
+            {
+              id: 'subpage-1',
+              name: '小关卡 1-1',
+              elements: structuredClone(preset.elements),
+            },
+          ],
+        },
+      ],
+    };
+    const reopened = JSON.parse(JSON.stringify(course)) as Course;
+    assert.deepEqual(reopened, course, `${presetId}/${kind} 保存重开后数据应保持一致`);
+
+    const imageSizes = new Map(
+      assets.map(({ source, width, height }) => [
+        source.replace(/^game\//, 'game_hw/image/'),
+        { w: width, h: height },
+      ]),
+    );
+    const artifacts = buildExportRegressionArtifacts(reopened, imageSizes);
+    assert.equal(artifacts.viewDir, 'game_hw');
+    assert.equal(artifacts.scenes.length, 1);
+
+    const sceneText = JSON.stringify(artifacts.scenes[0].scene);
+    const pageResources = (artifacts.config.pages as Array<{
+      res?: Array<{ url: string; type?: string }>;
+    }>)[0]?.res ?? [];
+    for (const { source } of assets) {
+      const target = source.replace(/^game\//, 'game_hw/image/');
+      assert.equal(artifacts.resources[source], target);
+      assert.ok(sceneText.includes(target), `${presetId}/${kind} scene 缺少 ${target}`);
+      assert.ok(
+        pageResources.some((entry) => entry.url === target && entry.type === 'image'),
+        `${presetId}/${kind} config 缺少 ${target}`,
+      );
+    }
+
+    const packedFiles = collectGameZipFiles(
+      new Map(Object.entries(artifacts.resources)),
+    );
+    assert.deepEqual(
+      [...packedFiles].sort(),
+      assets.map(({ source }) => source.slice('game/'.length)).sort(),
+    );
+  }
 });
 
 test('game.zip 包含两套模板使用的原始资源', async () => {
