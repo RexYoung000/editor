@@ -3,7 +3,8 @@ import { X, Trash2, FolderOpen, Pencil, Upload, Loader2, Pin } from 'lucide-reac
 import { useI18n } from '../i18n/context';
 import type { SubPage } from '../types';
 import type { CustomTemplate } from '../utils/customTemplateFs';
-import type { PresetTemplate } from '../presets';
+import { filterPresetTemplates, type PresetTemplate } from '../presets';
+import type { CourseKind } from '../utils/courseKind';
 
 type Mode = 'stage' | 'subPage';
 type Tab = 'preset' | 'custom' | 'copyable';
@@ -27,6 +28,8 @@ interface Props {
   subPageIndexOf: (subPageId: string) => number;
   /** 预设模板：独立于课件的静态模板 */
   presetTemplates?: PresetTemplate[];
+  /** 当前课件类型，用于筛选有明确归属的预设模板。 */
+  courseKind?: CourseKind;
   /** 复习课等不支持内部页面的课件隐藏内部页面预设、模板和复制来源。 */
   supportsInternalPages?: boolean;
   /** 自定义模板根目录，未设置时显示引导 */
@@ -55,6 +58,7 @@ export default function NewStageDialog({
   stageIndexOf,
   subPageIndexOf,
   presetTemplates,
+  courseKind = 'normal',
   supportsInternalPages = true,
   customTemplateDir,
   onConfirmBlank,
@@ -208,9 +212,11 @@ export default function NewStageDialog({
                 <div className="text-base font-medium">{t('blankLevel')}</div>
                 <div className="text-xs text-slate-400 px-2 text-center">{t('blankLevelDesc')}</div>
               </button>
-              {presetTemplates
-                ?.filter((p) => (mode === 'stage' || !p.noSubPages) && (supportsInternalPages || p.editorModel !== 'internal-pages'))
-                .map((preset) => (
+              {presetTemplates && filterPresetTemplates(presetTemplates, {
+                courseKind,
+                mode,
+                supportsInternalPages,
+              }).map((preset) => (
                 <button
                   key={preset.id}
                   onClick={() => onConfirmPreset(preset.id)}
