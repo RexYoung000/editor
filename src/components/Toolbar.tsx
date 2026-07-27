@@ -16,6 +16,7 @@ import { findMissingResourceElements, type ResourceMissingItem } from '../utils/
 import { ResourceMissingDialog } from './ResourceMissingDialog';
 import { isFlatLesson } from '../utils/courseKind';
 import { collectInternalPageIssues, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
+import { requestPageThumbnailFlush } from '../utils/pageThumbnailSync';
 
 export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack?: () => void }) {
   const { language, setLanguage, t } = useI18n();
@@ -88,6 +89,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   const handleSave = async () => {
     if (!currentCourse) return;
     try {
+      requestPageThumbnailFlush();
       const filePath = getCourseFilePath(currentCourse.id);
       if (filePath) {
         await writeBackToLocalFile(currentCourse.id, currentCourse);
@@ -107,6 +109,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
       return;
     }
     try {
+      requestPageThumbnailFlush();
       await writeBackToLocalFile(currentCourse.id, currentCourse);
     } catch {
       showToast(t('saveFailed'), 'error');
@@ -166,6 +169,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   const runCompileBuildAndOpen = async (previewMode: boolean) => {
     if (!currentCourse) return;
     assertInternalPagesReady('preview');
+    requestPageThumbnailFlush();
     await writeBackToLocalFile(currentCourse.id, currentCourse);
     await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
     await exportProject(currentCourse, { skipSvn: true });
@@ -203,6 +207,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     setBusy(true);
     try {
       assertInternalPagesReady('publish');
+      requestPageThumbnailFlush();
       await writeBackToLocalFile(currentCourse.id, currentCourse);
       await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
       const result = await exportProject(currentCourse);
