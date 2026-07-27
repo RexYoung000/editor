@@ -12,6 +12,7 @@ import { I18nProvider } from './i18n';
 import type { Course } from './types';
 import FocusWorkspace from './components/FocusWorkspace';
 import { isInternalPagesSubPage, isInternalPagesWorkbenchReadonly } from './utils/internalPages';
+import { requestPageThumbnailFlush } from './utils/pageThumbnailSync';
 
 function App() {
   const setCurrentCourse = useEditorStore((state) => state.setCurrentCourse);
@@ -78,6 +79,7 @@ function App() {
     const timer = setTimeout(async () => {
       setIsDirty(true);
       try {
+        requestPageThumbnailFlush();
         const filePath = getCourseFilePath(currentCourse.id);
         if (filePath) {
           await writeBackToLocalFile(currentCourse.id, currentCourse);
@@ -126,6 +128,7 @@ function App() {
       } else if (mod && e.key === 's') {
         e.preventDefault();
         if (currentCourse) {
+          requestPageThumbnailFlush();
           const filePath = getCourseFilePath(currentCourse.id);
           if (filePath) {
             await writeBackToLocalFile(currentCourse.id, currentCourse);
