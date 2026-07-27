@@ -24,7 +24,14 @@ import { getElementParentContainment } from '../utils/canvasGeometry';
 import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../utils/layerPresentation';
 import { createElementMap, getElementLayerState } from '../utils/layerState';
 import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
-import { keyboardBindingInfo, keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
+import {
+  applyKeyboardBindingProps,
+  keyboardBindingInfo,
+  keyboardCamp,
+  keyboardPresetId,
+  keyboardSupportsInput,
+  nextKeyboardCamp,
+} from '../utils/keyboardBinding';
 import { INPUT_RULE_ENABLED_KEY } from '../utils/inputAnswerRules';
 import {
   getChoiceAnswerMode,
@@ -1337,8 +1344,13 @@ export default function PropertyPanel() {
 
               {/* 组件属性（按 group 分组，advanced 字段单独折叠） */}
               {properties.length > 0 && (() => {
-                const normalProps = properties.filter(p => !p.advanced);
-                const advancedProps = properties.filter(p => p.advanced);
+                const customAnswerKeyboard = single?.type === 'KlBaseKeyboard'
+                  && (single.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id === 'customAnswer';
+                const applicableProperties = customAnswerKeyboard
+                  ? properties.filter((property) => !['camp', 'sheet', 'pattern'].includes(property.key))
+                  : properties;
+                const normalProps = applicableProperties.filter(p => !p.advanced);
+                const advancedProps = applicableProperties.filter(p => p.advanced);
                 const groups = new Map<string, typeof properties>();
                 normalProps.forEach((f) => {
                   const g = f.group || t('properties');
@@ -1488,7 +1500,13 @@ export default function PropertyPanel() {
             keyboardProps._keyboardPreset = { id: presetId };
           }
           updateElement(keyboard.element.id, { props: keyboardProps });
-          handleChange('camp', camp);
+          updateElement(single.id, {
+            props: applyKeyboardBindingProps(
+              single.props as Record<string, unknown> | undefined,
+              camp,
+              presetId,
+            ),
+          });
           saveHistory();
           setBindKeyboardOpen(false);
         }}

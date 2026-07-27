@@ -1,6 +1,6 @@
 import type { Action, Course, SubPage, Element } from '../types';
 import { elementMeta, FRACTION_INPUT_SHEET, type ExportChild } from '../elements/elementMeta';
-import { getKeyboardPreset } from '../elements/keyboardPresets';
+import { getKeyboardChildren } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath, lookupBuiltinBySrcPath, assetSrc, assetExport } from '../elements/builtinAssets';
 import { renderTextToImage, type RenderTextProps } from './textToImage';
 import { getCourseDirPath } from './electronFs';
@@ -32,6 +32,7 @@ import {
   getChoiceRuntimeProps,
   isChoiceOptionText,
 } from './choiceAnswerRules';
+import { collectCourseCustomAnswerKeyboardIssues } from './customAnswerKeyboardRules';
 
 // ─── Text 烘焙 ───
 
@@ -202,6 +203,7 @@ export function collectResources(
     if (!children) return;
     for (const c of children) {
       if (c.props) for (const v of Object.values(c.props)) collectValue(v);
+      if (c.resources) for (const resource of c.resources) collectValue(resource);
       if (c.child) scanFixed(c.child);
     }
   };
@@ -227,9 +229,7 @@ export function collectResources(
           }
         }
         scanFixed(meta?.exportChildren);
-        const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-        const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-        scanFixed(presetChildren);
+        scanFixed(getKeyboardChildren(el));
         // PageTurnBox 不携带额外资源，同 group ContainerBox 的资源由主循环收集
       }
     }
@@ -704,8 +704,7 @@ function buildSceneNode(
   }
 
   const directChildren = allElements.filter(e => e.parentId === element.id);
-  const presetId = (element.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-  const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
+  const presetChildren = getKeyboardChildren(element);
   const fixedSource: ExportChild[] = presetChildren ?? meta?.exportChildren ?? [];
 
   // 汇总被 inheritProps 声明要从外层 props 搬走的字段，最后统一从外层 props 剥掉
@@ -2142,11 +2141,24 @@ function collectExportChildrenRes(
 ) {
   if (!children) return;
   for (const c of children) {
+    if (c.resources) {
+      for (const resource of c.resources) {
+        const mapped = resourceMap.get(resource);
+        if (!mapped || addedSingleFiles.has(mapped)) continue;
+        if (/\.ttf$/i.test(mapped)) {
+          resEntries.push({ url: mapped, type: 'ttf' });
+          addedSingleFiles.add(mapped);
+        }
+      }
+    }
     if (c.props) {
       for (const v of Object.values(c.props)) {
         const mapped = resourceMap.get(String(v));
         if (!mapped) continue;
-        if (mapped.startsWith(imagePrefix)) {
+        if (/\.ttf$/i.test(mapped) && !addedSingleFiles.has(mapped)) {
+          resEntries.push({ url: mapped, type: 'ttf' });
+          addedSingleFiles.add(mapped);
+        } else if (mapped.startsWith(imagePrefix)) {
           const dir = getImageAtlasDirectory(mapped, imagePrefix);
           if (dir) imageDirs.add(dir);
         } else if (mapped.startsWith(soundPrefix) && !addedSingleFiles.has(mapped)) {
@@ -2302,9 +2314,7 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
           // PageTurnBox 不携带 pages 数组，ContainerBox 子元素资源由主循环收集
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
           collectExportChildrenRes(meta?.exportChildren, resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
-          const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-          const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-          collectExportChildrenRes(presetChildren, resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
+          collectExportChildrenRes(getKeyboardChildren(el), resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
           // playSound / stopSound 动作中的音频资源也需要注册到 config.json
           if (el.actions) {
             for (const action of el.actions) {
@@ -2455,9 +2465,7 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
           }
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
           collectExportChildrenRes(meta?.exportChildren, resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);
-          const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-          const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-          collectExportChildrenRes(presetChildren, resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);
+          collectExportChildrenRes(getKeyboardChildren(el), resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);
           // playSound / stopSound 动作中的音频资源也需要注册到 config.json
           if (el.actions) {
             for (const action of el.actions) {
@@ -2731,6 +2739,15 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
     const details = choiceAnswerIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
     const more = choiceAnswerIssues.length > 8 ? `\n另有 ${choiceAnswerIssues.length - 8} 项未显示` : '';
     throw new Error(`选择题配置尚未完成，不能预览或发布：\n\n${details}${more}`);
+  }
+
+  const customAnswerKeyboardIssues = collectCourseCustomAnswerKeyboardIssues(course);
+  if (customAnswerKeyboardIssues.length > 0) {
+    const details = customAnswerKeyboardIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = customAnswerKeyboardIssues.length > 8
+      ? `\n另有 ${customAnswerKeyboardIssues.length - 8} 项未显示`
+      : '';
+    throw new Error(`自定义答案键盘配置尚未完成，不能预览或发布：\n\n${details}${more}`);
   }
 
   if (!options.skipSvn) {

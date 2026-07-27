@@ -14,7 +14,13 @@ import { showToast } from '../utils/toast';
 import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './QuickPresetDialog';
 import type { Action, Element } from '../types';
 import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
-import { keyboardCamp, keyboardPresetId, keyboardSupportsInput, nextKeyboardCamp } from '../utils/keyboardBinding';
+import {
+  applyKeyboardBindingProps,
+  keyboardCamp,
+  keyboardPresetId,
+  keyboardSupportsInput,
+  nextKeyboardCamp,
+} from '../utils/keyboardBinding';
 import { isInputRuleHost } from '../utils/inputAnswerRules';
 import { applyQuickTemplateConfirmDefaults } from '../utils/quickTemplateConfirm';
 
@@ -241,7 +247,11 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
       const camp = addKeyboardFromPreset(preset, false);
       const page = currentElementPage();
       const input = page?.elements.find((element) => element.id === pendingKeyboardInputId);
-      if (input) updateElement(input.id, { props: { ...input.props, camp } });
+      if (input) {
+        updateElement(input.id, {
+          props: applyKeyboardBindingProps(input.props as Record<string, unknown> | undefined, camp, preset.id),
+        });
+      }
       selectElement(pendingKeyboardInputId, false);
       setPendingKeyboardInputId(null);
       setPendingKeyboardInputType(null);

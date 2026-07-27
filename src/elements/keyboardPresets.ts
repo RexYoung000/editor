@@ -7,12 +7,14 @@
 //   - 编辑器加载用 assetSrc(id)
 //   - 发布到课件包用 assetExport(id)
 
+import type { Element } from '../types';
 import { assetExport, assetSrc } from './builtinAssets';
 
 export interface ExportChild {
   type: string;
   props: Record<string, unknown>;
   child?: ExportChild[];
+  resources?: string[];
 }
 
 export interface KeyboardPreset {
@@ -25,6 +27,259 @@ export interface KeyboardPreset {
   defaultProps: Record<string, unknown>;
   defaultSize: { width: number; height: number };
   children: ExportChild[];
+}
+
+export type CustomAnswerKeyboardTheme = 'yellow' | 'blue' | 'green';
+
+export interface CustomAnswerKeyboardConfig {
+  answers: string[];
+  theme: CustomAnswerKeyboardTheme;
+}
+
+export interface CustomAnswerKeyboardLayout {
+  columns: 2 | 3;
+  answerRows: number;
+  answerPositions: Array<{ x: number; y: number }>;
+  clearPosition: { x: number; y: number };
+}
+
+export const CUSTOM_ANSWER_KEYBOARD_FONT = 'FZLanTingYuanZhongCu';
+export const DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG: CustomAnswerKeyboardConfig = {
+  answers: ['东', '南', '西', '北'],
+  theme: 'yellow',
+};
+
+const CUSTOM_ANSWER_THEMES: CustomAnswerKeyboardTheme[] = ['yellow', 'blue', 'green'];
+const CUSTOM_ANSWER_KEY_SIZE = { width: 84, height: 88 };
+const CUSTOM_ANSWER_BOARD_SIZE = { width: 330, height: 420 };
+
+export function isCustomAnswerKeyboardTheme(value: unknown): value is CustomAnswerKeyboardTheme {
+  return typeof value === 'string' && CUSTOM_ANSWER_THEMES.includes(value as CustomAnswerKeyboardTheme);
+}
+
+export function readCustomAnswerKeyboardConfig(
+  source: Pick<Element, 'props'> | Record<string, unknown> | null | undefined,
+): CustomAnswerKeyboardConfig {
+  const props = source && 'props' in source
+    ? (source.props as Record<string, unknown> | undefined)
+    : source;
+  const raw = props?._customAnswerKeyboard as Partial<CustomAnswerKeyboardConfig> | undefined;
+  return {
+    answers: Array.isArray(raw?.answers)
+      ? raw.answers.map((answer) => String(answer))
+      : [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers],
+    theme: isCustomAnswerKeyboardTheme(raw?.theme)
+      ? raw.theme
+      : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme,
+  };
+}
+
+export function normalizeCustomAnswerOptions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers];
+  return value
+    .map((answer) => String(answer).trim())
+    .slice(0, 9);
+}
+
+export function getCustomAnswerKeyboardLayout(answerCount: number): CustomAnswerKeyboardLayout {
+  const count = Math.max(2, Math.min(9, Math.round(answerCount)));
+  const columns: 2 | 3 = count === 2 || count === 4 ? 2 : 3;
+  const answerRows = Math.ceil(count / columns);
+  const totalRows = answerRows + 1;
+  const rowGap = 4;
+  const totalHeight = totalRows * CUSTOM_ANSWER_KEY_SIZE.height + (totalRows - 1) * rowGap;
+  const firstY = (CUSTOM_ANSWER_BOARD_SIZE.height - totalHeight) / 2 + CUSTOM_ANSWER_KEY_SIZE.height / 2;
+  const rowStep = CUSTOM_ANSWER_KEY_SIZE.height + rowGap;
+  const xPositions = columns === 2 ? [117, 213] : [69, 165, 261];
+  const answerPositions = Array.from({ length: count }, (_, index) => ({
+    x: xPositions[index % columns],
+    y: firstY + Math.floor(index / columns) * rowStep,
+  }));
+  return {
+    columns,
+    answerRows,
+    answerPositions,
+    clearPosition: {
+      x: CUSTOM_ANSWER_BOARD_SIZE.width / 2,
+      y: firstY + answerRows * rowStep,
+    },
+  };
+}
+
+export function getCustomAnswerThemeAssets(theme: CustomAnswerKeyboardTheme, editor = false) {
+  const resolve = editor ? assetSrc : assetExport;
+  const prefix = `keyboard.customAnswer.${theme}`;
+  return {
+    bg: resolve(`${prefix}.bg`),
+    keyNormal: resolve(`${prefix}.keyNormal`),
+    keyActive: resolve(`${prefix}.keyActive`),
+    wideNormal: resolve(`${prefix}.wideNormal`),
+    wideActive: resolve(`${prefix}.wideActive`),
+    clearNormal: resolve(`${prefix}.clearNormal`),
+    clearActive: resolve(`${prefix}.clearActive`),
+    arrow: resolve(`${prefix}.arrow`),
+  };
+}
+
+export function getCustomAnswerTextStyle(theme: CustomAnswerKeyboardTheme, text: string) {
+  const length = Array.from(text).length;
+  const fontSize = length <= 1 ? 42 : length === 2 ? 34 : length === 3 ? 27 : 23;
+  const palette = {
+    yellow: { color: '#6b4300', strokeColor: '#fff3a8' },
+    blue: { color: '#174f87', strokeColor: '#dff6ff' },
+    green: { color: '#25643f', strokeColor: '#e5ffe9' },
+  }[theme];
+  return { fontSize, ...palette };
+}
+
+function customAnswerLabel(answer: string, theme: CustomAnswerKeyboardTheme, pressed = false): ExportChild {
+  const style = getCustomAnswerTextStyle(theme, answer);
+  return {
+    type: 'Label',
+    props: {
+      x: 0,
+      y: pressed ? 2 : 0,
+      width: CUSTOM_ANSWER_KEY_SIZE.width,
+      height: CUSTOM_ANSWER_KEY_SIZE.height,
+      text: answer,
+      font: CUSTOM_ANSWER_KEYBOARD_FONT,
+      fontSize: style.fontSize,
+      color: style.color,
+      stroke: 4,
+      strokeColor: style.strokeColor,
+      align: 'center',
+      valign: 'middle',
+    },
+  };
+}
+
+function customAnswerKey(
+  answer: string,
+  position: { x: number; y: number },
+  theme: CustomAnswerKeyboardTheme,
+): ExportChild {
+  const assets = getCustomAnswerThemeAssets(theme);
+  return {
+    type: 'KlKey',
+    props: {
+      ...position,
+      width: CUSTOM_ANSWER_KEY_SIZE.width,
+      height: CUSTOM_ANSWER_KEY_SIZE.height,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      output: answer,
+      runtime: 'com.klzz.ui.custom.KeyBoard.KlKey',
+    },
+    child: [
+      {
+        type: 'Image',
+        props: {
+          width: CUSTOM_ANSWER_KEY_SIZE.width,
+          height: CUSTOM_ANSWER_KEY_SIZE.height,
+          skin: assets.keyNormal,
+          name: 'normal',
+        },
+        child: [customAnswerLabel(answer, theme)],
+      },
+      {
+        type: 'Image',
+        props: {
+          width: CUSTOM_ANSWER_KEY_SIZE.width,
+          height: CUSTOM_ANSWER_KEY_SIZE.height,
+          skin: assets.keyActive,
+          name: 'active',
+        },
+        child: [customAnswerLabel(answer, theme, true)],
+      },
+    ],
+  };
+}
+
+function customAnswerClearKey(
+  position: { x: number; y: number },
+  theme: CustomAnswerKeyboardTheme,
+): ExportChild {
+  const assets = getCustomAnswerThemeAssets(theme);
+  const state = (pressed: boolean): ExportChild => ({
+    type: 'Image',
+    props: {
+      width: 182,
+      height: CUSTOM_ANSWER_KEY_SIZE.height,
+      skin: pressed ? assets.wideActive : assets.wideNormal,
+      name: pressed ? 'active' : 'normal',
+    },
+    child: [{
+      type: 'Image',
+      props: {
+        skin: pressed ? assets.clearActive : assets.clearNormal,
+        centerX: 0,
+        centerY: pressed ? 2 : 0,
+      },
+    }],
+  });
+  return {
+    type: 'KlKey',
+    props: {
+      ...position,
+      width: 182,
+      height: CUSTOM_ANSWER_KEY_SIZE.height,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      output: ' ',
+      runtime: 'com.klzz.ui.custom.KeyBoard.KlKey',
+    },
+    child: [state(false), state(true)],
+  };
+}
+
+export function customAnswerKeyboardChildren(config: CustomAnswerKeyboardConfig): ExportChild[] {
+  const answers = normalizeCustomAnswerOptions(config.answers);
+  const renderAnswers = answers.length >= 2
+    ? answers
+    : [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers];
+  const theme = isCustomAnswerKeyboardTheme(config.theme)
+    ? config.theme
+    : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme;
+  const assets = getCustomAnswerThemeAssets(theme);
+  const layout = getCustomAnswerKeyboardLayout(renderAnswers.length);
+  return [
+    {
+      type: 'Image',
+      props: {
+        x: 65,
+        y: 65,
+        width: CUSTOM_ANSWER_BOARD_SIZE.width,
+        height: CUSTOM_ANSWER_BOARD_SIZE.height,
+        skin: assets.bg,
+        sizeGrid: '53,0,57,0',
+      },
+    },
+    {
+      type: 'Image',
+      props: {
+        x: 230,
+        y: 0,
+        skin: assets.arrow,
+        name: 'arrow',
+        anchorX: 0.5,
+      },
+    },
+    {
+      type: 'Box',
+      props: {
+        x: 65,
+        y: 65,
+        width: CUSTOM_ANSWER_BOARD_SIZE.width,
+        height: CUSTOM_ANSWER_BOARD_SIZE.height,
+        name: 'keysBox',
+      },
+      resources: [assetExport('keyboard.customAnswer.font')],
+      child: [
+        ...renderAnswers.map((answer, index) => customAnswerKey(answer, layout.answerPositions[index], theme)),
+        customAnswerClearKey(layout.clearPosition, theme),
+      ],
+    },
+  ];
 }
 
 // ─── 数字键工厂 ─────────────────────────────────────
@@ -504,6 +759,29 @@ export const KEYBOARD_PRESETS: KeyboardPreset[] = [
     },
     children: mathKeyboardChildren('<_>'),
   },
+  {
+    id: 'customAnswer',
+    label: '自定义答案',
+    thumbnail: assetSrc('keyboard.customAnswer.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
+    campPrefix: 'TEXT_ANSWER',
+    defaultSize: { width: 460, height: 550 },
+    defaultProps: {
+      anchorX: 0,
+      anchorY: 0,
+      sheet: '',
+      pattern: 13,
+      visible: false,
+      isHide: true,
+      fixed: true,
+      disabled: false,
+      _customAnswerKeyboard: {
+        answers: [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers],
+        theme: DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme,
+      },
+    },
+    children: customAnswerKeyboardChildren(DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG),
+  },
 ];
 
 export function getKeyboardPreset(id: string): KeyboardPreset | undefined {
@@ -512,4 +790,14 @@ export function getKeyboardPreset(id: string): KeyboardPreset | undefined {
     console.error(`[keyboardPresets] 未知键盘预设 id: "${id}"，相关键盘元素将无按键、无资源`);
   }
   return preset;
+}
+
+export function getKeyboardChildren(element: Pick<Element, 'props'>): ExportChild[] | undefined {
+  const presetId = (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (typeof presetId !== 'string') return undefined;
+  const preset = getKeyboardPreset(presetId);
+  if (!preset) return undefined;
+  return presetId === 'customAnswer'
+    ? customAnswerKeyboardChildren(readCustomAnswerKeyboardConfig(element))
+    : preset.children;
 }

@@ -1,6 +1,6 @@
 import type { Element } from '../types';
 import { elementMeta, type ExportChild } from '../elements/elementMeta';
-import { getKeyboardPreset } from '../elements/keyboardPresets';
+import { getKeyboardChildren } from '../elements/keyboardPresets';
 
 /**
  * 模板用资源引用扫描。
@@ -66,6 +66,7 @@ export function collectResourceRefs(elements: Element[]): ResourceRefs {
     if (!children) return;
     for (const c of children) {
       if (c.props) for (const v of Object.values(c.props)) visit(v);
+      if (c.resources) for (const resource of c.resources) visit(resource);
       if (c.child) scanFixed(c.child);
     }
   };
@@ -86,9 +87,7 @@ export function collectResourceRefs(elements: Element[]): ResourceRefs {
       }
     }
     scanFixed(meta?.exportChildren);
-    const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-    const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-    scanFixed(presetChildren);
+    scanFixed(getKeyboardChildren(el));
   }
 
   return refs;

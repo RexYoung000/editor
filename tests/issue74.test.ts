@@ -82,6 +82,7 @@ test('数字与分数键盘的兼容矩阵和资源注册完整', () => {
       preset2: ['KlInputImage'],
       decimal: ['KlInputImage'],
       fraction: ['FractionInput'],
+      customAnswer: ['KlInputImage'],
     },
   );
   assert.equal(elementMeta.FractionInput?.runtime, 'Components.FractionInput');
