@@ -45,6 +45,9 @@ export interface CustomAnswerKeyboardConfig {
 export interface CustomAnswerKeyboardLayout {
   columns: 2 | 3;
   answerRows: number;
+  keyWidth: number;
+  boardWidth: number;
+  boardHeight: number;
   answerPositions: Array<{ x: number; y: number; width: number }>;
   clearPosition: { x: number; y: number };
 }
@@ -59,8 +62,9 @@ const CUSTOM_ANSWER_THEMES: CustomAnswerKeyboardTheme[] = ['yellow', 'blue', 'gr
 const CUSTOM_ANSWER_KEY_SIZE = { width: 84, height: 88 };
 const CUSTOM_ANSWER_BOARD_SIZE = { width: 330, height: 420 };
 const CUSTOM_ANSWER_KEY_GAP = 12;
-const CUSTOM_ANSWER_ROW_MAX_WIDTH = 306;
-const CUSTOM_ANSWER_KEY_WIDTH_STEP = 36;
+const CUSTOM_ANSWER_ROW_GAP = 12;
+const CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING = 27;
+const CUSTOM_ANSWER_KEY_WIDTH_STEP = 42;
 
 export function isCustomAnswerKeyboardTheme(value: unknown): value is CustomAnswerKeyboardTheme {
   return typeof value === 'string' && CUSTOM_ANSWER_THEMES.includes(value as CustomAnswerKeyboardTheme);
@@ -110,38 +114,41 @@ export function getCustomAnswerKeyboardLayout(answersOrCount: string[] | number)
     : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers.slice(0, count);
   const columns: 2 | 3 = count === 2 || count === 4 ? 2 : 3;
   const answerRows = Math.ceil(count / columns);
+  const keyWidth = Math.max(...layoutAnswers.map(customAnswerKeyTargetWidth));
+  const fullRowWidth = columns * keyWidth + (columns - 1) * CUSTOM_ANSWER_KEY_GAP;
+  const boardWidth = Math.max(
+    CUSTOM_ANSWER_BOARD_SIZE.width,
+    fullRowWidth + CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING * 2,
+  );
   const totalRows = answerRows + 1;
-  const rowGap = 4;
-  const totalHeight = totalRows * CUSTOM_ANSWER_KEY_SIZE.height + (totalRows - 1) * rowGap;
+  const totalHeight = totalRows * CUSTOM_ANSWER_KEY_SIZE.height
+    + (totalRows - 1) * CUSTOM_ANSWER_ROW_GAP;
   const firstY = (CUSTOM_ANSWER_BOARD_SIZE.height - totalHeight) / 2 + CUSTOM_ANSWER_KEY_SIZE.height / 2;
-  const rowStep = CUSTOM_ANSWER_KEY_SIZE.height + rowGap;
+  const rowStep = CUSTOM_ANSWER_KEY_SIZE.height + CUSTOM_ANSWER_ROW_GAP;
   const answerPositions: CustomAnswerKeyboardLayout['answerPositions'] = [];
   for (let row = 0; row < answerRows; row += 1) {
     const rowAnswers = layoutAnswers.slice(row * columns, Math.min(count, (row + 1) * columns));
-    const targetWidths = rowAnswers.map(customAnswerKeyTargetWidth);
     const totalGap = Math.max(0, rowAnswers.length - 1) * CUSTOM_ANSWER_KEY_GAP;
-    const targetWidth = targetWidths.reduce((sum, width) => sum + width, 0);
-    const scale = targetWidth + totalGap > CUSTOM_ANSWER_ROW_MAX_WIDTH
-      ? (CUSTOM_ANSWER_ROW_MAX_WIDTH - totalGap) / targetWidth
-      : 1;
-    const widths = targetWidths.map((width) => Math.floor(width * scale));
-    const rowWidth = widths.reduce((sum, width) => sum + width, 0) + totalGap;
-    let cursorX = (CUSTOM_ANSWER_BOARD_SIZE.width - rowWidth) / 2;
-    widths.forEach((width) => {
+    const rowWidth = rowAnswers.length * keyWidth + totalGap;
+    let cursorX = (boardWidth - rowWidth) / 2;
+    rowAnswers.forEach(() => {
       answerPositions.push({
-        x: cursorX + width / 2,
+        x: cursorX + keyWidth / 2,
         y: firstY + row * rowStep,
-        width,
+        width: keyWidth,
       });
-      cursorX += width + CUSTOM_ANSWER_KEY_GAP;
+      cursorX += keyWidth + CUSTOM_ANSWER_KEY_GAP;
     });
   }
   return {
     columns,
     answerRows,
+    keyWidth,
+    boardWidth,
+    boardHeight: CUSTOM_ANSWER_BOARD_SIZE.height,
     answerPositions,
     clearPosition: {
-      x: CUSTOM_ANSWER_BOARD_SIZE.width / 2,
+      x: boardWidth / 2,
       y: firstY + answerRows * rowStep,
     },
   };
@@ -162,15 +169,13 @@ export function getCustomAnswerThemeAssets(theme: CustomAnswerKeyboardTheme, edi
   };
 }
 
-export function getCustomAnswerTextStyle(theme: CustomAnswerKeyboardTheme, text: string) {
-  const length = Array.from(text).length;
-  const fontSize = length <= 1 ? 42 : length === 2 ? 34 : length === 3 ? 25 : 19;
+export function getCustomAnswerTextStyle(theme: CustomAnswerKeyboardTheme, _text: string) {
   const palette = {
     yellow: { color: '#6b4300', strokeColor: '#fff3a8' },
     blue: { color: '#174f87', strokeColor: '#dff6ff' },
     green: { color: '#25643f', strokeColor: '#e5ffe9' },
   }[theme];
-  return { fontSize, ...palette };
+  return { fontSize: 42, ...palette };
 }
 
 function customAnswerTextNode(
@@ -306,16 +311,17 @@ export function customAnswerKeyboardChildren(config: CustomAnswerKeyboardConfig)
     : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme;
   const assets = getCustomAnswerThemeAssets(theme);
   const layout = getCustomAnswerKeyboardLayout(renderAnswers);
+  const boardX = (460 - layout.boardWidth) / 2;
   return [
     {
       type: 'Image',
       props: {
-        x: 65,
+        x: boardX,
         y: 65,
-        width: CUSTOM_ANSWER_BOARD_SIZE.width,
-        height: CUSTOM_ANSWER_BOARD_SIZE.height,
+        width: layout.boardWidth,
+        height: layout.boardHeight,
         skin: assets.bg,
-        sizeGrid: '53,0,57,0',
+        sizeGrid: '53,52,57,52',
       },
     },
     {
@@ -331,10 +337,10 @@ export function customAnswerKeyboardChildren(config: CustomAnswerKeyboardConfig)
     {
       type: 'Box',
       props: {
-        x: 65,
+        x: boardX,
         y: 65,
-        width: CUSTOM_ANSWER_BOARD_SIZE.width,
-        height: CUSTOM_ANSWER_BOARD_SIZE.height,
+        width: layout.boardWidth,
+        height: layout.boardHeight,
         name: 'keysBox',
       },
       child: [

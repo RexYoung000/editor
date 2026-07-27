@@ -81,6 +81,7 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
   const normalizedAnswers = normalizeCustomAnswerOptions(config.answers);
   const answers = normalizedAnswers.length >= 2 ? normalizedAnswers : ['东', '南', '西', '北'];
   const layout = getCustomAnswerKeyboardLayout(answers);
+  const boardX = (460 - layout.boardWidth) / 2;
   const makeImage = (skin: string, x: number, y: number, width?: number, height?: number) => {
     const image = cu.getInstance('Image');
     if (!image) return null;
@@ -92,9 +93,9 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
     return image;
   };
 
-  const bg = makeImage(assets.bg, 65, 65, 330, 420);
+  const bg = makeImage(assets.bg, boardX, 65, layout.boardWidth, layout.boardHeight);
   if (bg) {
-    bg.sizeGrid = '53,0,57,0';
+    bg.sizeGrid = '53,52,57,52';
     comp.addChild(bg);
   }
   const arrow = makeImage(assets.arrow, 216, 0);
@@ -125,7 +126,7 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
     const position = layout.answerPositions[index];
     const key = makeImage(
       assets.keyNormal,
-      65 + position.x - position.width / 2,
+      boardX + position.x - position.width / 2,
       65 + position.y - 44,
       position.width,
       88,
@@ -138,7 +139,7 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
 
   const clear = makeImage(
     assets.wideNormal,
-    65 + layout.clearPosition.x - 91,
+    boardX + layout.clearPosition.x - 91,
     65 + layout.clearPosition.y - 44,
     182,
     88,
