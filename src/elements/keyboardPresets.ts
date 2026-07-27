@@ -45,7 +45,7 @@ export interface CustomAnswerKeyboardConfig {
 export interface CustomAnswerKeyboardLayout {
   columns: 2 | 3;
   answerRows: number;
-  answerPositions: Array<{ x: number; y: number }>;
+  answerPositions: Array<{ x: number; y: number; width: number }>;
   clearPosition: { x: number; y: number };
 }
 
@@ -58,6 +58,9 @@ export const DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG: CustomAnswerKeyboardConfig =
 const CUSTOM_ANSWER_THEMES: CustomAnswerKeyboardTheme[] = ['yellow', 'blue', 'green'];
 const CUSTOM_ANSWER_KEY_SIZE = { width: 84, height: 88 };
 const CUSTOM_ANSWER_BOARD_SIZE = { width: 330, height: 420 };
+const CUSTOM_ANSWER_KEY_GAP = 12;
+const CUSTOM_ANSWER_ROW_MAX_WIDTH = 306;
+const CUSTOM_ANSWER_KEY_WIDTH_STEP = 36;
 
 export function isCustomAnswerKeyboardTheme(value: unknown): value is CustomAnswerKeyboardTheme {
   return typeof value === 'string' && CUSTOM_ANSWER_THEMES.includes(value as CustomAnswerKeyboardTheme);
@@ -92,8 +95,19 @@ export function normalizeCustomAnswerOptions(value: unknown): string[] {
     .slice(0, 9);
 }
 
-export function getCustomAnswerKeyboardLayout(answerCount: number): CustomAnswerKeyboardLayout {
-  const count = Math.max(2, Math.min(9, Math.round(answerCount)));
+function customAnswerKeyTargetWidth(answer: string): number {
+  const length = Math.max(1, Math.min(4, Array.from(answer).length));
+  return CUSTOM_ANSWER_KEY_SIZE.width + (length - 1) * CUSTOM_ANSWER_KEY_WIDTH_STEP;
+}
+
+export function getCustomAnswerKeyboardLayout(answersOrCount: string[] | number): CustomAnswerKeyboardLayout {
+  const answers = Array.isArray(answersOrCount)
+    ? normalizeCustomAnswerOptions(answersOrCount)
+    : Array.from({ length: Math.round(answersOrCount) }, () => '字');
+  const count = Math.max(2, Math.min(9, answers.length));
+  const layoutAnswers = answers.length >= 2
+    ? answers.slice(0, count)
+    : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers.slice(0, count);
   const columns: 2 | 3 = count === 2 || count === 4 ? 2 : 3;
   const answerRows = Math.ceil(count / columns);
   const totalRows = answerRows + 1;
@@ -101,11 +115,27 @@ export function getCustomAnswerKeyboardLayout(answerCount: number): CustomAnswer
   const totalHeight = totalRows * CUSTOM_ANSWER_KEY_SIZE.height + (totalRows - 1) * rowGap;
   const firstY = (CUSTOM_ANSWER_BOARD_SIZE.height - totalHeight) / 2 + CUSTOM_ANSWER_KEY_SIZE.height / 2;
   const rowStep = CUSTOM_ANSWER_KEY_SIZE.height + rowGap;
-  const xPositions = columns === 2 ? [117, 213] : [69, 165, 261];
-  const answerPositions = Array.from({ length: count }, (_, index) => ({
-    x: xPositions[index % columns],
-    y: firstY + Math.floor(index / columns) * rowStep,
-  }));
+  const answerPositions: CustomAnswerKeyboardLayout['answerPositions'] = [];
+  for (let row = 0; row < answerRows; row += 1) {
+    const rowAnswers = layoutAnswers.slice(row * columns, Math.min(count, (row + 1) * columns));
+    const targetWidths = rowAnswers.map(customAnswerKeyTargetWidth);
+    const totalGap = Math.max(0, rowAnswers.length - 1) * CUSTOM_ANSWER_KEY_GAP;
+    const targetWidth = targetWidths.reduce((sum, width) => sum + width, 0);
+    const scale = targetWidth + totalGap > CUSTOM_ANSWER_ROW_MAX_WIDTH
+      ? (CUSTOM_ANSWER_ROW_MAX_WIDTH - totalGap) / targetWidth
+      : 1;
+    const widths = targetWidths.map((width) => Math.floor(width * scale));
+    const rowWidth = widths.reduce((sum, width) => sum + width, 0) + totalGap;
+    let cursorX = (CUSTOM_ANSWER_BOARD_SIZE.width - rowWidth) / 2;
+    widths.forEach((width) => {
+      answerPositions.push({
+        x: cursorX + width / 2,
+        y: firstY + row * rowStep,
+        width,
+      });
+      cursorX += width + CUSTOM_ANSWER_KEY_GAP;
+    });
+  }
   return {
     columns,
     answerRows,
@@ -148,6 +178,7 @@ function customAnswerTextNode(
   theme: CustomAnswerKeyboardTheme,
   pressed = false,
   textSkin?: string,
+  width = CUSTOM_ANSWER_KEY_SIZE.width,
 ): ExportChild {
   if (textSkin) {
     return {
@@ -155,7 +186,7 @@ function customAnswerTextNode(
       props: {
         x: 0,
         y: pressed ? 2 : 0,
-        width: CUSTOM_ANSWER_KEY_SIZE.width,
+        width,
         height: CUSTOM_ANSWER_KEY_SIZE.height,
         skin: textSkin,
         mouseEnabled: false,
@@ -168,7 +199,7 @@ function customAnswerTextNode(
     props: {
       x: 0,
       y: pressed ? 2 : 0,
-      width: CUSTOM_ANSWER_KEY_SIZE.width,
+      width,
       height: CUSTOM_ANSWER_KEY_SIZE.height,
       text: answer,
       font: CUSTOM_ANSWER_KEYBOARD_FONT,
@@ -184,16 +215,17 @@ function customAnswerTextNode(
 
 function customAnswerKey(
   answer: string,
-  position: { x: number; y: number },
+  position: { x: number; y: number; width: number },
   theme: CustomAnswerKeyboardTheme,
   textSkin?: string,
 ): ExportChild {
   const assets = getCustomAnswerThemeAssets(theme);
+  const width = position.width;
   return {
     type: 'KlKey',
     props: {
       ...position,
-      width: CUSTOM_ANSWER_KEY_SIZE.width,
+      width,
       height: CUSTOM_ANSWER_KEY_SIZE.height,
       anchorX: 0.5,
       anchorY: 0.5,
@@ -204,22 +236,24 @@ function customAnswerKey(
       {
         type: 'Image',
         props: {
-          width: CUSTOM_ANSWER_KEY_SIZE.width,
+          width,
           height: CUSTOM_ANSWER_KEY_SIZE.height,
           skin: assets.keyNormal,
+          sizeGrid: '0,28,0,28',
           name: 'normal',
         },
-        child: [customAnswerTextNode(answer, theme, false, textSkin)],
+        child: [customAnswerTextNode(answer, theme, false, textSkin, width)],
       },
       {
         type: 'Image',
         props: {
-          width: CUSTOM_ANSWER_KEY_SIZE.width,
+          width,
           height: CUSTOM_ANSWER_KEY_SIZE.height,
           skin: assets.keyActive,
+          sizeGrid: '0,28,0,28',
           name: 'active',
         },
-        child: [customAnswerTextNode(answer, theme, true, textSkin)],
+        child: [customAnswerTextNode(answer, theme, true, textSkin, width)],
       },
     ],
   };
@@ -271,7 +305,7 @@ export function customAnswerKeyboardChildren(config: CustomAnswerKeyboardConfig)
     ? config.theme
     : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme;
   const assets = getCustomAnswerThemeAssets(theme);
-  const layout = getCustomAnswerKeyboardLayout(renderAnswers.length);
+  const layout = getCustomAnswerKeyboardLayout(renderAnswers);
   return [
     {
       type: 'Image',

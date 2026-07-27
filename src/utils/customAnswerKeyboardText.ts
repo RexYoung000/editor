@@ -1,4 +1,5 @@
 import {
+  getCustomAnswerKeyboardLayout,
   getCustomAnswerTextStyle,
   normalizeCustomAnswerOptions,
   readCustomAnswerKeyboardConfig,
@@ -32,9 +33,10 @@ const inputFontSkinCache = new Map<string, Promise<string>>();
 export function renderCustomAnswerTextSkin(
   answer: string,
   theme: CustomAnswerKeyboardTheme,
+  width = CUSTOM_ANSWER_KEYBOARD_TEXT_SIZE.width,
 ): Promise<string> {
   const style = getCustomAnswerTextStyle(theme, answer);
-  const cacheKey = JSON.stringify([answer, theme, style]);
+  const cacheKey = JSON.stringify([answer, theme, width, style]);
   const cached = textSkinCache.get(cacheKey);
   if (cached) return cached;
 
@@ -45,7 +47,7 @@ export function renderCustomAnswerTextSkin(
     }
     return renderTextToImage(
       answer,
-      CUSTOM_ANSWER_KEYBOARD_TEXT_SIZE.width,
+      width,
       CUSTOM_ANSWER_KEYBOARD_TEXT_SIZE.height,
       {
         fontFace,
@@ -142,7 +144,7 @@ export function renderCustomAnswerInputFontSkin(
 }
 
 export interface CustomAnswerKeyboardTextRenderer {
-  answerText(answer: string, theme: CustomAnswerKeyboardTheme): Promise<string>;
+  answerText(answer: string, theme: CustomAnswerKeyboardTheme, width: number): Promise<string>;
   inputFont(
     characters: string,
     theme: CustomAnswerKeyboardTheme,
@@ -177,9 +179,14 @@ export async function bakeCustomAnswerKeyboardTextAssets(
         for (const keyboard of keyboards) {
           const config = readCustomAnswerKeyboardConfig(keyboard);
           const answers = normalizeCustomAnswerOptions(config.answers);
+          const layout = getCustomAnswerKeyboardLayout(answers);
           const inputSheet = customAnswerInputSheet(answers);
           const textSkins = await Promise.all(
-            answers.map((answer) => renderer.answerText(answer, config.theme)),
+            answers.map((answer, index) => renderer.answerText(
+              answer,
+              config.theme,
+              layout.answerPositions[index]?.width ?? CUSTOM_ANSWER_KEYBOARD_TEXT_SIZE.width,
+            )),
           );
 
           const keyboardCamp = camp(keyboard);

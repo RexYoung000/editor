@@ -80,7 +80,7 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
   const assets = getCustomAnswerThemeAssets(config.theme, true);
   const normalizedAnswers = normalizeCustomAnswerOptions(config.answers);
   const answers = normalizedAnswers.length >= 2 ? normalizedAnswers : ['东', '南', '西', '北'];
-  const layout = getCustomAnswerKeyboardLayout(answers.length);
+  const layout = getCustomAnswerKeyboardLayout(answers);
   const makeImage = (skin: string, x: number, y: number, width?: number, height?: number) => {
     const image = cu.getInstance('Image');
     if (!image) return null;
@@ -100,12 +100,12 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
   const arrow = makeImage(assets.arrow, 216, 0);
   if (arrow) comp.addChild(arrow);
 
-  const addTextSkin = (parent: LayaObj, answer: string) => {
-    const textImage = makeImage('', 0, 0, 84, 88);
+  const addTextSkin = (parent: LayaObj, answer: string, width: number) => {
+    const textImage = makeImage('', 0, 0, width, 88);
     if (!textImage) return;
     textImage.mouseEnabled = false;
     parent.addChild(textImage);
-    void renderCustomAnswerTextSkin(answer, config.theme).then((dataUrl) => {
+    void renderCustomAnswerTextSkin(answer, config.theme, width).then((dataUrl) => {
       if (comp._customAnswerRenderKey !== renderKey || textImage.destroyed) return;
       const L = laya();
       const applySkin = () => {
@@ -123,9 +123,16 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
 
   answers.forEach((answer, index) => {
     const position = layout.answerPositions[index];
-    const key = makeImage(assets.keyNormal, 65 + position.x - 42, 65 + position.y - 44, 84, 88);
+    const key = makeImage(
+      assets.keyNormal,
+      65 + position.x - position.width / 2,
+      65 + position.y - 44,
+      position.width,
+      88,
+    );
     if (!key) return;
-    addTextSkin(key, answer);
+    key.sizeGrid = '0,28,0,28';
+    addTextSkin(key, answer, position.width);
     comp.addChild(key);
   });
 
