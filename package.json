@@ -43,7 +43,7 @@
     "globals": "^17.5.0",
     "immer": "^11.1.4",
     "layaair2-cmd": "^1.6.15",
-    "postcss": "^8.5.10",
+    "postcss": "^8.5.23",
     "tailwindcss": "^4.2.3",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
