@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Course, Element, SubPage } from '../src/types';
 import {
-  CUSTOM_ANSWER_KEYBOARD_FONT,
   KEYBOARD_PRESETS,
   getCustomAnswerKeyboardLayout,
   getKeyboardChildren,
 } from '../src/elements/keyboardPresets';
 import { applyKeyboardBindingProps } from '../src/utils/keyboardBinding';
 import { collectCourseCustomAnswerKeyboardIssues } from '../src/utils/customAnswerKeyboardRules';
+import {
+  bakeCustomAnswerKeyboardTextAssets,
+  customAnswerInputSheet,
+  getCustomAnswerInputGlyphMetrics,
+} from '../src/utils/customAnswerKeyboardText';
 import { buildExportRegressionArtifacts } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
 import {
@@ -86,29 +90,91 @@ test('自定义答案键盘按 2～9 项规则生成稳定布局', () => {
   assert.deepEqual(nine.clearPosition, { x: 165, y: 348 });
 });
 
-test('每个键盘实例按答案和主题动态生成中文按键、清空键与字体资源', () => {
+test('每个键盘实例按答案和主题动态生成中文按键、清空键与文字图片', () => {
   const keyboard = customKeyboard('one', ['春', '夏天', '秋季风', '冬天到了'], 'blue');
+  (keyboard.props._customAnswerKeyboard as Record<string, unknown>).textSkins = [
+    'data:image/png;base64,spring',
+    'data:image/png;base64,summer',
+    'data:image/png;base64,autumn',
+    'data:image/png;base64,winter',
+  ];
   const children = getKeyboardChildren(keyboard);
   const nodes = treeNodes(children);
   const keys = nodes.filter((node) => node.type === 'KlKey');
   assert.deepEqual(keys.map((key) => key.props.output), ['春', '夏天', '秋季风', '冬天到了', ' ']);
   assert.ok(nodes.some((node) => node.props.skin === 'game/textKeyboard/blue/key-normal.png'));
-  assert.ok(nodes.some((node) => node.props.text === '冬天到了' && node.props.font === CUSTOM_ANSWER_KEYBOARD_FONT));
-  assert.ok(nodes.some((node) => node.resources?.includes('game/textKeyboard/FZLanTingYuanZhongCu.ttf')));
+  assert.ok(nodes.some((node) => node.props.skin === 'data:image/png;base64,winter'));
+  assert.ok(!nodes.some((node) => node.type === 'Label'));
+  assert.ok(!nodes.some((node) => node.resources?.some((resource) => /\.ttf$/i.test(resource))));
 });
 
-test('绑定自定义答案键盘时自动切换为文本整项替换模式', () => {
+test('绑定自定义答案键盘时自动切换为位图字库整项替换模式', () => {
   const props = applyKeyboardBindingProps({ place: 4, sheet: '0123456789' }, 'TEXT_ANSWER-1', 'customAnswer');
-  assert.equal(props.contentType, 3);
+  assert.equal(props.contentType, 1);
   assert.equal(props.place, 1);
-  assert.equal(props.font, CUSTOM_ANSWER_KEYBOARD_FONT);
   assert.equal(props.sheet, '');
+  assert.equal(props.fontClipSkin, '');
+  assert.equal(props._customAnswerKeyboardBinding, true);
 
   const restored = applyKeyboardBindingProps(props, 'L12_DECIMAL-1', 'decimal');
   assert.equal(restored.contentType, undefined);
-  assert.equal(restored.font, undefined);
+  assert.equal(restored.fontClipSkin, undefined);
+  assert.equal(restored._customAnswerKeyboardBinding, undefined);
   assert.equal(restored.place, 4);
   assert.equal(restored.sheet, '0123456789.');
+});
+
+test('预览发布前为键帽和绑定输入框生成位图资源并保留文本答案', async () => {
+  const course = normalCourseFixture();
+  const page = firstEditablePage(course);
+  const keyboard = customKeyboard('bake', ['东北', '东南', '西北'], 'green');
+  const input = element(
+    'answer-input',
+    'KlInputImage',
+    { camp: keyboard.props.camp, _judgeAnswer: '东北' },
+    { width: 160, height: 70 },
+  );
+  page.elements.push(keyboard, input);
+
+  let renderedInputMetrics: ReturnType<typeof getCustomAnswerInputGlyphMetrics> | undefined;
+  await bakeCustomAnswerKeyboardTextAssets(course, {
+    answerText: async (answer, theme) => `data:image/png;base64,key-${theme}-${answer}`,
+    inputFont: async (characters, theme, metrics) => {
+      renderedInputMetrics = metrics;
+      return `data:image/png;base64,input-${theme}-${characters}`;
+    },
+  });
+
+  const config = keyboard.props._customAnswerKeyboard as {
+    answers: string[];
+    textSkins: string[];
+    inputFontSkin: string;
+    inputSheet: string;
+  };
+  assert.deepEqual(config.answers, ['东北', '东南', '西北']);
+  assert.deepEqual(config.textSkins, [
+    'data:image/png;base64,key-green-东北',
+    'data:image/png;base64,key-green-东南',
+    'data:image/png;base64,key-green-西北',
+  ]);
+  assert.equal(config.inputSheet, '东北南西');
+  assert.equal(config.inputFontSkin, 'data:image/png;base64,input-green-东北南西');
+  assert.equal(input.props.contentType, 1);
+  assert.equal(input.props.fontClipSkin, config.inputFontSkin);
+  assert.equal(input.props.sheet, config.inputSheet);
+  assert.equal(input.props.contentScale, 1);
+  assert.deepEqual(renderedInputMetrics, getCustomAnswerInputGlyphMetrics(160, 70, 2));
+  assert.equal(input.props._judgeAnswer, '东北');
+  assert.equal(input.props.font, undefined);
+  assert.equal(customAnswerInputSheet(['东北', '东南', '西北']), '东北南西');
+  assert.equal(customAnswerInputSheet(['天天', '天地']), '天地');
+});
+
+test('输入框字库图片自身适配最长四字答案，不依赖运行时缩放', () => {
+  const metrics = getCustomAnswerInputGlyphMetrics(120, 60, 4);
+  assert.ok(metrics.cellWidth * 4 <= 120 - 16);
+  assert.ok(metrics.cellHeight <= 60 - 10);
+  assert.ok(metrics.fontSize <= metrics.cellWidth);
 });
 
 test('自定义答案键盘预设进入兼容矩阵', () => {
@@ -122,28 +188,54 @@ test('自定义答案键盘预设进入兼容矩阵', () => {
   );
 });
 
-test('正式与预习导出包含动态答案、主题皮肤和 TTF 资源', () => {
+test('正式与预习导出包含动态答案、主题皮肤和位图字库，不包含运行时字体', async () => {
+  const renderer = {
+    answerText: async (answer: string, theme: 'yellow' | 'blue' | 'green') => (
+      `data:image/png;base64,key-${theme}-${answer}`
+    ),
+    inputFont: async (characters: string, theme: 'yellow' | 'blue' | 'green') => (
+      `data:image/png;base64,input-${theme}-${characters}`
+    ),
+  };
   for (const fixture of [normalCourseFixture, homeworkCourseFixture]) {
     const course = fixture();
-    firstEditablePage(course).elements.push(customKeyboard('export', ['红', '黄', '蓝'], 'green'));
+    const page = firstEditablePage(course);
+    const keyboard = customKeyboard('export', ['红', '黄', '蓝'], 'green');
+    page.elements.push(
+      keyboard,
+      element('export-input', 'KlInputImage', { camp: keyboard.props.camp, _judgeAnswer: '红' }),
+    );
+    await bakeCustomAnswerKeyboardTextAssets(course, renderer);
     const artifacts = buildExportRegressionArtifacts(course);
     const sceneText = JSON.stringify(artifacts.scenes);
     const configText = JSON.stringify(artifacts.config);
     assert.match(sceneText, /"output":"红"/);
     assert.match(sceneText, /textKeyboard\/green\/key-normal\.png/);
-    assert.match(sceneText, /FZLanTingYuanZhongCu/);
-    assert.match(configText, /textKeyboard\/FZLanTingYuanZhongCu\.ttf/);
-    assert.match(configText, /"type":"ttf"/);
+    assert.match(sceneText, /"contentType":1/);
+    assert.match(sceneText, /"sheet":"红黄蓝"/);
+    assert.match(sceneText, /skin_\d+\.png/);
+    assert.doesNotMatch(sceneText, /FZLanTingYuanZhongCu|\.ttf|"type":"Label"/);
+    assert.doesNotMatch(configText, /\.ttf|"type":"ttf"/);
   }
 
   const previewCourse = previewCourseFixture();
   const previewPage = previewCourse.previewStages?.flatMap((stage) => stage.subPages)
     .find((candidate) => !candidate.frozen);
   assert.ok(previewPage);
-  previewPage.elements.push(customKeyboard('preview-export', ['对', '错'], 'blue'));
+  const previewKeyboard = customKeyboard('preview-export', ['对', '错'], 'blue');
+  previewPage.elements.push(
+    previewKeyboard,
+    element('preview-input', 'KlInputImage', { camp: previewKeyboard.props.camp, _judgeAnswer: '对' }),
+  );
+  await bakeCustomAnswerKeyboardTextAssets(previewCourse, renderer);
   const previewArtifacts = buildPreviewExportRegressionArtifacts(previewCourse);
-  assert.match(JSON.stringify(previewArtifacts.scenes), /"output":"对"/);
-  assert.match(JSON.stringify(previewArtifacts.config), /"type":"ttf"/);
+  const previewSceneText = JSON.stringify(previewArtifacts.scenes);
+  const previewConfigText = JSON.stringify(previewArtifacts.config);
+  assert.match(previewSceneText, /"output":"对"/);
+  assert.match(previewSceneText, /"contentType":1/);
+  assert.match(previewSceneText, /"sheet":"对错"/);
+  assert.doesNotMatch(previewSceneText, /FZLanTingYuanZhongCu|\.ttf|"type":"Label"/);
+  assert.doesNotMatch(previewConfigText, /\.ttf|"type":"ttf"/);
 });
 
 test('发布校验阻止无效选项和无法作答的正确答案', () => {

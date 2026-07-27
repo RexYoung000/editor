@@ -33,11 +33,12 @@ import {
   isChoiceOptionText,
 } from './choiceAnswerRules';
 import { collectCourseCustomAnswerKeyboardIssues } from './customAnswerKeyboardRules';
+import { bakeCustomAnswerKeyboardTextAssets } from './customAnswerKeyboardText';
 
 // ─── Text 烘焙 ───
 
 /**
- * publish 前烘焙：把所有 NewTextArea 元素就地替换成 Image（skin 是渲染好的 PNG data URL）。
+ * publish 前烘焙：把 NewTextArea 和自定义答案键盘文字转换为 PNG 资源。
  * 后续 collectResources/elementToLayaNode/atlas 全流程对它一无所知，data URL 走现有的
  * `data:image` → `game/image/skin_<n>.png` 通道，零特殊处理。
  *
@@ -65,6 +66,7 @@ async function bakeTextElements(course: Course): Promise<Course> {
       }
     }
   }
+  await bakeCustomAnswerKeyboardTextAssets(cloned);
   return cloned;
 }
 

@@ -93,8 +93,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'keyboard.fraction.thumbnail',  src: 'editor/keyboard-fraction-thumb.png' },
   { id: 'keyboard.customAnswer.thumbnail', src: 'editor/keyboard-custom-answer-thumb.png' },
 
-  // 自定义答案键盘：三套同结构主题 + 运行时中文字体
-  { id: 'keyboard.customAnswer.font',                src: 'runtime/game/textKeyboard/FZLanTingYuanZhongCu.ttf', exportPath: 'game/textKeyboard/FZLanTingYuanZhongCu.ttf' },
+  // 自定义答案键盘：三套同结构主题；文字在编辑器内烘焙为 PNG
   { id: 'keyboard.customAnswer.yellow.bg',           src: 'runtime/game/textKeyboard/yellow/bg.png',           exportPath: 'game/textKeyboard/yellow/bg.png' },
   { id: 'keyboard.customAnswer.yellow.keyNormal',    src: 'runtime/game/textKeyboard/yellow/key-normal.png',   exportPath: 'game/textKeyboard/yellow/key-normal.png' },
   { id: 'keyboard.customAnswer.yellow.keyActive',    src: 'runtime/game/textKeyboard/yellow/key-active.png',   exportPath: 'game/textKeyboard/yellow/key-active.png' },

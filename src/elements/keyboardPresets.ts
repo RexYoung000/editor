@@ -34,6 +34,12 @@ export type CustomAnswerKeyboardTheme = 'yellow' | 'blue' | 'green';
 export interface CustomAnswerKeyboardConfig {
   answers: string[];
   theme: CustomAnswerKeyboardTheme;
+  /** 仅用于预览/发布过程，按 answers 顺序保存键帽文字透明图。 */
+  textSkins?: string[];
+  /** 仅用于预览/发布过程，供绑定输入框使用的 FontClip 字库图。 */
+  inputFontSkin?: string;
+  /** inputFontSkin 中的字符排列。 */
+  inputSheet?: string;
 }
 
 export interface CustomAnswerKeyboardLayout {
@@ -71,6 +77,11 @@ export function readCustomAnswerKeyboardConfig(
     theme: isCustomAnswerKeyboardTheme(raw?.theme)
       ? raw.theme
       : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme,
+    textSkins: Array.isArray(raw?.textSkins)
+      ? raw.textSkins.map((skin) => String(skin))
+      : undefined,
+    inputFontSkin: typeof raw?.inputFontSkin === 'string' ? raw.inputFontSkin : undefined,
+    inputSheet: typeof raw?.inputSheet === 'string' ? raw.inputSheet : undefined,
   };
 }
 
@@ -123,7 +134,7 @@ export function getCustomAnswerThemeAssets(theme: CustomAnswerKeyboardTheme, edi
 
 export function getCustomAnswerTextStyle(theme: CustomAnswerKeyboardTheme, text: string) {
   const length = Array.from(text).length;
-  const fontSize = length <= 1 ? 42 : length === 2 ? 34 : length === 3 ? 27 : 23;
+  const fontSize = length <= 1 ? 42 : length === 2 ? 34 : length === 3 ? 25 : 19;
   const palette = {
     yellow: { color: '#6b4300', strokeColor: '#fff3a8' },
     blue: { color: '#174f87', strokeColor: '#dff6ff' },
@@ -132,7 +143,25 @@ export function getCustomAnswerTextStyle(theme: CustomAnswerKeyboardTheme, text:
   return { fontSize, ...palette };
 }
 
-function customAnswerLabel(answer: string, theme: CustomAnswerKeyboardTheme, pressed = false): ExportChild {
+function customAnswerTextNode(
+  answer: string,
+  theme: CustomAnswerKeyboardTheme,
+  pressed = false,
+  textSkin?: string,
+): ExportChild {
+  if (textSkin) {
+    return {
+      type: 'Image',
+      props: {
+        x: 0,
+        y: pressed ? 2 : 0,
+        width: CUSTOM_ANSWER_KEY_SIZE.width,
+        height: CUSTOM_ANSWER_KEY_SIZE.height,
+        skin: textSkin,
+        mouseEnabled: false,
+      },
+    };
+  }
   const style = getCustomAnswerTextStyle(theme, answer);
   return {
     type: 'Label',
@@ -157,6 +186,7 @@ function customAnswerKey(
   answer: string,
   position: { x: number; y: number },
   theme: CustomAnswerKeyboardTheme,
+  textSkin?: string,
 ): ExportChild {
   const assets = getCustomAnswerThemeAssets(theme);
   return {
@@ -179,7 +209,7 @@ function customAnswerKey(
           skin: assets.keyNormal,
           name: 'normal',
         },
-        child: [customAnswerLabel(answer, theme)],
+        child: [customAnswerTextNode(answer, theme, false, textSkin)],
       },
       {
         type: 'Image',
@@ -189,7 +219,7 @@ function customAnswerKey(
           skin: assets.keyActive,
           name: 'active',
         },
-        child: [customAnswerLabel(answer, theme, true)],
+        child: [customAnswerTextNode(answer, theme, true, textSkin)],
       },
     ],
   };
@@ -273,9 +303,13 @@ export function customAnswerKeyboardChildren(config: CustomAnswerKeyboardConfig)
         height: CUSTOM_ANSWER_BOARD_SIZE.height,
         name: 'keysBox',
       },
-      resources: [assetExport('keyboard.customAnswer.font')],
       child: [
-        ...renderAnswers.map((answer, index) => customAnswerKey(answer, layout.answerPositions[index], theme)),
+        ...renderAnswers.map((answer, index) => customAnswerKey(
+          answer,
+          layout.answerPositions[index],
+          theme,
+          config.textSkins?.[index],
+        )),
         customAnswerClearKey(layout.clearPosition, theme),
       ],
     },

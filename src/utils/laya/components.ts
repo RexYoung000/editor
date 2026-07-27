@@ -5,11 +5,10 @@ import { elementMeta } from '../../elements/elementMeta';
 import { lookupBuiltinByExportPath } from '../../elements/builtinAssets';
 import { readFileAsDataUrl } from '../electronFs';
 import {
-  CUSTOM_ANSWER_KEYBOARD_FONT,
   getCustomAnswerKeyboardLayout,
-  getCustomAnswerTextStyle,
   getCustomAnswerThemeAssets,
   getKeyboardPreset,
+  normalizeCustomAnswerOptions,
   readCustomAnswerKeyboardConfig,
 } from '../../elements/keyboardPresets';
 import { getCachedVideoThumbnail } from '../videoThumbnail';
@@ -17,7 +16,7 @@ import { getDefaultSkins, generateButtonSkin, generateCheckboxSkin, generateRadi
 import { renderTextToImage, type RenderTextProps } from '../textToImage';
 import { getEditorCanvasFillColor, isEditorCanvasHitThrough } from '../canvasComposite';
 import { isElementHidden } from '../layerState';
-import { loadLibraryFont } from '../fontLoader';
+import { renderCustomAnswerTextSkin } from '../customAnswerKeyboardText';
 
 function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string | null, stroke?: string, sw?: number) {
   if (stroke && sw && sw > 0) g.drawRect(x, y, w, h, fill, stroke, sw);
@@ -79,7 +78,8 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
   comp.removeChildren?.();
 
   const assets = getCustomAnswerThemeAssets(config.theme, true);
-  const answers = config.answers.length >= 2 ? config.answers.slice(0, 9) : ['东', '南', '西', '北'];
+  const normalizedAnswers = normalizeCustomAnswerOptions(config.answers);
+  const answers = normalizedAnswers.length >= 2 ? normalizedAnswers : ['东', '南', '西', '北'];
   const layout = getCustomAnswerKeyboardLayout(answers.length);
   const makeImage = (skin: string, x: number, y: number, width?: number, height?: number) => {
     const image = cu.getInstance('Image');
@@ -100,28 +100,32 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
   const arrow = makeImage(assets.arrow, 216, 0);
   if (arrow) comp.addChild(arrow);
 
-  const addLabel = (parent: LayaObj, answer: string) => {
-    const label = cu.getInstance('Label');
-    if (!label) return;
-    const style = getCustomAnswerTextStyle(config.theme, answer);
-    label.width = 84;
-    label.height = 88;
-    label.text = answer;
-    label.font = CUSTOM_ANSWER_KEYBOARD_FONT;
-    label.fontSize = style.fontSize;
-    label.color = style.color;
-    label.stroke = 4;
-    label.strokeColor = style.strokeColor;
-    label.align = 'center';
-    label.valign = 'middle';
-    parent.addChild(label);
+  const addTextSkin = (parent: LayaObj, answer: string) => {
+    const textImage = makeImage('', 0, 0, 84, 88);
+    if (!textImage) return;
+    textImage.mouseEnabled = false;
+    parent.addChild(textImage);
+    void renderCustomAnswerTextSkin(answer, config.theme).then((dataUrl) => {
+      if (comp._customAnswerRenderKey !== renderKey || textImage.destroyed) return;
+      const L = laya();
+      const applySkin = () => {
+        if (comp._customAnswerRenderKey === renderKey && !textImage.destroyed) textImage.skin = dataUrl;
+      };
+      if (L?.loader && L.Handler) {
+        L.loader.load([{ url: dataUrl, type: 'image' }], L.Handler.create(null, applySkin));
+      } else {
+        applySkin();
+      }
+    }).catch((error) => {
+      console.error('[customAnswerKeyboard] 键帽文字图片生成失败', error);
+    });
   };
 
   answers.forEach((answer, index) => {
     const position = layout.answerPositions[index];
     const key = makeImage(assets.keyNormal, 65 + position.x - 42, 65 + position.y - 44, 84, 88);
     if (!key) return;
-    addLabel(key, answer);
+    addTextSkin(key, answer);
     comp.addChild(key);
   });
 
@@ -138,17 +142,6 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
     comp.addChild(clear);
   }
 
-  void loadLibraryFont('yizhi.lantingyuanzhongcu').then((fontFace) => {
-    if (!fontFace || comp._customAnswerRenderKey !== renderKey) return;
-    for (let index = 0; index < comp.numChildren; index += 1) {
-      const child = comp.getChildAt(index);
-      if (!child?.numChildren) continue;
-      for (let nestedIndex = 0; nestedIndex < child.numChildren; nestedIndex += 1) {
-        const nested = child.getChildAt(nestedIndex);
-        if (nested?.text !== undefined) nested.font = fontFace;
-      }
-    }
-  });
 }
 
 export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj | null {
