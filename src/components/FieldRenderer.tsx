@@ -478,7 +478,10 @@ function AnswerKeyboardField({
           const normalized = answer.trim();
           const invalid = normalized === '' || duplicateValues.has(normalized) || Array.from(answer).length > 4;
           return (
-            <div key={index} className="flex items-center gap-1">
+            <div
+              key={index}
+              className="grid grid-cols-[1rem_minmax(0,1fr)_1.75rem_1.75rem_1.75rem] items-center gap-1"
+            >
               <span className="w-4 shrink-0 text-right text-[10px] text-slate-500">{index + 1}</span>
               <input
                 value={answer}
@@ -489,7 +492,7 @@ function AnswerKeyboardField({
                   answers[index] = event.target.value;
                   update({ ...config, answers });
                 }}
-                className={`${inputCls} min-w-0 ${invalid ? 'border-red-500 focus:border-red-400' : ''}`}
+                className={`${inputCls} min-w-0 cursor-text ${invalid ? 'border-red-500 focus:border-red-400' : ''}`}
               />
               <button
                 type="button"
