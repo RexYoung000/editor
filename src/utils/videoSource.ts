@@ -73,6 +73,7 @@ export async function materializeVideoSelection(
           kind: 'remote' as const,
           path: encodedLibraryPath(selection.libraryPath),
           expectedHash: selection.hash,
+          expectedHashAlgorithm: 'sha256-8' as const,
           expectedSize: selection.size,
         };
 

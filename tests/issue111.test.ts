@@ -11,6 +11,7 @@ import {
 } from '../src/elements/presetVideos';
 import type { Course } from '../src/types';
 import { buildExportRegressionArtifacts } from '../src/utils/exportProject';
+import { materializeVideoSelection } from '../src/utils/videoSource';
 
 const storage = new Map<string, string>();
 Object.assign(globalThis, {
@@ -72,6 +73,41 @@ test('预设筛选按课件、语言和名称取交集，并正确映射 EN、YY
     'review-english-closing',
   ]);
   assert.deepEqual(filterPresetVideos('homework', 'all', ''), []);
+});
+
+test('资源库视频沿用短 SHA-256 校验，落盘结果继续使用 Electron 计算的 MD5', async () => {
+  const courseId = 'issue111-library-hash';
+  localStorage.setItem(`forge_course_dir_${courseId}`, '/tmp/issue111-library-hash');
+  let received: Parameters<typeof window.electronAPI.materializeVideoToCourse>[0] | null = null;
+  window.electronAPI.materializeVideoToCourse = async (params) => {
+    received = params;
+    return {
+      ok: true,
+      relativePath: 'images/animation/video_abcdef.mp4',
+      hash: 'abcdef0123456789abcdef0123456789',
+      size: 1024,
+    };
+  };
+
+  const relativePath = await materializeVideoSelection(courseId, {
+    kind: 'library',
+    libraryPath: '测试/video.mp4',
+    name: 'video.mp4',
+    size: 1024,
+    hash: '1234abcd',
+  });
+
+  assert.equal(relativePath, 'images/animation/video_abcdef.mp4');
+  assert.deepEqual(received, {
+    courseDir: '/tmp/issue111-library-hash',
+    source: {
+      kind: 'remote',
+      path: '/builtin/library/%E6%B5%8B%E8%AF%95/video.mp4',
+      expectedHash: '1234abcd',
+      expectedHashAlgorithm: 'sha256-8',
+      expectedSize: 1024,
+    },
+  });
 });
 
 test('正课、预习和复习课创建时直接写入视频引用，不生成空视频关卡', async () => {

@@ -786,7 +786,8 @@ async function downloadVideoToTemp(remotePath, tempPath, expectedSize) {
       }
 
       let size = 0;
-      const hash = crypto.createHash('md5');
+      const md5 = crypto.createHash('md5');
+      const sha256 = crypto.createHash('sha256');
       const validator = new Transform({
         transform(chunk, _encoding, callback) {
           size += chunk.length;
@@ -794,7 +795,8 @@ async function downloadVideoToTemp(remotePath, tempPath, expectedSize) {
             callback(new Error('视频不能超过 50MB'));
             return;
           }
-          hash.update(chunk);
+          md5.update(chunk);
+          sha256.update(chunk);
           callback(null, chunk);
         },
       });
@@ -802,7 +804,11 @@ async function downloadVideoToTemp(remotePath, tempPath, expectedSize) {
       pipeline(response, validator, fs.createWriteStream(tempPath, { flags: 'wx' }))
         .then(() => {
           if (expectedSize && size !== expectedSize) throw new Error('视频大小与注册信息不一致');
-          resolve({ hash: hash.digest('hex'), size });
+          resolve({
+            md5: md5.digest('hex'),
+            sha256: sha256.digest('hex'),
+            size,
+          });
         })
         .catch(reject);
     });
@@ -833,10 +839,19 @@ ipcMain.handle('materialize-video-to-course', async (_event, params) => {
       await fs.promises.copyFile(source.path, tempPath);
     } else if (source.kind === 'remote') {
       const downloaded = await downloadVideoToTemp(source.path, tempPath, source.expectedSize);
-      hash = downloaded.hash;
+      hash = downloaded.md5;
       size = downloaded.size;
-      if (source.expectedHash && hash !== source.expectedHash) {
-        throw new Error('视频内容与注册信息不一致');
+      if (source.expectedHash) {
+        const expectedHashAlgorithm = source.expectedHashAlgorithm || 'md5';
+        const actualHash = expectedHashAlgorithm === 'md5'
+          ? downloaded.md5
+          : expectedHashAlgorithm === 'sha256-8'
+            ? downloaded.sha256.slice(0, 8)
+            : null;
+        if (!actualHash) throw new Error('视频校验算法无效');
+        if (actualHash !== source.expectedHash) {
+          throw new Error('视频内容与注册信息不一致');
+        }
       }
     } else {
       throw new Error('未知的视频来源');

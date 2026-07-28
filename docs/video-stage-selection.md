@@ -53,7 +53,7 @@
 三种来源统一只接受 MP4，单文件不超过 50MB。
 
 - 本地文件通过 Electron 文件选择器取得绝对路径，使用磁盘流式哈希和 `copyLocalFile` 等价的磁盘拷贝能力，不经 Base64。
-- 预设和资源库文件从当前 Vite 服务器流式下载到 Electron 本机课件目录，不发送 `outputDir` 或本机路径给远程 Vite。
+- 预设和资源库文件从当前 Vite 服务器流式下载到 Electron 本机课件目录，不发送 `outputDir` 或本机路径给远程 Vite。预设使用注册表 MD5 校验，资源库使用现有文件信息接口返回的 SHA-256 前 8 位校验；Electron 同时计算完整 MD5 作为课件内去重依据。
 - 三种来源都落在 `<courseDir>/images/animation/`，使用内容 MD5 命名并复用相同内容。
 - 写入过程先使用临时文件，校验格式、大小和内容后再进入正式路径；失败时清理临时文件。
 - `videoUrl` 只保存课件内相对路径，例如 `images/animation/video_<hash>.mp4`。

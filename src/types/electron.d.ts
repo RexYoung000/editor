@@ -40,7 +40,13 @@ export interface ElectronAPI {
     courseDir: string;
     source:
       | { kind: 'local'; path: string }
-      | { kind: 'remote'; path: string; expectedHash?: string; expectedSize?: number };
+      | {
+          kind: 'remote';
+          path: string;
+          expectedHash?: string;
+          expectedHashAlgorithm?: 'md5' | 'sha256-8';
+          expectedSize?: number;
+        };
   }) => Promise<
     | { ok: true; relativePath: string; hash: string; size: number }
     | { ok: false; error: string }
