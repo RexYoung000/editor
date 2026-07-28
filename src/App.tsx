@@ -13,6 +13,7 @@ import type { Course } from './types';
 import FocusWorkspace from './components/FocusWorkspace';
 import { isInternalPagesSubPage, isInternalPagesWorkbenchReadonly } from './utils/internalPages';
 import { requestPageThumbnailFlush } from './utils/pageThumbnailSync';
+import { commitPendingPropertyEdits } from './utils/propertyEditSession';
 
 function App() {
   const setCurrentCourse = useEditorStore((state) => state.setCurrentCourse);
@@ -79,11 +80,15 @@ function App() {
     const timer = setTimeout(async () => {
       setIsDirty(true);
       try {
-        requestPageThumbnailFlush();
-        const filePath = getCourseFilePath(currentCourse.id);
-        if (filePath) {
-          await writeBackToLocalFile(currentCourse.id, currentCourse);
-          await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
+        commitPendingPropertyEdits();
+        const courseToSave = useEditorStore.getState().currentCourse;
+        if (courseToSave) {
+          requestPageThumbnailFlush();
+          const filePath = getCourseFilePath(courseToSave.id);
+          if (filePath) {
+            await writeBackToLocalFile(courseToSave.id, courseToSave);
+            await cleanupUnreferencedImages(courseToSave.id, collectImageReferences(courseToSave));
+          }
         }
       } catch { /* 写入失败，忽略 */ }
       setIsDirty(false);
@@ -127,12 +132,14 @@ function App() {
         moveElementLayer(selectedElementIds[0], direction);
       } else if (mod && e.key === 's') {
         e.preventDefault();
-        if (currentCourse) {
+        commitPendingPropertyEdits();
+        const courseToSave = useEditorStore.getState().currentCourse;
+        if (courseToSave) {
           requestPageThumbnailFlush();
-          const filePath = getCourseFilePath(currentCourse.id);
+          const filePath = getCourseFilePath(courseToSave.id);
           if (filePath) {
-            await writeBackToLocalFile(currentCourse.id, currentCourse);
-            await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
+            await writeBackToLocalFile(courseToSave.id, courseToSave);
+            await cleanupUnreferencedImages(courseToSave.id, collectImageReferences(courseToSave));
           }
           setIsDirty(false);
         }
@@ -184,7 +191,10 @@ function App() {
         <StartPage onEnterEditor={handleEnterEditor} />
       ) : (
         <div className="h-screen flex flex-col bg-slate-900 text-white">
-          <Toolbar isDirty={isDirty} onBack={() => setPhase('landing')} />
+          <Toolbar isDirty={isDirty} onBack={() => {
+            commitPendingPropertyEdits();
+            setPhase('landing');
+          }} />
           <EditorWorkspaceLayout
             sidebar={focusSubPageId ? <FocusWorkspace /> : <PageList />}
             sidebarWidth={focusSubPageId ? focusWidth : 240}

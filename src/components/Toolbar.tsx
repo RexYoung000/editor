@@ -17,6 +17,7 @@ import { ResourceMissingDialog } from './ResourceMissingDialog';
 import { isFlatLesson } from '../utils/courseKind';
 import { collectInternalPageIssues, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { requestPageThumbnailFlush } from '../utils/pageThumbnailSync';
+import { commitPendingPropertyEdits } from '../utils/propertyEditSession';
 
 export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack?: () => void }) {
   const { language, setLanguage, t } = useI18n();
@@ -49,6 +50,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   const canRedo = !workbenchReadonly && historyIndex < history.length - 1;
 
   const handleNew = () => {
+    commitPendingPropertyEdits();
     if (currentCourse && [...currentCourse.stages, ...(currentCourse.previewStages ?? [])].some(s => s.subPages.some(sp => sp.elements.length > 0))) {
       setShowNewConfirm(true);
       return;
@@ -71,6 +73,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   };
 
   const handleOpen = async () => {
+    commitPendingPropertyEdits();
     const dir = await selectDirectory();
     if (!dir) return;
     // SVN 检查暂时禁用，后续需要时恢复
@@ -87,6 +90,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   };
 
   const handleSave = async () => {
+    commitPendingPropertyEdits();
     if (!currentCourse) return;
     try {
       requestPageThumbnailFlush();
@@ -103,6 +107,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   };
 
   const handleSaveAs = async () => {
+    commitPendingPropertyEdits();
     if (!currentCourse) return;
     if (!getCourseDirPath(currentCourse.id)) {
       showToast(t('saveAsNoSourceDir'), 'error');
@@ -167,6 +172,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   // 共享流程：导出工程（不提交 SVN）→ 编译 → 打 zip → 上传 → 打开预览
   // previewMode: false=正课, true=预习关卡
   const runCompileBuildAndOpen = async (previewMode: boolean) => {
+    commitPendingPropertyEdits();
     if (!currentCourse) return;
     assertInternalPagesReady('preview');
     requestPageThumbnailFlush();
@@ -203,6 +209,7 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
 
   // 发布工程核心流程（不含资源检查，便于"继续发布工程"按钮跳过资源检查后调用）
   const runPublishFlow = async () => {
+    commitPendingPropertyEdits();
     if (!currentCourse || busy) return;
     setBusy(true);
     try {
