@@ -80,24 +80,32 @@ test('自定义答案键盘按 2～9 项规则生成稳定布局', () => {
     [
       [2, 2, 1, 2],
       [3, 3, 1, 3],
-      [4, 2, 2, 4],
+      [4, 3, 2, 4],
       [5, 3, 2, 5],
       [9, 3, 3, 9],
     ],
   );
+  assert.equal(getCustomAnswerKeyboardLayout(2).boardHeight, 220);
+  assert.equal(getCustomAnswerKeyboardLayout(5).boardHeight, 320);
   const nine = getCustomAnswerKeyboardLayout(9);
+  assert.equal(nine.boardHeight, 420);
   assert.equal(nine.answerPositions[0].y, 60);
   assert.equal(nine.answerPositions[8].y, 260);
   assert.deepEqual(nine.clearPosition, { x: 165, y: 360 });
 
   const mixed = getCustomAnswerKeyboardLayout(['第一次', '第二次', '第三次', '北']);
-  assert.equal(mixed.keyWidth, 168);
-  assert.equal(mixed.boardWidth, 402);
-  assert.deepEqual(mixed.answerPositions.map(({ width }) => width), [168, 168, 168, 168]);
+  assert.equal(mixed.boardWidth, 582);
+  assert.equal(mixed.boardHeight, 320);
+  assert.deepEqual(mixed.answerPositions.map(({ width }) => width), [168, 168, 168, 84]);
   assert.deepEqual(
     mixed.answerPositions.map(({ x }) => x),
-    [111, 291, 111, 291],
+    [111, 291, 471, 69],
   );
+  assert.deepEqual(
+    mixed.answerPositions.map(({ x, width }) => x - width / 2),
+    [27, 207, 387, 27],
+  );
+  assert.deepEqual(mixed.clearPosition, { x: 291, y: 260 });
   const crowded = getCustomAnswerKeyboardLayout(Array.from({ length: 9 }, () => '第三次'));
   assert.equal(crowded.boardWidth, 582);
   assert.deepEqual(crowded.answerPositions.slice(0, 3).map(({ width }) => width), [168, 168, 168]);
@@ -119,7 +127,7 @@ test('每个键盘实例按答案和主题动态生成中文按键、清空键�
   const nodes = treeNodes(children);
   const keys = nodes.filter((node) => node.type === 'KlKey');
   assert.deepEqual(keys.map((key) => key.props.output), ['春', '夏天', '秋季风', '冬天到了', ' ']);
-  assert.deepEqual(keys.slice(0, 4).map((key) => key.props.width), [210, 210, 210, 210]);
+  assert.deepEqual(keys.slice(0, 4).map((key) => key.props.width), [84, 126, 168, 210]);
   assert.ok(nodes.some((node) => node.props.sizeGrid === '0,28,0,28'));
   assert.ok(nodes.some((node) => node.props.sizeGrid === '53,52,57,52'));
   assert.ok(nodes.some((node) => node.props.skin === 'game/textKeyboard/blue/key-normal.png'));
