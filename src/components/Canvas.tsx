@@ -114,8 +114,8 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [layaReady, setLayaReady] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [newTextId, setNewTextId] = useState<string | null>(null);
   const [textCaretPoint, setTextCaretPoint] = useState<{ x: number; y: number } | null>(null);
+  const [selectAllTextOnEdit, setSelectAllTextOnEdit] = useState(false);
   const handledTextCreateRequest = useRef(0);
   const [showReadonlyTip, setShowReadonlyTip] = useState(false);
   const readonlyTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,7 +161,7 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
     handledTextCreateRequest.current = textCreateRequest;
 
     const element = createDefaultElement('NewTextArea', currentSubPageId ?? undefined);
-    const layout = layoutText('', element.width, element.height, element.props);
+    const layout = layoutText(String(element.props.text ?? ''), element.width, element.height, element.props);
     element.width = layout.width;
     element.height = layout.height;
     const viewport = worldRef.current;
@@ -172,13 +172,8 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
 
     const object = createLayaComponent(element);
     if (object) registerObject(element.id, object);
-    addElement(element, false);
+    addElement(element);
     selectElement(element.id, false);
-    queueMicrotask(() => {
-      setNewTextId(element.id);
-      setTextCaretPoint({ x: 0, y: 0 });
-      setEditingId(element.id);
-    });
   }, [addElement, currentPage, currentSubPageId, layaReady, selectElement, textCreateRequest, workbenchReadonly, workspaceSize.height, workspaceSize.width]);
 
   useEffect(() => {
@@ -1116,12 +1111,13 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
               showSnapGuides={assistPreferences.showSnapGuides}
               distanceHintsEnabled={assistPreferences.showDistanceHints}
               setEditingId={setEditingId}
-              newTextId={newTextId}
               textCaretPoint={textCaretPoint}
               setTextCaretPoint={setTextCaretPoint}
-              onTextSessionEnd={(id) => {
-                if (id === newTextId) setNewTextId(null);
+              selectAllTextOnEdit={selectAllTextOnEdit}
+              setSelectAllTextOnEdit={setSelectAllTextOnEdit}
+              onTextSessionEnd={() => {
                 setTextCaretPoint(null);
+                setSelectAllTextOnEdit(false);
               }}
             />
           </div>

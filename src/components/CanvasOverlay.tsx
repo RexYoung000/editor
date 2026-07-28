@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { EditorLayerGroup, Element } from '../types';
 import { useEditorStore } from '../store/editorStore';
-import { getObject, removeObject } from '../utils/layaBridge';
+import { getObject } from '../utils/layaBridge';
 import { applyNewTextAreaRender } from '../utils/laya/components';
 import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
 import { resolveElementFont } from '../utils/fontLoader';
 import { caretOffsetAtPoint, layoutText, normalizeTextSizingMode } from '../utils/textLayout';
 import type { RenderTextProps } from '../utils/textToImage';
-import { decrementSubPageCounter } from '../elements/elementMeta';
+import { NEW_TEXT_DEFAULT_CONTENT } from '../elements/elementMeta';
 import {
   getElementWorldBounds,
   getElementWorldMatrix,
@@ -180,9 +180,10 @@ interface CanvasOverlayProps {
   showSnapGuides: boolean;
   distanceHintsEnabled: boolean;
   setEditingId: (id: string | null) => void;
-  newTextId: string | null;
   textCaretPoint: { x: number; y: number } | null;
   setTextCaretPoint: (point: { x: number; y: number } | null) => void;
+  selectAllTextOnEdit: boolean;
+  setSelectAllTextOnEdit: (value: boolean) => void;
   onTextSessionEnd: (id: string) => void;
 }
 
@@ -199,9 +200,10 @@ export default function CanvasOverlay({
   showSnapGuides,
   distanceHintsEnabled,
   setEditingId,
-  newTextId,
   textCaretPoint,
   setTextCaretPoint,
+  selectAllTextOnEdit,
+  setSelectAllTextOnEdit,
   onTextSessionEnd,
 }: CanvasOverlayProps) {
   const interactionRef = useRef<PointerInteraction | null>(null);
@@ -322,16 +324,6 @@ export default function CanvasOverlay({
     const nextProps = { ...props, text: textDraft };
     const layout = layoutText(textDraft, editingElement.width, editingElement.height, nextProps as RenderTextProps, overlayFontFamily);
     const mode = normalizeTextSizingMode(props.textSizingMode);
-    const isNewEmpty = newTextId === editingElement.id && textDraft.length === 0;
-    if (isNewEmpty) {
-      const store = useEditorStore.getState();
-      store.removeElementsWithoutHistory([editingElement.id]);
-      decrementSubPageCounter(store.currentSubPageId ?? undefined, 'NewTextArea');
-      removeObject(editingElement.id);
-      setEditingId(null);
-      onTextSessionEnd(editingElement.id);
-      return;
-    }
     const changed = textDraft !== String(props.text ?? '')
       || (mode !== 'fixed' && (layout.width !== editingElement.width || layout.height !== editingElement.height));
     if (changed) {
@@ -344,7 +336,7 @@ export default function CanvasOverlay({
     }
     setEditingId(null);
     onTextSessionEnd(editingElement.id);
-  }, [editingElement, newTextId, onTextSessionEnd, overlayFontFamily, setEditingId, textDraft]);
+  }, [editingElement, onTextSessionEnd, overlayFontFamily, setEditingId, textDraft]);
 
   useLayoutEffect(() => {
     const textarea = textAreaRef.current;
@@ -352,7 +344,9 @@ export default function CanvasOverlay({
     if (caretAppliedForRef.current === editingElement.id) return;
     caretAppliedForRef.current = editingElement.id;
     textarea.focus();
-    if (textCaretPoint) {
+    if (selectAllTextOnEdit) {
+      textarea.setSelectionRange(0, textDraft.length);
+    } else if (textCaretPoint) {
       const props = editingElement.props as Record<string, unknown>;
       textarea.setSelectionRange(
         caretOffsetAtPoint(textDraft, editingElement.width, props, textCaretPoint.x, textCaretPoint.y, overlayFontFamily),
@@ -361,7 +355,7 @@ export default function CanvasOverlay({
     } else {
       textarea.setSelectionRange(textDraft.length, textDraft.length);
     }
-  }, [editingElement, overlayFontFamily, textCaretPoint, textDraft]);
+  }, [editingElement, overlayFontFamily, selectAllTextOnEdit, textCaretPoint, textDraft]);
 
   // CanvasOverlay 阻止画布默认 pointer 行为时，浏览器不会替 textarea 自然触发失焦。
   // 在文档捕获阶段主动提交，保证点击画布、属性面板或工具栏都能结束编辑。
@@ -1004,11 +998,16 @@ export default function CanvasOverlay({
     const elementMap = new Map(page.elements.map((element) => [element.id, element]));
     if (!hit || isElementLocked(hit, elementMap) || (hit.type !== 'NewTextArea' && hit.type !== 'Video')) return;
     if (hit.type === 'NewTextArea') {
+      const selectDefaultContent = String(hit.props.text ?? '') === NEW_TEXT_DEFAULT_CONTENT;
+      setSelectAllTextOnEdit(selectDefaultContent);
       const inverse = invertMatrix(getElementWorldMatrix(hit, page.elements));
-      setTextCaretPoint(inverse ? transformPoint(inverse, point) : null);
-    } else setTextCaretPoint(null);
+      setTextCaretPoint(selectDefaultContent ? null : (inverse ? transformPoint(inverse, point) : null));
+    } else {
+      setSelectAllTextOnEdit(false);
+      setTextCaretPoint(null);
+    }
     setEditingId(hit.id);
-  }, [pointerToWorld, setEditingId, setTextCaretPoint]);
+  }, [pointerToWorld, setEditingId, setSelectAllTextOnEdit, setTextCaretPoint]);
 
   const elements = currentPage?.elements ?? [];
   const previewMap = new Map((previewTransforms ?? []).map((snapshot) => [snapshot.id, snapshot]));
@@ -1489,8 +1488,9 @@ export default function CanvasOverlay({
         const leading = (props.leading as number) ?? 0;
         const liveLayout = layoutText(textDraft, editingElement.width, editingElement.height, props, overlayFontFamily);
         const matrix = getElementWorldMatrix(editingElement, elements);
+        const decorationScale = 1 / Math.max(zoom, 0.05);
         return (
-          <div data-canvas-interactive data-text-editor style={{
+          <div data-canvas-interactive data-text-editor data-text-editor-state="editing" style={{
             position: 'absolute',
             left: matrix.tx * zoom + panX,
             top: matrix.ty * zoom + panY,
@@ -1499,17 +1499,19 @@ export default function CanvasOverlay({
             transform: `matrix(${matrix.a * zoom}, ${matrix.b * zoom}, ${matrix.c * zoom}, ${matrix.d * zoom}, 0, 0)`,
             transformOrigin: '0 0',
             zIndex: 50,
-            opacity: editingElement.opacity,
             background: 'transparent',
             backgroundColor: 'transparent',
-            outline: '2px solid #1677ff',
-            boxShadow: '0 0 0 1px #fff, 0 2px 7px rgba(0, 0, 0, 0.9)',
+            outline: `${2 * decorationScale}px solid #06b6d4`,
+            outlineOffset: decorationScale,
+            boxShadow: `0 0 0 ${decorationScale}px #fff, 0 0 0 ${4 * decorationScale}px rgba(8, 145, 178, 0.38), 0 ${3 * decorationScale}px ${10 * decorationScale}px rgba(0, 0, 0, 0.9)`,
             boxSizing: 'border-box',
             pointerEvents: 'auto',
+            cursor: 'text',
           }}>
             <textarea
               ref={textAreaRef}
               value={textDraft}
+              aria-label="编辑文本"
               onChange={(event) => setTextDraftState({ id: editingElement.id, value: event.target.value })}
               onKeyDown={(event) => {
                 if (event.nativeEvent.isComposing) return;
@@ -1533,6 +1535,8 @@ export default function CanvasOverlay({
                 appearance: 'none',
                 WebkitAppearance: 'none',
                 resize: 'none',
+                cursor: 'text',
+                caretColor: '#ff2d55',
                 overflow: normalizeTextSizingMode(props.textSizingMode) === 'fixed' ? 'auto' : 'hidden',
                 fontFamily: `"${overlayFontFamily}"`,
                 fontSize,

@@ -2,6 +2,8 @@ import { assetExport, assetSrc } from './builtinAssets';
 import { DEFAULT_FONT_ID } from './fontLibrary';
 import type { Element, SubPage } from '../types';
 
+export const NEW_TEXT_DEFAULT_CONTENT = '双击编辑文本';
+
 export interface PropertyDef {
   key: string;
   label: string;
@@ -282,9 +284,9 @@ export const elementMeta: Record<string, Meta> = {
     defaultSize: { width: 800, height: 62 },
     defaultPosition: { x: 560, y: 509 },
     defaultProps: {
-      text: '',
+      text: NEW_TEXT_DEFAULT_CONTENT,
       fontSize: 38,
-      color: '#0d0d0d',
+      color: '#ffffff',
       leading: 24,
       wordWrap: true,
       align: 'left',
