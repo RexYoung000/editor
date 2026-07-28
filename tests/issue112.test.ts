@@ -85,17 +85,17 @@ test('自定义答案键盘将答案与清空键按整体宽度生成稳定布�
       [9, 3, 9],
     ],
   );
-  assert.equal(getCustomAnswerKeyboardLayout(2).boardHeight, 120);
-  assert.equal(getCustomAnswerKeyboardLayout(5).boardHeight, 220);
+  assert.equal(getCustomAnswerKeyboardLayout(2).boardHeight, 136);
+  assert.equal(getCustomAnswerKeyboardLayout(5).boardHeight, 236);
   const nine = getCustomAnswerKeyboardLayout(9);
-  assert.equal(nine.boardHeight, 320);
+  assert.equal(nine.boardHeight, 336);
   assert.equal(nine.answerPositions[0].y, 60);
   assert.equal(nine.answerPositions[8].y, 260);
   assert.deepEqual(nine.clearPosition, { x: 214, y: 260 });
 
   const mixed = getCustomAnswerKeyboardLayout(['第一次', '第二次', '第三次', '北']);
   assert.equal(mixed.boardWidth, 402);
-  assert.equal(mixed.boardHeight, 320);
+  assert.equal(mixed.boardHeight, 336);
   assert.deepEqual(mixed.answerPositions.map(({ width }) => width), [168, 168, 168, 84]);
   assert.deepEqual(
     mixed.answerPositions.map(({ x }) => x),
@@ -120,7 +120,7 @@ test('自定义答案键盘优先减少行数并避免清空键单独成行', ()
   const directions = getCustomAnswerKeyboardLayout(['东', '南', '西', '北', '我要走开']);
   assert.equal(directions.rowCount, 2);
   assert.equal(directions.boardWidth, 458);
-  assert.equal(directions.boardHeight, 220);
+  assert.equal(directions.boardHeight, 236);
   assert.deepEqual(
     directions.answerPositions.map(({ x, y, width }) => [x, y, width]),
     [
@@ -132,6 +132,10 @@ test('自定义答案键盘优先减少行数并避免清空键单独成行', ()
     ],
   );
   assert.deepEqual(directions.clearPosition, { x: 340, y: 160 });
+  assert.equal(
+    directions.boardHeight - (directions.clearPosition.y + 88 / 2),
+    32,
+  );
 
   const phrases = getCustomAnswerKeyboardLayout(['abc', '第二次', '第三次']);
   assert.equal(phrases.rowCount, 2);

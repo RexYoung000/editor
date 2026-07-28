@@ -62,7 +62,8 @@ const CUSTOM_ANSWER_BOARD_MIN_WIDTH = 330;
 const CUSTOM_ANSWER_KEY_GAP = 12;
 const CUSTOM_ANSWER_ROW_GAP = 12;
 const CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING = 27;
-const CUSTOM_ANSWER_BOARD_VERTICAL_PADDING = 16;
+const CUSTOM_ANSWER_BOARD_TOP_PADDING = 16;
+const CUSTOM_ANSWER_BOARD_BOTTOM_PADDING = 32;
 const CUSTOM_ANSWER_KEY_WIDTH_STEP = 42;
 const CUSTOM_ANSWER_CLEAR_KEY_WIDTH = 182;
 const CUSTOM_ANSWER_MAX_CONTENT_WIDTH = 460 - CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING * 2;
@@ -175,8 +176,9 @@ export function getCustomAnswerKeyboardLayout(answersOrCount: string[] | number)
   );
   const boardHeight = rows.length * CUSTOM_ANSWER_KEY_SIZE.height
     + (rows.length - 1) * CUSTOM_ANSWER_ROW_GAP
-    + CUSTOM_ANSWER_BOARD_VERTICAL_PADDING * 2;
-  const firstY = CUSTOM_ANSWER_BOARD_VERTICAL_PADDING + CUSTOM_ANSWER_KEY_SIZE.height / 2;
+    + CUSTOM_ANSWER_BOARD_TOP_PADDING
+    + CUSTOM_ANSWER_BOARD_BOTTOM_PADDING;
+  const firstY = CUSTOM_ANSWER_BOARD_TOP_PADDING + CUSTOM_ANSWER_KEY_SIZE.height / 2;
   const rowStep = CUSTOM_ANSWER_KEY_SIZE.height + CUSTOM_ANSWER_ROW_GAP;
   const keyPositions: Array<{ x: number; y: number; width: number }> = [];
   rows.forEach((widths, row) => {
