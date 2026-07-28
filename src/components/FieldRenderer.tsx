@@ -18,6 +18,7 @@ import { translateLabel } from '../elements/elementMetaI18n';
 import { FONT_LIBRARY, FONT_CATEGORIES, lookupFont } from '../elements/fontLibrary';
 import { loadLocalFont } from '../utils/fontLoader';
 import LibraryBrowser, { LibraryErrorDialog, type SelectResult } from './LibraryBrowser';
+import { parseFiniteNumberDraft } from '../utils/propertyEditSession';
 
 function getVal(elements: Element[], key: string): unknown {
   if (elements.length === 0) return '';
@@ -399,6 +400,9 @@ interface Props {
   elements: Element[];
   onChange: (key: string, value: unknown) => void;
   propDefault?: number;
+  onEditStart?: () => void;
+  onEditChange?: (applyChange: () => void) => void;
+  onEditCommit?: () => void;
 }
 
 const ANSWER_THEME_OPTIONS: Array<{
@@ -547,11 +551,24 @@ function AnswerKeyboardField({
   );
 }
 
-export default function FieldRenderer({ field, elements, onChange, propDefault }: Props) {
+export default function FieldRenderer({
+  field,
+  elements,
+  onChange,
+  propDefault,
+  onEditStart,
+  onEditChange,
+  onEditCommit,
+}: Props) {
   const { t, language } = useI18n();
   const val = getVal(elements, field.key);
   const isMulti = val === '__MULTI__';
   const [editingNum, setEditingNum] = useState<string | undefined>(undefined);
+  const applyDirectChange = (value: unknown) => {
+    const applyChange = () => onChange(field.key, value);
+    if (onEditChange) onEditChange(applyChange);
+    else applyChange();
+  };
 
   switch (field.type) {
     case 'answerKeyboard':
@@ -566,30 +583,22 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
           <input type="number" className={inputCls} min={field.min} max={field.max} step={field.step}
             value={displayVal}
             placeholder={isMulti ? t('multipleValues') : String(numDefault)}
+            onFocus={onEditStart}
             onChange={(e) => {
-              setEditingNum(e.target.value);
+              const draft = e.target.value;
+              setEditingNum(draft);
+              const parsed = parseFiniteNumberDraft(draft);
+              if (parsed !== null) applyDirectChange(parsed);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                if (editingNum === '' || editingNum === '-' || editingNum === undefined) {
-                  onChange(field.key, numDefault);
-                } else {
-                  const n = Number(editingNum);
-                  if (!isNaN(n)) onChange(field.key, n);
-                }
+                e.currentTarget.blur();
               }
             }}
             onBlur={() => {
-              if (editingNum !== undefined) {
-                if (editingNum === '' || editingNum === '-') {
-                  onChange(field.key, numDefault);
-                } else {
-                  const n = Number(editingNum);
-                  if (!isNaN(n)) onChange(field.key, n);
-                }
-                setEditingNum(undefined);
-              }
+              setEditingNum(undefined);
+              onEditCommit?.();
             }}
           />
         </Row>
@@ -601,7 +610,12 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
         <input className={inputCls}
           value={isMulti ? '' : ((val as string) ?? '')}
           placeholder={isMulti ? t('multipleValues') : ''}
-          onChange={(e) => onChange(field.key, e.target.value)}
+          onFocus={onEditStart}
+          onChange={(e) => applyDirectChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+          }}
+          onBlur={onEditCommit}
         />
       </Row>
     );
@@ -611,7 +625,9 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
         <textarea className={`${inputCls} resize-y`} rows={3}
           value={isMulti ? '' : ((val as string) ?? '')}
           placeholder={isMulti ? t('multipleValues') : ''}
-          onChange={(e) => onChange(field.key, e.target.value)}
+          onFocus={onEditStart}
+          onChange={(e) => applyDirectChange(e.target.value)}
+          onBlur={onEditCommit}
         />
       </Row>
     );

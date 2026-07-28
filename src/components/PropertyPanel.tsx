@@ -41,6 +41,7 @@ import {
 } from '../utils/choiceAnswerRules';
 import { isQuickTemplateConfirm } from '../utils/quickTemplateConfirm';
 import { layoutText, normalizeTextSizingMode } from '../utils/textLayout';
+import { createPropertyEditSession, parseFiniteNumberDraft } from '../utils/propertyEditSession';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -230,8 +231,13 @@ export default function PropertyPanel() {
   const [bindKeyboardOpen, setBindKeyboardOpen] = useState(false);
   const [tabImgPickerOpen, setTabImgPickerOpen] = useState(false);
   const [okBtnPickerOpen, setOkBtnPickerOpen] = useState(false);
+  const [propertyEditSession] = useState(() => createPropertyEditSession(
+    () => JSON.stringify(useEditorStore.getState().currentCourse),
+    () => useEditorStore.getState().saveHistory(),
+  ));
 
   useEffect(() => {
+    propertyEditSession.commit();
     queueMicrotask(() => {
       setEditingValues({});
       setSkinEditorOpen(false);
@@ -239,7 +245,9 @@ export default function PropertyPanel() {
       setTabImgPickerOpen(false);
       setOkBtnPickerOpen(false);
     });
-  }, [selectedElementIds, selectedEditorLayerGroupId]);
+  }, [currentInternalPageId, currentSubPageId, propertyEditSession, selectedElementIds, selectedEditorLayerGroupId]);
+
+  useEffect(() => () => propertyEditSession.dispose(), [propertyEditSession]);
 
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
   const currentSubPage = findSubPage(currentCourse, currentSubPageId);
@@ -1204,36 +1212,28 @@ export default function PropertyPanel() {
                         <input type="number" disabled={sizeDisabled} title={sizeDisabled ? '请先切换尺寸模式' : undefined} className={`flex-1 min-w-0 px-1 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50`}
                           value={displayVal}
                           placeholder={String(effectiveDefault)}
+                          onFocus={() => propertyEditSession.begin()}
                           onChange={(e) => {
-                            setEditingValues(prev => ({ ...prev, [f.key]: e.target.value }));
+                            const draft = e.target.value;
+                            setEditingValues(prev => ({ ...prev, [f.key]: draft }));
+                            const parsed = parseFiniteNumberDraft(draft);
+                            if (parsed !== null) {
+                              propertyEditSession.change(() => handleTransformChange(f.key, parsed));
+                            }
                           }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
-                              const raw = editingValues[f.key];
-                              if (raw === '' || raw === '-' || raw === undefined) {
-                                handleTransformChange(f.key, effectiveDefault);
-                              } else {
-                                const n = Number(raw);
-                                if (!isNaN(n)) handleTransformChange(f.key, n);
-                              }
+                              e.currentTarget.blur();
                             }
                           }}
                           onBlur={() => {
-                            const raw = editingValues[f.key];
-                            if (raw !== undefined) {
-                              if (raw === '' || raw === '-') {
-                                handleTransformChange(f.key, effectiveDefault);
-                              } else {
-                                const n = Number(raw);
-                                if (!isNaN(n)) handleTransformChange(f.key, n);
-                              }
-                            }
                             setEditingValues(prev => {
                               const next = { ...prev };
                               delete next[f.key];
                               return next;
                             });
+                            propertyEditSession.commit();
                           }}
                         />
                       </div>
@@ -1315,27 +1315,23 @@ export default function PropertyPanel() {
                       <input type="number" className="flex-1 px-1.5 py-1 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500"
                         value={editingValues[f.key] ?? (raw !== undefined && raw !== null ? String(raw) : '')}
                         placeholder="0"
-                        onChange={(e) => { setEditingValues(prev => ({ ...prev, [f.key]: e.target.value })); }}
+                        onFocus={() => propertyEditSession.begin()}
+                        onChange={(e) => {
+                          const draft = e.target.value;
+                          setEditingValues(prev => ({ ...prev, [f.key]: draft }));
+                          const parsed = parseFiniteNumberDraft(draft);
+                          if (parsed !== null) {
+                            propertyEditSession.change(() => handleTransformChange(f.key, parsed));
+                          }
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            const r = editingValues[f.key];
-                            if (r === '' || r === '-' || r === undefined) {
-                              handleTransformChange(f.key, 0);
-                            } else {
-                              const n = Number(r);
-                              if (!isNaN(n)) handleTransformChange(f.key, n);
-                            }
-                            setEditingValues(prev => { const next = { ...prev }; delete next[f.key]; return next; });
-                            (e.target as HTMLInputElement).blur();
+                            e.currentTarget.blur();
                           }
                         }}
                         onBlur={() => {
-                          const r = editingValues[f.key];
-                          if (r !== undefined && r !== '' && r !== '-') {
-                            const n = Number(r);
-                            if (!isNaN(n)) handleTransformChange(f.key, n);
-                          }
                           setEditingValues(prev => { const next = { ...prev }; delete next[f.key]; return next; });
+                          propertyEditSession.commit();
                         }} />
                     </div>
                   );
@@ -1375,7 +1371,18 @@ export default function PropertyPanel() {
                       />
                     );
                   }
-                  const fieldEl = <FieldRenderer key={field.key} field={field} elements={selectedElements} onChange={handleChange} propDefault={numDefault} />;
+                  const fieldEl = (
+                    <FieldRenderer
+                      key={field.key}
+                      field={field}
+                      elements={selectedElements}
+                      onChange={handleChange}
+                      propDefault={numDefault}
+                      onEditStart={() => propertyEditSession.begin()}
+                      onEditChange={(applyChange) => propertyEditSession.change(applyChange)}
+                      onEditCommit={() => propertyEditSession.commit()}
+                    />
+                  );
                   // DropObj 的 skin/tipSkin 字段：追加「对齐」按钮
                   if (single && single.type === 'DropObj' && (field.key === 'skin' || field.key === 'tipSkin')) {
                     const alignDropObjToSkin = useEditorStore.getState().alignDropObjToSkin;
