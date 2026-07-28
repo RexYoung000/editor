@@ -73,6 +73,7 @@ pnpm build
 - 不在业务代码中硬编码内置资源路径。资源在 `public/builtin/` 存放并由 `src/elements/builtinAssets.ts` 注册，编辑器和导出分别使用 `assetSrc(id)` 与 `assetExport(id)`。
 - `public/builtin/editor/` 只供编辑器使用，`public/builtin/runtime/` 同时供编辑器和课件使用；修改 `public/builtin/runtime/game/` 后必须运行 `pnpm pack-game`。
 - `public/builtin/library/` 默认不入 Git；依赖素材库的任务必须确认本机资源版本和来源。
+- 改视频关卡创建、替换、预设注册或视频落盘前阅读 [视频关卡来源选择](docs/video-stage-selection.md)。
 - 详细规则见 [docs/resource-management.md](docs/resource-management.md) 和 [docs/commands.md](docs/commands.md)。
 
 ### 导出、模板与打包

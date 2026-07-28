@@ -1,3 +1,5 @@
+import { PRESET_VIDEOS } from './presetVideos';
+
 /**
  * 内置资源清单。
  *
@@ -57,6 +59,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'preset.questionLayoutAqua.background', src: 'runtime/game/preset/question-layout-aqua-01/background.jpg', exportPath: 'game/preset/question-layout-aqua-01/background.jpg' },
   { id: 'preset.questionLayoutBlue.background', src: 'runtime/game/preset/question-layout-blue-01/background.jpg', exportPath: 'game/preset/question-layout-blue-01/background.jpg' },
   { id: 'preset.questionLayoutBlue.titlePaper', src: 'runtime/game/preset/question-layout-blue-01/title-paper.png', exportPath: 'game/preset/question-layout-blue-01/title-paper.png' },
+  ...PRESET_VIDEOS.map((video) => ({ id: video.assetId, src: video.assetPath })),
 
   // 键盘预设1：数字键盘（参考 LessonZK 模板）
   { id: 'keyboard.preset1.bg',          src: 'runtime/game/jpL11/jp_3.png',       exportPath: 'game/jpL11/jp_3.png' },

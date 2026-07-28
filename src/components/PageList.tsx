@@ -6,6 +6,7 @@ import { showToast } from '../utils/toast';
 import { PRESET_TEMPLATES } from '../presets';
 import ConfirmDialog from './ConfirmDialog';
 import NewStageDialog from './NewStageDialog';
+import VideoSourceDialog from './VideoSourceDialog';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
 import { isInternalPagesSubPage } from '../utils/internalPages';
 import type { SubPage } from '../types';
@@ -180,6 +181,7 @@ export default function PageList() {
   const [deleteStageConfirm, setDeleteStageConfirm] = useState<{ stageId: string; name: string; target: 'preview' | 'normal' } | null>(null);
   const [clearAllConfirm, setClearAllConfirm] = useState(false);
   const [newStageDialog, setNewStageDialog] = useState<'normalStage' | 'previewStage' | { mode: 'subPage'; stageId: string } | null>(null);
+  const [videoSourceTarget, setVideoSourceTarget] = useState<'normal' | 'preview' | null>(null);
   const [openSubPageActions, setOpenSubPageActions] = useState<string | null>(null);
 
   useEffect(() => {
@@ -497,7 +499,7 @@ export default function PageList() {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (isVideoOnly) {
-                    addVideoStage();
+                    setVideoSourceTarget('normal');
                   } else {
                     openNewStageDialog('normalStage');
                   }
@@ -902,6 +904,11 @@ export default function PageList() {
             setNewStageDialog(null);
           }}
           onConfirmPreset={(presetId) => {
+            if (presetId === 'video') {
+              setVideoSourceTarget(newStageDialog === 'previewStage' ? 'preview' : 'normal');
+              setNewStageDialog(null);
+              return;
+            }
             if (newStageDialog === 'previewStage') {
               addPreviewStageFromPreset(presetId);
             } else if (newStageDialog === 'normalStage') {
@@ -933,6 +940,24 @@ export default function PageList() {
           onImportTemplates={handleImportTemplates}
           onPinTemplate={pinCustomTemplate}
           onCancel={() => setNewStageDialog(null)}
+        />
+      )}
+      {videoSourceTarget && (
+        <VideoSourceDialog
+          courseId={currentCourse.id}
+          courseKind={kind ?? 'normal'}
+          mode="create"
+          onCancel={() => setVideoSourceTarget(null)}
+          onConfirm={(relativePath) => {
+            if (videoSourceTarget === 'preview') {
+              addPreviewStageFromPreset('video', relativePath);
+            } else if (isVideoOnly) {
+              addVideoStage(relativePath);
+            } else {
+              addStageFromPreset('video', relativePath);
+            }
+            setVideoSourceTarget(null);
+          }}
         />
       )}
     </>

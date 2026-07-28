@@ -113,16 +113,16 @@ interface EditorState {
   setPageThumbnail: (subPageId: string, dataUrl: string) => void;
 
   addStage: () => void;
-  addVideoStage: () => void;  // 复习课专用：添加视频关卡
+  addVideoStage: (videoUrl?: string) => void;  // 复习课专用：添加视频关卡
   addStageFromSubPage: (sourceSubPageId: string) => void;
   addStageFromTemplate: (templateId: string) => Promise<void>;
-  addStageFromPreset: (presetId: string) => void;
+  addStageFromPreset: (presetId: string, videoUrl?: string) => void;
   deleteStage: (stageId: string) => void;
   clearAllStages: () => void;
   reorderStages: (fromIndex: number, toIndex: number) => void;
 
   addPreviewStage: () => void;
-  addPreviewStageFromPreset: (presetId: string) => void;
+  addPreviewStageFromPreset: (presetId: string, videoUrl?: string) => void;
   addPreviewStageFromSubPage: (sourceSubPageId: string) => void;
   addPreviewStageFromTemplate: (templateId: string) => Promise<void>;
   deletePreviewStage: (stageId: string) => void;
@@ -320,16 +320,25 @@ function renumberPreviewAll(course: Course): void {
   });
 }
 
-function subPageFromPreset(preset: (typeof PRESET_TEMPLATES)[number], name: string): SubPage {
+function subPageFromPreset(
+  preset: (typeof PRESET_TEMPLATES)[number],
+  name: string,
+  initialVideoUrl = '',
+): SubPage {
   if (preset.editorModel === 'internal-pages') {
     const subPage = createInternalPagesSubPage(genId('subpage'), name);
     subPage.elements = cloneElementsWithNewIds(preset.elements, 'el');
     return subPage;
   }
+  const elements = cloneElementsWithNewIds(preset.elements, 'el');
+  if (preset.id === 'video' && initialVideoUrl) {
+    const video = elements.find((element) => element.type === 'Video');
+    if (video) video.props = { ...video.props, videoUrl: initialVideoUrl };
+  }
   return {
     id: genId('subpage'),
     name,
-    elements: cloneElementsWithNewIds(preset.elements, 'el'),
+    elements,
     frozen: preset.frozen ?? false,
   };
 }
@@ -805,7 +814,7 @@ export const useEditorStore = create<EditorState>()(
         get().saveHistory();
       }),
 
-    addVideoStage: () =>
+    addVideoStage: (videoUrl = '') =>
       set((state) => {
         if (!state.currentCourse) return;
         const stageNum = state.currentCourse.stages.length + 1;
@@ -822,7 +831,7 @@ export const useEditorStore = create<EditorState>()(
           opacity: 1,
           locked: true,
           actions: [],
-          props: { videoUrl: '' },
+          props: { videoUrl },
         };
         const newSub: SubPage = {
           id: genId('subpage'),
@@ -976,7 +985,7 @@ export const useEditorStore = create<EditorState>()(
         get().saveHistory();
       }),
 
-    addPreviewStageFromPreset: (presetId) => {
+    addPreviewStageFromPreset: (presetId, videoUrl = '') => {
       const preset = PRESET_TEMPLATES.find((p) => p.id === presetId);
       if (!preset) return;
       set((state) => {
@@ -988,7 +997,7 @@ export const useEditorStore = create<EditorState>()(
         })) return;
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `预习 ${previewNum}`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `预习 ${previewNum}`, videoUrl);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
@@ -1236,7 +1245,7 @@ export const useEditorStore = create<EditorState>()(
       get().saveHistory();
     },
 
-    addStageFromPreset: (presetId) => {
+    addStageFromPreset: (presetId, videoUrl = '') => {
       const preset = PRESET_TEMPLATES.find((p) => p.id === presetId);
       if (!preset) return;
       set((state) => {
@@ -1246,7 +1255,7 @@ export const useEditorStore = create<EditorState>()(
           mode: 'stage',
           supportsInternalPages: state.currentCourse.kind !== 'review',
         })) return;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`, videoUrl);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),

@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getServerUrl: () => ipcRenderer.invoke('get-server-url'),
   registerCourseDir: (courseId, dirPath) => ipcRenderer.invoke('register-course-dir', courseId, dirPath),
   copyLocalFile: (srcAbsPath, destAbsPath) => ipcRenderer.invoke('copy-local-file', srcAbsPath, destAbsPath),
+  materializeVideoToCourse: (params) => ipcRenderer.invoke('materialize-video-to-course', params),
   hashFile: (absPath) => ipcRenderer.invoke('hash-file', absPath),
   statFile: (absPath) => ipcRenderer.invoke('stat-file', absPath),
   readFileAsBuffer: (filePath) => ipcRenderer.invoke('read-file-as-buffer', filePath),

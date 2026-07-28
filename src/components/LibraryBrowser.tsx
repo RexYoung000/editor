@@ -64,6 +64,8 @@ export type LibraryBrowserProps = {
   mode: 'file' | 'spineFolder';
   /** mode='file' 时按扩展名过滤；undefined 时按 'image' 处理 */
   fileFilter?: 'image' | 'audio' | 'video';
+  /** 进一步限制可选扩展名，例如视频关卡只接受 ['mp4']。 */
+  allowedExtensions?: string[];
   onSelect: (result: SelectResult) => void | Promise<void>;
   onClose: () => void;
 };
@@ -78,6 +80,12 @@ const EXT_BY_FILTER: Record<NonNullable<LibraryBrowserProps['fileFilter']>, RegE
 
 function fileMatchesFilter(name: string, filter: LibraryBrowserProps['fileFilter']): boolean {
   return EXT_BY_FILTER[filter ?? 'image'].test(name);
+}
+
+function fileMatchesAllowedExtensions(name: string, allowedExtensions?: string[]): boolean {
+  if (!allowedExtensions?.length) return true;
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : '';
+  return allowedExtensions.some((allowed) => allowed.toLowerCase().replace(/^\./, '') === ext);
 }
 
 // ─── localStorage 记忆（按一级目录 + fileFilter 组合）───
@@ -167,7 +175,7 @@ const TAB_LEVELS_MAX = 3;
 const LIBRARY_SEARCH_LIMIT = 500;
 
 export default function LibraryBrowser(props: LibraryBrowserProps) {
-  const { mode, fileFilter, onSelect, onClose } = props;
+  const { mode, fileFilter, allowedExtensions, onSelect, onClose } = props;
 
   const [pathStack, setPathStack] = useState<string[]>([]);
   const [cache, setCache] = useState<Record<string, LibraryEntry[]>>({});
@@ -352,6 +360,10 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
   }, [searchType, debouncedQuery, series, color, language, quickTag, searchRequestKey]);
 
   const availableQuickTags = useMemo(() => quickTags.filter((tag) => tag.count > 0), [quickTags]);
+  const visibleSearchResults = useMemo(
+    () => searchResults.filter((result) => fileMatchesAllowedExtensions(result.name, allowedExtensions)),
+    [allowedExtensions, searchResults],
+  );
   const primaryQuickTags = useMemo(() => availableQuickTags.filter((tag) => tag.primary), [availableQuickTags]);
   const quickTagGroups = useMemo(() => {
     const groups = new Map<string, LibraryQuickTagOption[]>();
@@ -460,7 +472,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60"
       onClick={onClose}
     >
       <div
@@ -658,12 +670,12 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
           {searchActive && !searchLoading && !searchPending && searchError && (
             <div className="flex h-full items-center justify-center text-sm text-red-400">搜索失败：{searchError}</div>
           )}
-          {searchActive && !searchLoading && !searchPending && !searchError && searchResults.length === 0 && (
+          {searchActive && !searchLoading && !searchPending && !searchError && visibleSearchResults.length === 0 && (
             <div className="flex h-full items-center justify-center text-sm text-slate-500">没有匹配的资源</div>
           )}
-          {searchActive && !searchLoading && !searchPending && !searchError && searchResults.length > 0 && (
+          {searchActive && !searchLoading && !searchPending && !searchError && visibleSearchResults.length > 0 && (
             <LibrarySearchGrid
-              results={searchResults}
+              results={visibleSearchResults}
               selected={selected}
               setSelected={setSelected}
               onConfirm={(selection) => void triggerConfirm(selection)}
@@ -677,6 +689,7 @@ export default function LibraryBrowser(props: LibraryBrowserProps) {
               entries={currentEntries}
               mode={mode}
               fileFilter={fileFilter}
+              allowedExtensions={allowedExtensions}
               currentPath={currentPath}
               selected={selected}
               setSelected={setSelected}
@@ -794,6 +807,7 @@ type FolderAndFileGridProps = {
   entries: LibraryEntry[];
   mode: LibraryBrowserProps['mode'];
   fileFilter: LibraryBrowserProps['fileFilter'];
+  allowedExtensions?: string[];
   currentPath: string;
   selected: LibrarySelection | null;
   setSelected: (s: LibrarySelection | null) => void;
@@ -804,7 +818,7 @@ type FolderAndFileGridProps = {
 };
 
 function FolderAndFileGrid(props: FolderAndFileGridProps) {
-  const { entries, mode, fileFilter, currentPath, selected, setSelected, onEnterFolder, onConfirm, busy, showFolders } = props;
+  const { entries, mode, fileFilter, allowedExtensions, currentPath, selected, setSelected, onEnterFolder, onConfirm, busy, showFolders } = props;
 
   const visibleEntries = entries.filter((e) => {
     if (e.isDir) {
@@ -890,7 +904,8 @@ function FolderAndFileGrid(props: FolderAndFileGridProps) {
               const fileLibraryPath = currentPath ? `${currentPath}/${f.name}` : f.name;
               const thumbUrl = `/builtin/library/${fileLibraryPath.split('/').map(encodeURIComponent).join('/')}`;
 
-              const matchesFilter = fileMatchesFilter(f.name, fileFilter);
+              const matchesFilter = fileMatchesFilter(f.name, fileFilter)
+                && fileMatchesAllowedExtensions(f.name, allowedExtensions);
               const isSelected = selected?.isDir === false && selected.name === f.name;
 
               const baseCls = 'border rounded p-1 text-center transition-colors';

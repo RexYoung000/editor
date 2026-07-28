@@ -10,8 +10,9 @@ import BindKeyboardModal from './BindKeyboardModal';
 import { InputRuleEditor, InputRulesOverview } from './InputAnswerRulesEditor';
 import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
+import VideoSourceDialog from './VideoSourceDialog';
 import PageTurnPageList from './PageTurnPageList';
-import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock, Video } from 'lucide-react';
 import type { Action, Element } from '../types';
 import { useI18n } from '../i18n/context';
 import { getObject, syncProps } from '../utils/layaBridge';
@@ -231,6 +232,7 @@ export default function PropertyPanel() {
   const [bindKeyboardOpen, setBindKeyboardOpen] = useState(false);
   const [tabImgPickerOpen, setTabImgPickerOpen] = useState(false);
   const [okBtnPickerOpen, setOkBtnPickerOpen] = useState(false);
+  const [videoSourceOpen, setVideoSourceOpen] = useState(false);
   const [propertyEditSession] = useState(() => createPropertyEditSession(
     () => JSON.stringify(useEditorStore.getState().currentCourse),
     () => useEditorStore.getState().saveHistory(),
@@ -244,6 +246,7 @@ export default function PropertyPanel() {
       setBindKeyboardOpen(false);
       setTabImgPickerOpen(false);
       setOkBtnPickerOpen(false);
+      setVideoSourceOpen(false);
     });
   }, [currentInternalPageId, currentSubPageId, propertyEditSession, selectedElementIds, selectedEditorLayerGroupId]);
 
@@ -642,6 +645,7 @@ export default function PropertyPanel() {
   // 文本尺寸模式在变换区域提供专用分段入口，避免在属性分组中重复出现。
   const properties: PropertyDef[] = (meta?.properties ?? []).filter((field) => (
     !(single?.type === 'NewTextArea' && field.key === 'textSizingMode')
+    && !(single?.type === 'Video' && singleLayerState?.effectiveLocked && field.key === 'videoUrl')
   ));
 
   // 通用变换属性（locked 元素不显示）
@@ -809,7 +813,25 @@ export default function PropertyPanel() {
                 <div className="mb-3 border border-amber-500/40 bg-amber-950/30 p-2 text-[10px] leading-relaxed text-amber-200" role="status">
                   {singleLayerState.lockedById && lockedSource
                     ? `受父级锁定：${getLayerDisplayName(lockedSource, elementMeta[lockedSource.type]?.label)}。请先解锁“${getLayerDisplayName(lockedSource, elementMeta[lockedSource.type]?.label)}”。`
-                    : '当前图层已锁定，仅可查看属性。'}
+                    : single?.type === 'Video'
+                      ? '视频关卡结构已锁定，仍可更换视频资源。'
+                      : '当前图层已锁定，仅可查看属性。'}
+                </div>
+              )}
+
+              {single?.type === 'Video' && singleLayerState?.effectiveLocked && (
+                <div className="mb-3 rounded border border-slate-700 bg-slate-800 p-2">
+                  <div className="mb-2 truncate text-[10px] text-slate-500" title={String(single.props.videoUrl ?? '')}>
+                    {single.props.videoUrl ? String(single.props.videoUrl).split('/').pop() : '尚未选择视频'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setVideoSourceOpen(true)}
+                    className="flex h-8 w-full items-center justify-center gap-2 rounded bg-blue-600 text-xs text-white hover:bg-blue-500"
+                  >
+                    <Video size={14} />
+                    {single.props.videoUrl ? '更换视频' : '选择视频'}
+                  </button>
                 </div>
               )}
 
@@ -1563,6 +1585,19 @@ export default function PropertyPanel() {
           }
         }}
         onClose={() => setOkBtnPickerOpen(false)}
+      />
+    )}
+    {videoSourceOpen && single?.type === 'Video' && currentCourse && (
+      <VideoSourceDialog
+        courseId={currentCourse.id}
+        courseKind={currentCourse.kind ?? 'normal'}
+        mode="replace"
+        onCancel={() => setVideoSourceOpen(false)}
+        onConfirm={(relativePath) => {
+          updateElement(single.id, { props: { videoUrl: relativePath } });
+          saveHistory();
+          setVideoSourceOpen(false);
+        }}
       />
     )}
     </>

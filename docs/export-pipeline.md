@@ -101,6 +101,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用该入口，通过 `viewDir` 和待遍历 stages 决定课程命名空间，遍历所有元素的 `props` / `actions` / `exportChildren` / `_keyboardPreset.children`，产出 `Map<src, dest>`：
 
+视频关卡在创建或替换时已经按 [视频关卡来源选择](video-stage-selection.md) 把预设、本地或资源库 MP4 统一落入当前课件目录。导出只读取实际 `videoUrl`，不能扫描或整批复制内置预设目录。
+
 | src 形态 | 落点（`viewDir = game_lt` 为例） | 说明 |
 |---|---|---|
 | `/uploads/<file>` 或 `images/<file>`（非 animation/sound） | `game_lt/image/img/<file>` 或 `game_lt/animation/<file>`（视频）| 用户上传，按扩展名分流：图片 → image/img，视频(.mp4/.webm/.mov) → animation 平铺 |

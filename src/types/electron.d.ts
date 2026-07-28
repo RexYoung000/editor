@@ -36,6 +36,21 @@ export interface ElectronAPI {
   getServerUrl: () => Promise<string>;
   registerCourseDir: (courseId: string, dirPath: string) => Promise<boolean>;
   copyLocalFile: (srcAbsPath: string, destAbsPath: string) => Promise<boolean>;
+  materializeVideoToCourse: (params: {
+    courseDir: string;
+    source:
+      | { kind: 'local'; path: string }
+      | {
+          kind: 'remote';
+          path: string;
+          expectedHash?: string;
+          expectedHashAlgorithm?: 'md5' | 'sha256-8';
+          expectedSize?: number;
+        };
+  }) => Promise<
+    | { ok: true; relativePath: string; hash: string; size: number }
+    | { ok: false; error: string }
+  >;
   hashFile: (absPath: string) => Promise<{ ok: true; hash: string } | { ok: false; error: string }>;
   statFile: (absPath: string) => Promise<{ ok: true; mtime: number; size: number } | { ok: false; error: string }>;
   readFileAsBuffer: (filePath: string) => Promise<ArrayBuffer | null>;
