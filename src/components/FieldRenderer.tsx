@@ -482,25 +482,31 @@ function AnswerKeyboardField({
               key={index}
               className="grid grid-cols-[1rem_minmax(0,1fr)_1.75rem_1.75rem_1.75rem] items-center gap-1"
             >
-              <span className="w-4 shrink-0 text-right text-[10px] text-slate-500">{index + 1}</span>
-              <input
-                value={answer}
-                maxLength={4}
-                aria-label={`答案 ${index + 1}`}
-                onChange={(event) => {
-                  const answers = [...config.answers];
-                  answers[index] = event.target.value;
-                  update({ ...config, answers });
-                }}
-                className={`${inputCls} min-w-0 cursor-text ${invalid ? 'border-red-500 focus:border-red-400' : ''}`}
-              />
+              <label
+                data-answer-focus-area={index + 1}
+                className="col-span-2 grid min-h-7 grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 cursor-text"
+              >
+                <span className="w-4 text-right text-[10px] text-slate-500">{index + 1}</span>
+                <input
+                  data-answer-input={index + 1}
+                  value={answer}
+                  maxLength={4}
+                  aria-label={`答案 ${index + 1}`}
+                  onChange={(event) => {
+                    const answers = [...config.answers];
+                    answers[index] = event.target.value;
+                    update({ ...config, answers });
+                  }}
+                  className={`${inputCls} h-7 min-w-0 cursor-text ${invalid ? 'border-red-500 focus:border-red-400' : ''}`}
+                />
+              </label>
               <button
                 type="button"
                 title="上移"
                 aria-label={`上移答案 ${index + 1}`}
                 disabled={index === 0}
                 onClick={() => move(index, -1)}
-                className="h-7 w-7 flex shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white disabled:opacity-25"
+                className="h-7 w-7 flex shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-25"
               >
                 <ArrowUp size={13} />
               </button>
@@ -510,7 +516,7 @@ function AnswerKeyboardField({
                 aria-label={`下移答案 ${index + 1}`}
                 disabled={index === config.answers.length - 1}
                 onClick={() => move(index, 1)}
-                className="h-7 w-7 flex shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white disabled:opacity-25"
+                className="h-7 w-7 flex shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-25"
               >
                 <ArrowDown size={13} />
               </button>
@@ -523,7 +529,7 @@ function AnswerKeyboardField({
                   ...config,
                   answers: config.answers.filter((_, answerIndex) => answerIndex !== index),
                 })}
-                className="h-7 w-7 flex shrink-0 items-center justify-center rounded text-slate-400 hover:bg-red-900/60 hover:text-red-300 disabled:opacity-25"
+                className="h-7 w-7 flex shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 hover:bg-red-900/60 hover:text-red-300 disabled:cursor-default disabled:opacity-25"
               >
                 <Trash2 size={13} />
               </button>
