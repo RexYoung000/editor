@@ -1,6 +1,6 @@
 import type { Action, Course, SubPage, Element } from '../types';
 import { elementMeta, type ExportChild } from '../elements/elementMeta';
-import { getKeyboardPreset } from '../elements/keyboardPresets';
+import { getKeyboardChildren } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
 import { getCourseDirPath } from './electronFs';
 import { getApiBaseUrl } from './apiConfig';
@@ -306,11 +306,24 @@ function collectPreviewExportChildrenRes(
 ) {
   if (!children) return;
   for (const c of children) {
+    if (c.resources) {
+      for (const resource of c.resources) {
+        const mapped = resourceMap.get(resource);
+        if (!mapped || addedSingleFiles.has(mapped)) continue;
+        if (/\.ttf$/i.test(mapped)) {
+          resEntries.push({ url: mapped, type: 'ttf' });
+          addedSingleFiles.add(mapped);
+        }
+      }
+    }
     if (c.props) {
       for (const v of Object.values(c.props)) {
         const mapped = resourceMap.get(String(v));
         if (!mapped) continue;
-        if (mapped.startsWith('game_preview/image/')) {
+        if (/\.ttf$/i.test(mapped) && !addedSingleFiles.has(mapped)) {
+          resEntries.push({ url: mapped, type: 'ttf' });
+          addedSingleFiles.add(mapped);
+        } else if (mapped.startsWith('game_preview/image/')) {
           const dir = getImageAtlasDirectory(mapped, 'game_preview/image/');
           if (dir) imageDirs.add(dir);
         } else if (mapped.startsWith('game_preview/sound/') && !addedSingleFiles.has(mapped)) {
@@ -405,9 +418,7 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
           }
           // PageTurnBox 不携带 pages 数组，ContainerBox 子元素资源由主循环收集
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
-          const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-          const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-          collectPreviewExportChildrenRes(presetChildren, resourceMap, imageDirs, resEntries, addedSingleFiles);
+          collectPreviewExportChildrenRes(getKeyboardChildren(el), resourceMap, imageDirs, resEntries, addedSingleFiles);
         }
       }
 

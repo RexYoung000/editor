@@ -1,5 +1,8 @@
 import type { Element } from '../types';
-import { KEYBOARD_PRESETS, type KeyboardPreset } from '../elements/keyboardPresets';
+import {
+  KEYBOARD_PRESETS,
+  type KeyboardPreset,
+} from '../elements/keyboardPresets';
 
 type KeyboardProps = {
   _keyboardPreset?: { id?: unknown };
@@ -97,4 +100,35 @@ export function keyboardSupportsInput(element: Element, inputType: string, eleme
 
 export function keyboardPresetId(element: Element, elements: Element[] = []): string | undefined {
   return inferKeyboardPreset(element, elements)?.id;
+}
+
+export function applyKeyboardBindingProps(
+  currentProps: Record<string, unknown> | undefined,
+  camp: string,
+  presetId: string | undefined,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...(currentProps ?? {}), camp };
+  if (presetId === 'customAnswer') {
+    delete next.font;
+    return {
+      ...next,
+      _customAnswerKeyboardBinding: true,
+      contentType: 1,
+      place: 1,
+      sheet: '',
+      fontClipSkin: '',
+      contentScale: 0.5,
+    };
+  }
+
+  if (next._customAnswerKeyboardBinding === true) {
+    delete next._customAnswerKeyboardBinding;
+    delete next.contentType;
+    delete next.fontClipSkin;
+    delete next.contentScale;
+    const preset = presetId ? KEYBOARD_PRESETS.find((item) => item.id === presetId) : undefined;
+    next.sheet = preset?.defaultProps.sheet ?? '0123456789°+-*/=().';
+    if (next.place === 1) next.place = 4;
+  }
+  return next;
 }

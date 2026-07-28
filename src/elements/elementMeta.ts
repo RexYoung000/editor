@@ -5,7 +5,7 @@ import type { Element, SubPage } from '../types';
 export interface PropertyDef {
   key: string;
   label: string;
-  type: 'number' | 'text' | 'textarea' | 'color' | 'select' | 'slider' | 'boolean' | 'file' | 'elementRef' | 'spineFolder' | 'fontLibrary' | 'fontLocal' | 'matchingItemRef';
+  type: 'number' | 'text' | 'textarea' | 'color' | 'select' | 'slider' | 'boolean' | 'file' | 'elementRef' | 'spineFolder' | 'fontLibrary' | 'fontLocal' | 'matchingItemRef' | 'answerKeyboard';
   /** 仅 type:'file' 时生效；undefined 时按 'image' 处理 */
   fileType?: 'image' | 'audio' | 'video';
   group?: string;
@@ -26,6 +26,8 @@ export interface ExportChild {
   type: string;
   props: Record<string, unknown>;
   child?: ExportChild[];
+  /** 该节点依赖但不直接出现在 props 中的运行时资源（如 Label 使用的 TTF）。 */
+  resources?: string[];
   /** 注入子节点导出时把外层 element 的 width/height 写到 props（用于画板节点宽高跟随 Box） */
   inheritSize?: boolean;
   /** 注入子节点导出时从外层 element.props 搬运的字段名列表（搬过来后外层 props 会剥掉这些字段） */
@@ -362,6 +364,7 @@ export const elementMeta: Record<string, Meta> = {
     defaultProps: {},
     properties: [
       ...COMMON_STATE_PROPS,
+      { key: '_customAnswerKeyboard', label: '答案配置', type: 'answerKeyboard', group: '交互' },
       { key: 'camp',    label: '阵营',     type: 'text',    group: '交互' },
       { key: 'sheet',   label: '可输入字符', type: 'text',  group: '交互' },
       { key: 'pattern', label: '键盘样式',  type: 'number', group: '交互' },

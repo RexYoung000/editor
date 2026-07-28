@@ -7,12 +7,14 @@
 //   - 编辑器加载用 assetSrc(id)
 //   - 发布到课件包用 assetExport(id)
 
+import type { Element } from '../types';
 import { assetExport, assetSrc } from './builtinAssets';
 
 export interface ExportChild {
   type: string;
   props: Record<string, unknown>;
   child?: ExportChild[];
+  resources?: string[];
 }
 
 export interface KeyboardPreset {
@@ -25,6 +27,388 @@ export interface KeyboardPreset {
   defaultProps: Record<string, unknown>;
   defaultSize: { width: number; height: number };
   children: ExportChild[];
+}
+
+export type CustomAnswerKeyboardTheme = 'yellow' | 'blue' | 'green';
+
+export interface CustomAnswerKeyboardConfig {
+  answers: string[];
+  theme: CustomAnswerKeyboardTheme;
+  /** 仅用于预览/发布过程，按 answers 顺序保存键帽文字透明图。 */
+  textSkins?: string[];
+  /** 仅用于预览/发布过程，供绑定输入框使用的 FontClip 字库图。 */
+  inputFontSkin?: string;
+  /** inputFontSkin 中的字符排列。 */
+  inputSheet?: string;
+}
+
+export interface CustomAnswerKeyboardLayout {
+  rowCount: number;
+  boardWidth: number;
+  boardHeight: number;
+  answerPositions: Array<{ x: number; y: number; width: number }>;
+  clearPosition: { x: number; y: number };
+}
+
+export const CUSTOM_ANSWER_KEYBOARD_FONT = 'FZLanTingYuanZhongCu';
+export const DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG: CustomAnswerKeyboardConfig = {
+  answers: ['东', '南', '西', '北'],
+  theme: 'yellow',
+};
+
+const CUSTOM_ANSWER_THEMES: CustomAnswerKeyboardTheme[] = ['yellow', 'blue', 'green'];
+const CUSTOM_ANSWER_KEY_SIZE = { width: 84, height: 88 };
+const CUSTOM_ANSWER_BOARD_MIN_WIDTH = 330;
+const CUSTOM_ANSWER_KEY_GAP = 12;
+const CUSTOM_ANSWER_ROW_GAP = 12;
+const CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING = 27;
+const CUSTOM_ANSWER_BOARD_TOP_PADDING = 16;
+const CUSTOM_ANSWER_BOARD_BOTTOM_PADDING = 32;
+const CUSTOM_ANSWER_KEY_WIDTH_STEP = 42;
+const CUSTOM_ANSWER_CLEAR_KEY_WIDTH = 182;
+const CUSTOM_ANSWER_MAX_CONTENT_WIDTH = 460 - CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING * 2;
+
+export function isCustomAnswerKeyboardTheme(value: unknown): value is CustomAnswerKeyboardTheme {
+  return typeof value === 'string' && CUSTOM_ANSWER_THEMES.includes(value as CustomAnswerKeyboardTheme);
+}
+
+export function readCustomAnswerKeyboardConfig(
+  source: Pick<Element, 'props'> | Record<string, unknown> | null | undefined,
+): CustomAnswerKeyboardConfig {
+  const props = source && 'props' in source
+    ? (source.props as Record<string, unknown> | undefined)
+    : source;
+  const raw = props?._customAnswerKeyboard as Partial<CustomAnswerKeyboardConfig> | undefined;
+  return {
+    answers: Array.isArray(raw?.answers)
+      ? raw.answers.map((answer) => String(answer))
+      : [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers],
+    theme: isCustomAnswerKeyboardTheme(raw?.theme)
+      ? raw.theme
+      : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme,
+    textSkins: Array.isArray(raw?.textSkins)
+      ? raw.textSkins.map((skin) => String(skin))
+      : undefined,
+    inputFontSkin: typeof raw?.inputFontSkin === 'string' ? raw.inputFontSkin : undefined,
+    inputSheet: typeof raw?.inputSheet === 'string' ? raw.inputSheet : undefined,
+  };
+}
+
+export function normalizeCustomAnswerOptions(value: unknown): string[] {
+  if (!Array.isArray(value)) return [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers];
+  return value
+    .map((answer) => String(answer).trim())
+    .slice(0, 9);
+}
+
+function customAnswerKeyTargetWidth(answer: string): number {
+  const length = Math.max(1, Math.min(4, Array.from(answer).length));
+  return CUSTOM_ANSWER_KEY_SIZE.width + (length - 1) * CUSTOM_ANSWER_KEY_WIDTH_STEP;
+}
+
+function customAnswerRowWidth(widths: number[]): number {
+  return widths.reduce((sum, width) => sum + width, 0)
+    + Math.max(0, widths.length - 1) * CUSTOM_ANSWER_KEY_GAP;
+}
+
+function getCustomAnswerKeyboardRows(keyWidths: number[]): number[][] {
+  const candidates: number[][][] = [];
+  const visit = (start: number, rows: number[][]) => {
+    if (start === keyWidths.length) {
+      candidates.push(rows);
+      return;
+    }
+    for (let end = start + 1; end <= keyWidths.length; end += 1) {
+      const row = keyWidths.slice(start, end);
+      if (customAnswerRowWidth(row) > CUSTOM_ANSWER_MAX_CONTENT_WIDTH) break;
+      visit(end, [...rows, row]);
+    }
+  };
+  visit(0, []);
+
+  const score = (rows: number[][]) => {
+    const rowWidths = rows.map(customAnswerRowWidth);
+    const maxRowWidth = Math.max(...rowWidths);
+    const clearKeyIsAlone = rows.at(-1)?.length === 1 ? 1 : 0;
+    const raggedness = rowWidths.reduce(
+      (sum, width) => sum + (maxRowWidth - width) ** 2,
+      0,
+    );
+    return [rows.length, clearKeyIsAlone, maxRowWidth, raggedness];
+  };
+  candidates.sort((left, right) => {
+    const leftScore = score(left);
+    const rightScore = score(right);
+    for (let index = 0; index < leftScore.length; index += 1) {
+      if (leftScore[index] !== rightScore[index]) {
+        return leftScore[index] - rightScore[index];
+      }
+    }
+    const leftRowWidths = left.map(customAnswerRowWidth);
+    const rightRowWidths = right.map(customAnswerRowWidth);
+    for (let index = 0; index < leftRowWidths.length; index += 1) {
+      if (leftRowWidths[index] !== rightRowWidths[index]) {
+        return rightRowWidths[index] - leftRowWidths[index];
+      }
+    }
+    return 0;
+  });
+  return candidates[0] ?? keyWidths.map((width) => [width]);
+}
+
+export function getCustomAnswerKeyboardLayout(answersOrCount: string[] | number): CustomAnswerKeyboardLayout {
+  const answers = Array.isArray(answersOrCount)
+    ? normalizeCustomAnswerOptions(answersOrCount)
+    : Array.from({ length: Math.round(answersOrCount) }, () => '字');
+  const count = Math.max(2, Math.min(9, answers.length));
+  const layoutAnswers = answers.length >= 2
+    ? answers.slice(0, count)
+    : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers.slice(0, count);
+  const keyWidths = [
+    ...layoutAnswers.map(customAnswerKeyTargetWidth),
+    CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
+  ];
+  const rows = getCustomAnswerKeyboardRows(keyWidths);
+  const rowWidths = rows.map(customAnswerRowWidth);
+  const boardWidth = Math.max(
+    CUSTOM_ANSWER_BOARD_MIN_WIDTH,
+    Math.max(...rowWidths) + CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING * 2,
+  );
+  const boardHeight = rows.length * CUSTOM_ANSWER_KEY_SIZE.height
+    + (rows.length - 1) * CUSTOM_ANSWER_ROW_GAP
+    + CUSTOM_ANSWER_BOARD_TOP_PADDING
+    + CUSTOM_ANSWER_BOARD_BOTTOM_PADDING;
+  const firstY = CUSTOM_ANSWER_BOARD_TOP_PADDING + CUSTOM_ANSWER_KEY_SIZE.height / 2;
+  const rowStep = CUSTOM_ANSWER_KEY_SIZE.height + CUSTOM_ANSWER_ROW_GAP;
+  const keyPositions: Array<{ x: number; y: number; width: number }> = [];
+  rows.forEach((widths, row) => {
+    let cursorX = CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING;
+    widths.forEach((width) => {
+      keyPositions.push({
+        x: cursorX + width / 2,
+        y: firstY + row * rowStep,
+        width,
+      });
+      cursorX += width + CUSTOM_ANSWER_KEY_GAP;
+    });
+  });
+  const clearPosition = keyPositions.at(-1) ?? {
+    x: CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING + CUSTOM_ANSWER_CLEAR_KEY_WIDTH / 2,
+    y: firstY,
+    width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
+  };
+  return {
+    rowCount: rows.length,
+    boardWidth,
+    boardHeight,
+    answerPositions: keyPositions.slice(0, -1),
+    clearPosition: {
+      x: clearPosition.x,
+      y: clearPosition.y,
+    },
+  };
+}
+
+export function getCustomAnswerThemeAssets(theme: CustomAnswerKeyboardTheme, editor = false) {
+  const resolve = editor ? assetSrc : assetExport;
+  const prefix = `keyboard.customAnswer.${theme}`;
+  return {
+    bg: resolve(`${prefix}.bg`),
+    keyNormal: resolve(`${prefix}.keyNormal`),
+    keyActive: resolve(`${prefix}.keyActive`),
+    wideNormal: resolve(`${prefix}.wideNormal`),
+    wideActive: resolve(`${prefix}.wideActive`),
+    clearNormal: resolve(`${prefix}.clearNormal`),
+    clearActive: resolve(`${prefix}.clearActive`),
+    arrow: resolve(`${prefix}.arrow`),
+  };
+}
+
+export function getCustomAnswerTextStyle(theme: CustomAnswerKeyboardTheme, _text: string) {
+  const palette = {
+    yellow: { color: '#6b4300', strokeColor: '#fff3a8' },
+    blue: { color: '#174f87', strokeColor: '#dff6ff' },
+    green: { color: '#25643f', strokeColor: '#e5ffe9' },
+  }[theme];
+  return { fontSize: 42, ...palette };
+}
+
+function customAnswerTextNode(
+  answer: string,
+  theme: CustomAnswerKeyboardTheme,
+  pressed = false,
+  textSkin?: string,
+  width = CUSTOM_ANSWER_KEY_SIZE.width,
+): ExportChild {
+  if (textSkin) {
+    return {
+      type: 'Image',
+      props: {
+        x: 0,
+        y: pressed ? 2 : 0,
+        width,
+        height: CUSTOM_ANSWER_KEY_SIZE.height,
+        skin: textSkin,
+        mouseEnabled: false,
+      },
+    };
+  }
+  const style = getCustomAnswerTextStyle(theme, answer);
+  return {
+    type: 'Label',
+    props: {
+      x: 0,
+      y: pressed ? 2 : 0,
+      width,
+      height: CUSTOM_ANSWER_KEY_SIZE.height,
+      text: answer,
+      font: CUSTOM_ANSWER_KEYBOARD_FONT,
+      fontSize: style.fontSize,
+      color: style.color,
+      stroke: 4,
+      strokeColor: style.strokeColor,
+      align: 'center',
+      valign: 'middle',
+    },
+  };
+}
+
+function customAnswerKey(
+  answer: string,
+  position: { x: number; y: number; width: number },
+  theme: CustomAnswerKeyboardTheme,
+  textSkin?: string,
+): ExportChild {
+  const assets = getCustomAnswerThemeAssets(theme);
+  const width = position.width;
+  return {
+    type: 'KlKey',
+    props: {
+      ...position,
+      width,
+      height: CUSTOM_ANSWER_KEY_SIZE.height,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      output: answer,
+      runtime: 'com.klzz.ui.custom.KeyBoard.KlKey',
+    },
+    child: [
+      {
+        type: 'Image',
+        props: {
+          width,
+          height: CUSTOM_ANSWER_KEY_SIZE.height,
+          skin: assets.keyNormal,
+          sizeGrid: '0,28,0,28',
+          name: 'normal',
+        },
+        child: [customAnswerTextNode(answer, theme, false, textSkin, width)],
+      },
+      {
+        type: 'Image',
+        props: {
+          width,
+          height: CUSTOM_ANSWER_KEY_SIZE.height,
+          skin: assets.keyActive,
+          sizeGrid: '0,28,0,28',
+          name: 'active',
+        },
+        child: [customAnswerTextNode(answer, theme, true, textSkin, width)],
+      },
+    ],
+  };
+}
+
+function customAnswerClearKey(
+  position: { x: number; y: number },
+  theme: CustomAnswerKeyboardTheme,
+): ExportChild {
+  const assets = getCustomAnswerThemeAssets(theme);
+  const state = (pressed: boolean): ExportChild => ({
+    type: 'Image',
+    props: {
+      width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
+      height: CUSTOM_ANSWER_KEY_SIZE.height,
+      skin: pressed ? assets.wideActive : assets.wideNormal,
+      name: pressed ? 'active' : 'normal',
+    },
+    child: [{
+      type: 'Image',
+      props: {
+        skin: pressed ? assets.clearActive : assets.clearNormal,
+        centerX: 0,
+        centerY: pressed ? 2 : 0,
+      },
+    }],
+  });
+  return {
+    type: 'KlKey',
+    props: {
+      ...position,
+      width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
+      height: CUSTOM_ANSWER_KEY_SIZE.height,
+      anchorX: 0.5,
+      anchorY: 0.5,
+      output: ' ',
+      runtime: 'com.klzz.ui.custom.KeyBoard.KlKey',
+    },
+    child: [state(false), state(true)],
+  };
+}
+
+export function customAnswerKeyboardChildren(config: CustomAnswerKeyboardConfig): ExportChild[] {
+  const answers = normalizeCustomAnswerOptions(config.answers);
+  const renderAnswers = answers.length >= 2
+    ? answers
+    : [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers];
+  const theme = isCustomAnswerKeyboardTheme(config.theme)
+    ? config.theme
+    : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme;
+  const assets = getCustomAnswerThemeAssets(theme);
+  const layout = getCustomAnswerKeyboardLayout(renderAnswers);
+  const boardX = (460 - layout.boardWidth) / 2;
+  return [
+    {
+      type: 'Image',
+      props: {
+        x: boardX,
+        y: 65,
+        width: layout.boardWidth,
+        height: layout.boardHeight,
+        skin: assets.bg,
+        sizeGrid: '53,52,57,52',
+      },
+    },
+    {
+      type: 'Image',
+      props: {
+        x: 230,
+        y: 0,
+        skin: assets.arrow,
+        name: 'arrow',
+        anchorX: 0.5,
+      },
+    },
+    {
+      type: 'Box',
+      props: {
+        x: boardX,
+        y: 65,
+        width: layout.boardWidth,
+        height: layout.boardHeight,
+        name: 'keysBox',
+      },
+      child: [
+        ...renderAnswers.map((answer, index) => customAnswerKey(
+          answer,
+          layout.answerPositions[index],
+          theme,
+          config.textSkins?.[index],
+        )),
+        customAnswerClearKey(layout.clearPosition, theme),
+      ],
+    },
+  ];
 }
 
 // ─── 数字键工厂 ─────────────────────────────────────
@@ -504,6 +888,29 @@ export const KEYBOARD_PRESETS: KeyboardPreset[] = [
     },
     children: mathKeyboardChildren('<_>'),
   },
+  {
+    id: 'customAnswer',
+    label: '自定义答案',
+    thumbnail: assetSrc('keyboard.customAnswer.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
+    campPrefix: 'TEXT_ANSWER',
+    defaultSize: { width: 460, height: 550 },
+    defaultProps: {
+      anchorX: 0,
+      anchorY: 0,
+      sheet: '',
+      pattern: 13,
+      visible: false,
+      isHide: true,
+      fixed: true,
+      disabled: false,
+      _customAnswerKeyboard: {
+        answers: [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers],
+        theme: DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.theme,
+      },
+    },
+    children: customAnswerKeyboardChildren(DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG),
+  },
 ];
 
 export function getKeyboardPreset(id: string): KeyboardPreset | undefined {
@@ -512,4 +919,14 @@ export function getKeyboardPreset(id: string): KeyboardPreset | undefined {
     console.error(`[keyboardPresets] 未知键盘预设 id: "${id}"，相关键盘元素将无按键、无资源`);
   }
   return preset;
+}
+
+export function getKeyboardChildren(element: Pick<Element, 'props'>): ExportChild[] | undefined {
+  const presetId = (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (typeof presetId !== 'string') return undefined;
+  const preset = getKeyboardPreset(presetId);
+  if (!preset) return undefined;
+  return presetId === 'customAnswer'
+    ? customAnswerKeyboardChildren(readCustomAnswerKeyboardConfig(element))
+    : preset.children;
 }

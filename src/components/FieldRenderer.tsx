@@ -1,6 +1,12 @@
 import { useRef, useState, useEffect } from 'react';
+import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import type { Element } from '../types';
 import type { PropertyDef } from '../elements/elementMeta';
+import {
+  readCustomAnswerKeyboardConfig,
+  type CustomAnswerKeyboardConfig,
+  type CustomAnswerKeyboardTheme,
+} from '../elements/keyboardPresets';
 import { useEditorStore, findSubPage } from '../store/editorStore';
 import { showToast } from '../utils/toast';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
@@ -395,6 +401,152 @@ interface Props {
   propDefault?: number;
 }
 
+const ANSWER_THEME_OPTIONS: Array<{
+  value: CustomAnswerKeyboardTheme;
+  label: string;
+  color: string;
+}> = [
+  { value: 'yellow', label: '黄色皮肤', color: '#f5c84b' },
+  { value: 'blue', label: '蓝色皮肤', color: '#55a7e8' },
+  { value: 'green', label: '绿色皮肤', color: '#69b77d' },
+];
+
+function AnswerKeyboardField({
+  field,
+  elements,
+  onChange,
+}: {
+  field: PropertyDef;
+  elements: Element[];
+  onChange: (key: string, value: unknown) => void;
+}) {
+  const element = elements.length === 1 ? elements[0] : null;
+  const presetId = (element?.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (!element || presetId !== 'customAnswer') return null;
+
+  const config = readCustomAnswerKeyboardConfig(element);
+  const update = (next: CustomAnswerKeyboardConfig) => onChange(field.key, next);
+  const trimmed = config.answers.map((answer) => answer.trim());
+  const duplicateValues = new Set(trimmed.filter((answer, index) => (
+    answer !== '' && trimmed.indexOf(answer) !== index
+  )));
+  const hasEmpty = trimmed.some((answer) => answer === '');
+  const hasLong = config.answers.some((answer) => Array.from(answer).length > 4);
+
+  const move = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= config.answers.length) return;
+    const answers = [...config.answers];
+    [answers[index], answers[target]] = [answers[target], answers[index]];
+    update({ ...config, answers });
+  };
+
+  return (
+    <Row label={field.label} tooltip={field.tooltip} stacked>
+      <div className="mb-2">
+        <div className="text-[10px] text-slate-500 mb-1">键盘皮肤</div>
+        <div className="flex gap-1.5">
+          {ANSWER_THEME_OPTIONS.map((option) => {
+            const selected = config.theme === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                title={option.label}
+                aria-label={option.label}
+                onClick={() => update({ ...config, theme: option.value })}
+                className={`h-8 w-8 flex items-center justify-center rounded border ${
+                  selected ? 'border-blue-400 bg-blue-500/20' : 'border-slate-600 bg-slate-800 hover:border-slate-400'
+                }`}
+              >
+                <span
+                  className="h-4 w-4 rounded-sm border border-white/40"
+                  style={{ backgroundColor: option.color }}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        {config.answers.map((answer, index) => {
+          const normalized = answer.trim();
+          const invalid = normalized === '' || duplicateValues.has(normalized) || Array.from(answer).length > 4;
+          return (
+            <div key={index} className="flex items-center gap-1">
+              <span className="w-4 shrink-0 text-right text-[10px] text-slate-500">{index + 1}</span>
+              <input
+                value={answer}
+                maxLength={4}
+                aria-label={`答案 ${index + 1}`}
+                onChange={(event) => {
+                  const answers = [...config.answers];
+                  answers[index] = event.target.value;
+                  update({ ...config, answers });
+                }}
+                className={`${inputCls} min-w-0 ${invalid ? 'border-red-500 focus:border-red-400' : ''}`}
+              />
+              <button
+                type="button"
+                title="上移"
+                aria-label={`上移答案 ${index + 1}`}
+                disabled={index === 0}
+                onClick={() => move(index, -1)}
+                className="h-7 w-7 flex shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white disabled:opacity-25"
+              >
+                <ArrowUp size={13} />
+              </button>
+              <button
+                type="button"
+                title="下移"
+                aria-label={`下移答案 ${index + 1}`}
+                disabled={index === config.answers.length - 1}
+                onClick={() => move(index, 1)}
+                className="h-7 w-7 flex shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white disabled:opacity-25"
+              >
+                <ArrowDown size={13} />
+              </button>
+              <button
+                type="button"
+                title="删除答案"
+                aria-label={`删除答案 ${index + 1}`}
+                disabled={config.answers.length <= 2}
+                onClick={() => update({
+                  ...config,
+                  answers: config.answers.filter((_, answerIndex) => answerIndex !== index),
+                })}
+                className="h-7 w-7 flex shrink-0 items-center justify-center rounded text-slate-400 hover:bg-red-900/60 hover:text-red-300 disabled:opacity-25"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        disabled={config.answers.length >= 9}
+        onClick={() => update({ ...config, answers: [...config.answers, ''] })}
+        className="mt-1.5 w-full flex items-center justify-center gap-1 py-1.5 rounded border border-slate-600 bg-slate-700 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-40"
+      >
+        <Plus size={13} />
+        新增答案
+      </button>
+
+      {(hasEmpty || duplicateValues.size > 0 || hasLong) && (
+        <div className="mt-1.5 text-[10px] leading-4 text-red-300">
+          {hasEmpty && <div>答案不能为空。</div>}
+          {duplicateValues.size > 0 && <div>答案不能重复。</div>}
+          {hasLong && <div>每项答案最多 4 个字符。</div>}
+        </div>
+      )}
+      <div className="mt-1 text-[10px] text-slate-500">{config.answers.length}/9 项</div>
+    </Row>
+  );
+}
+
 export default function FieldRenderer({ field, elements, onChange, propDefault }: Props) {
   const { t, language } = useI18n();
   const val = getVal(elements, field.key);
@@ -402,6 +554,9 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
   const [editingNum, setEditingNum] = useState<string | undefined>(undefined);
 
   switch (field.type) {
+    case 'answerKeyboard':
+      return <AnswerKeyboardField field={field} elements={elements} onChange={onChange} />;
+
     case 'number': {
       const storedVal = isMulti ? '' : (val !== undefined && val !== null ? String(val) : '');
       const displayVal = editingNum ?? storedVal;

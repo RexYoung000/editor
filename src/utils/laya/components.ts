@@ -4,12 +4,19 @@ import { laya, classUtils, isPreviewMode, canvasRoot } from './core';
 import { elementMeta } from '../../elements/elementMeta';
 import { lookupBuiltinByExportPath } from '../../elements/builtinAssets';
 import { readFileAsDataUrl } from '../electronFs';
-import { getKeyboardPreset } from '../../elements/keyboardPresets';
+import {
+  getCustomAnswerKeyboardLayout,
+  getCustomAnswerThemeAssets,
+  getKeyboardPreset,
+  normalizeCustomAnswerOptions,
+  readCustomAnswerKeyboardConfig,
+} from '../../elements/keyboardPresets';
 import { getCachedVideoThumbnail } from '../videoThumbnail';
 import { getDefaultSkins, generateButtonSkin, generateCheckboxSkin, generateRadioSkin, generateInputSkin } from '../skinGenerator';
 import { renderTextToImage, type RenderTextProps } from '../textToImage';
 import { getEditorCanvasFillColor, isEditorCanvasHitThrough } from '../canvasComposite';
 import { isElementHidden } from '../layerState';
+import { renderCustomAnswerTextSkin } from '../customAnswerKeyboardText';
 
 function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string | null, stroke?: string, sw?: number) {
   if (stroke && sw && sw > 0) g.drawRect(x, y, w, h, fill, stroke, sw);
@@ -57,6 +64,94 @@ export function applyNewTextAreaRender(comp: LayaObj, element: Element): void {
   }).catch(() => {});
 }
 
+export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element): void {
+  if (isPreviewMode()) return;
+  const presetId = (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (presetId !== 'customAnswer') return;
+  const cu = classUtils();
+  if (!cu) return;
+
+  const config = readCustomAnswerKeyboardConfig(element);
+  const renderKey = JSON.stringify([element.width, element.height, config]);
+  if (comp._customAnswerRenderKey === renderKey) return;
+  comp._customAnswerRenderKey = renderKey;
+  comp.removeChildren?.();
+
+  const assets = getCustomAnswerThemeAssets(config.theme, true);
+  const normalizedAnswers = normalizeCustomAnswerOptions(config.answers);
+  const answers = normalizedAnswers.length >= 2 ? normalizedAnswers : ['东', '南', '西', '北'];
+  const layout = getCustomAnswerKeyboardLayout(answers);
+  const boardX = (460 - layout.boardWidth) / 2;
+  const makeImage = (skin: string, x: number, y: number, width?: number, height?: number) => {
+    const image = cu.getInstance('Image');
+    if (!image) return null;
+    image.skin = skin;
+    image.x = x;
+    image.y = y;
+    if (width !== undefined) image.width = width;
+    if (height !== undefined) image.height = height;
+    return image;
+  };
+
+  const bg = makeImage(assets.bg, boardX, 65, layout.boardWidth, layout.boardHeight);
+  if (bg) {
+    bg.sizeGrid = '53,52,57,52';
+    comp.addChild(bg);
+  }
+  const arrow = makeImage(assets.arrow, 216, 0);
+  if (arrow) comp.addChild(arrow);
+
+  const addTextSkin = (parent: LayaObj, answer: string, width: number) => {
+    const textImage = makeImage('', 0, 0, width, 88);
+    if (!textImage) return;
+    textImage.mouseEnabled = false;
+    parent.addChild(textImage);
+    void renderCustomAnswerTextSkin(answer, config.theme, width).then((dataUrl) => {
+      if (comp._customAnswerRenderKey !== renderKey || textImage.destroyed) return;
+      const L = laya();
+      const applySkin = () => {
+        if (comp._customAnswerRenderKey === renderKey && !textImage.destroyed) textImage.skin = dataUrl;
+      };
+      if (L?.loader && L.Handler) {
+        L.loader.load([{ url: dataUrl, type: 'image' }], L.Handler.create(null, applySkin));
+      } else {
+        applySkin();
+      }
+    }).catch((error) => {
+      console.error('[customAnswerKeyboard] 键帽文字图片生成失败', error);
+    });
+  };
+
+  answers.forEach((answer, index) => {
+    const position = layout.answerPositions[index];
+    const key = makeImage(
+      assets.keyNormal,
+      boardX + position.x - position.width / 2,
+      65 + position.y - 44,
+      position.width,
+      88,
+    );
+    if (!key) return;
+    key.sizeGrid = '0,28,0,28';
+    addTextSkin(key, answer, position.width);
+    comp.addChild(key);
+  });
+
+  const clear = makeImage(
+    assets.wideNormal,
+    boardX + layout.clearPosition.x - 91,
+    65 + layout.clearPosition.y - 44,
+    182,
+    88,
+  );
+  if (clear) {
+    const icon = makeImage(assets.clearNormal, (182 - 65) / 2, (88 - 55) / 2);
+    if (icon) clear.addChild(icon);
+    comp.addChild(clear);
+  }
+
+}
+
 export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj | null {
   const cu = classUtils();
   if (!cu) { console.warn('[laya-bridge] ClassUtils not ready'); return null; }
@@ -84,6 +179,11 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
       else if (resolvedType === 'TextArea') resolvedType = 'Label';
       // SoundButton 编辑模式下用 Image 替代（类似图片组件，避免实例化真 SoundButton）
       else if (resolvedType === 'SoundButton') resolvedType = 'Image';
+      // 自定义答案键盘需要按实例配置显示真实答案和主题。
+      else if (
+        element.type === 'KlBaseKeyboard'
+        && (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id === 'customAnswer'
+      ) resolvedType = 'Sprite';
       // Spine 动画：编辑模式下用原生 laya.ani.bone.Skeleton，绕过 KlSkeleton1 的自动重播逻辑
       // sdk_baiya 通过 View.regComponent("Skeleton", KlSkeleton1) 覆盖了 ClassUtils，
       // 但 Laya.Skeleton / Laya.__classmap['laya.ani.bone.Skeleton'] 仍是原生类
@@ -374,6 +474,9 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
 
   if (element.type === 'NewTextArea') {
     applyNewTextAreaRender(comp, element);
+  }
+  if (element.type === 'KlBaseKeyboard') {
+    applyCustomAnswerKeyboardRender(comp, element);
   }
 
   // DropObj 编辑模式：用 Box 渲染，手动管理 skin + tipSkin 两个子 Image
