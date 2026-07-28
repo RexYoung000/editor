@@ -2,6 +2,11 @@ const { app, BrowserWindow, ipcMain, shell, dialog, protocol, net: electronNet }
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
+const { Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 
 // 本地定义工具函数（避免引入跨模块依赖）
 function lessonSuffix(kind) {
@@ -709,12 +714,147 @@ ipcMain.handle('copy-local-file', (_event, srcAbsPath, destAbsPath) => {
   }
 });
 
+const VIDEO_FILE_LIMIT = 50 * 1024 * 1024;
+
+function hashFileStream(absPath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('md5');
+    const stream = fs.createReadStream(absPath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+async function promoteVideoTempFile(courseDir, tempPath, hash) {
+  const animationDir = path.join(courseDir, 'images', 'animation');
+  fs.mkdirSync(animationDir, { recursive: true });
+  const candidates = [`video_${hash.slice(0, 6)}.mp4`, `video_${hash}.mp4`];
+  for (const fileName of candidates) {
+    const destPath = path.join(animationDir, fileName);
+    if (!fs.existsSync(destPath)) {
+      fs.renameSync(tempPath, destPath);
+      return `images/animation/${fileName}`;
+    }
+    if (await hashFileStream(destPath) === hash) {
+      fs.rmSync(tempPath, { force: true });
+      return `images/animation/${fileName}`;
+    }
+  }
+  throw new Error('视频内容哈希冲突');
+}
+
+function validateRemoteVideoPath(remotePath) {
+  if (typeof remotePath !== 'string' || !remotePath.startsWith('/')) {
+    throw new Error('视频下载路径无效');
+  }
+  const decoded = decodeURIComponent(remotePath);
+  if (decoded.includes('..') || (
+    !decoded.startsWith('/builtin/runtime/video-stage/')
+    && !decoded.startsWith('/builtin/library/')
+  )) {
+    throw new Error('视频下载路径不在允许范围');
+  }
+  if (!/\.mp4$/i.test(decoded)) throw new Error('视频关卡只支持 MP4');
+}
+
+async function downloadVideoToTemp(remotePath, tempPath, expectedSize) {
+  validateRemoteVideoPath(remotePath);
+  if (!currentServerUrl) throw new Error('尚未连接资源服务器');
+  const server = new URL(currentServerUrl);
+  const target = new URL(remotePath, server.origin);
+  if (target.origin !== server.origin) throw new Error('视频下载地址与当前服务器不一致');
+  const transport = target.protocol === 'https:' ? https : http;
+
+  return new Promise((resolve, reject) => {
+    const request = transport.get(target, (response) => {
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`视频下载失败: HTTP ${response.statusCode}`));
+        return;
+      }
+      const contentLength = Number(response.headers['content-length'] || 0);
+      if (contentLength > VIDEO_FILE_LIMIT) {
+        response.resume();
+        reject(new Error('视频不能超过 50MB'));
+        return;
+      }
+      if (expectedSize && contentLength && contentLength !== expectedSize) {
+        response.resume();
+        reject(new Error('视频大小与注册信息不一致'));
+        return;
+      }
+
+      let size = 0;
+      const hash = crypto.createHash('md5');
+      const validator = new Transform({
+        transform(chunk, _encoding, callback) {
+          size += chunk.length;
+          if (size > VIDEO_FILE_LIMIT) {
+            callback(new Error('视频不能超过 50MB'));
+            return;
+          }
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      });
+
+      pipeline(response, validator, fs.createWriteStream(tempPath, { flags: 'wx' }))
+        .then(() => {
+          if (expectedSize && size !== expectedSize) throw new Error('视频大小与注册信息不一致');
+          resolve({ hash: hash.digest('hex'), size });
+        })
+        .catch(reject);
+    });
+    request.setTimeout(30000, () => request.destroy(new Error('视频下载超时')));
+    request.on('error', reject);
+  });
+}
+
+ipcMain.handle('materialize-video-to-course', async (_event, params) => {
+  const courseDir = params?.courseDir;
+  const source = params?.source;
+  if (!courseDir || !source) return { ok: false, error: '缺少视频落盘参数' };
+
+  const animationDir = path.join(courseDir, 'images', 'animation');
+  fs.mkdirSync(animationDir, { recursive: true });
+  const tempPath = path.join(animationDir, `.video-import-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.tmp`);
+
+  try {
+    let hash;
+    let size;
+    if (source.kind === 'local') {
+      if (path.extname(source.path || '').toLowerCase() !== '.mp4') throw new Error('视频关卡只支持 MP4');
+      const stat = fs.statSync(source.path);
+      if (!stat.isFile()) throw new Error('所选路径不是文件');
+      if (stat.size > VIDEO_FILE_LIMIT) throw new Error('视频不能超过 50MB');
+      size = stat.size;
+      hash = await hashFileStream(source.path);
+      await fs.promises.copyFile(source.path, tempPath);
+    } else if (source.kind === 'remote') {
+      const downloaded = await downloadVideoToTemp(source.path, tempPath, source.expectedSize);
+      hash = downloaded.hash;
+      size = downloaded.size;
+      if (source.expectedHash && hash !== source.expectedHash) {
+        throw new Error('视频内容与注册信息不一致');
+      }
+    } else {
+      throw new Error('未知的视频来源');
+    }
+
+    const relativePath = await promoteVideoTempFile(courseDir, tempPath, hash);
+    return { ok: true, relativePath, hash, size };
+  } catch (error) {
+    try { fs.rmSync(tempPath, { force: true }); } catch { /* ignore cleanup failure */ }
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 // ─── IPC: hash-file ───
 // 流式 MD5，支持大文件（视频等），不一次性读进内存
 ipcMain.handle('hash-file', (_event, absPath) => {
   return new Promise((resolve) => {
     try {
-      const crypto = require('crypto');
       const hash = crypto.createHash('md5');
       const stream = fs.createReadStream(absPath);
       stream.on('data', (chunk) => hash.update(chunk));
