@@ -17,6 +17,7 @@ import {
 import { buildExportRegressionArtifacts } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
 import {
+  evaluationCourseFixture,
   homeworkCourseFixture,
   normalCourseFixture,
   previewCourseFixture,
@@ -257,7 +258,7 @@ test('自定义答案键盘预设进入兼容矩阵', () => {
   );
 });
 
-test('正式与预习导出包含动态答案、主题皮肤和位图字库，不包含运行时字体', async () => {
+test('正课、作业、专题测评与预习导出完整加载自定义答案键盘和输入框资源', async () => {
   const renderer = {
     answerText: async (answer: string, theme: 'yellow' | 'blue' | 'green') => (
       `data:image/png;base64,key-${theme}-${answer}`
@@ -266,7 +267,7 @@ test('正式与预习导出包含动态答案、主题皮肤和位图字库，�
       `data:image/png;base64,input-${theme}-${characters}`
     ),
   };
-  for (const fixture of [normalCourseFixture, homeworkCourseFixture]) {
+  for (const fixture of [normalCourseFixture, homeworkCourseFixture, evaluationCourseFixture]) {
     const course = fixture();
     const page = firstEditablePage(course);
     const keyboard = customKeyboard('export', ['红', '黄', '蓝'], 'green');
@@ -285,6 +286,9 @@ test('正式与预习导出包含动态答案、主题皮肤和位图字库，�
     assert.match(sceneText, /skin_\d+\.png/);
     assert.doesNotMatch(sceneText, /FZLanTingYuanZhongCu|\.ttf|"type":"Label"/);
     assert.doesNotMatch(configText, /\.ttf|"type":"ttf"/);
+    const viewDir = course.kind === 'normal' ? 'game_lt' : 'game_hw';
+    assert.match(configText, new RegExp(`res/atlas/${viewDir}/image/inputImg\\.atlas`));
+    assert.match(configText, new RegExp(`res/atlas/${viewDir}/image/textKeyboard/green\\.atlas`));
   }
 
   const previewCourse = previewCourseFixture();
@@ -305,6 +309,8 @@ test('正式与预习导出包含动态答案、主题皮肤和位图字库，�
   assert.match(previewSceneText, /"sheet":"对错"/);
   assert.doesNotMatch(previewSceneText, /FZLanTingYuanZhongCu|\.ttf|"type":"Label"/);
   assert.doesNotMatch(previewConfigText, /\.ttf|"type":"ttf"/);
+  assert.match(previewConfigText, /res\/atlas\/game_preview\/image\/inputImg\.atlas/);
+  assert.match(previewConfigText, /res\/atlas\/game_preview\/image\/textKeyboard\/blue\.atlas/);
 });
 
 test('发布校验阻止无效选项和无法作答的正确答案', () => {
