@@ -208,6 +208,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
     - `<viewDir>/image/...`：`isLargeImage` 为 true → push `{url, type:'image'}` 单文件；为 false → 把 `parts[2]`（一级子目录名）加入 `imageDirs`
     - `<viewDir>/sound/...`：单独 push `{url, type:'sound'}`
     - `<viewDir>/animation/<...>.sk`：push `{url}` + 同目录 `.png` push `{url, type:'image'}`
+
+正常课、作业、专题测评和预习的普通场景都必须同时扫描两类固定子节点资源：`elementMeta.exportChildren` 与 `getKeyboardChildren(element)`。前者承载 `KlInputImage` 等组件的输入框底图，后者承载键盘预设的动态按键与底板；任何课程类型漏掉其中一类，编译后都可能出现“场景节点存在，但对应图集未预加载、组件不可见”的结果。复习课当前只生成视频配置，不导出题目场景，因此不进入这项资源一致性约束。
   - 末尾 `imageDirs.forEach(dir => res.push({url: 'res/atlas/<viewDir>/image/<dir>.atlas'}))`
   - 内置音效条件加入：扫 stage 内所有 actions，**用到 `onClickSound`** → 加 `<viewDir>/sound/btn_click.wav`；**有 `playRightSound`** → 加 `right.mp3`；**有 `playWrongSound`** → 加 `wowo.mp3`（preview 是 `wrong.mp3`）
 
@@ -252,6 +254,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
    - 顶层 `mode: 'preview'`，`feedback: 'spirit'`，无 `noVideoMystery`
    - 视频关卡 `classType: 'yx'`
    - 普通 page：`name: '预习<i+1>'`、`classType: 'yx'`，**无 subviews**（每个预习关卡单 page）
+   - 普通 page 的 `res` 与正式工程保持固定子节点资源边界一致：同时收集 `elementMeta.exportChildren` 和键盘预设 children，保证输入框底图与键盘皮肤对应图集都进入预加载清单
    - 内置音效中 wrong 文件名是 **`wrong.mp3`** 而非主流程的 `wowo.mp3`
    - 也有 `onClickSound → btn_click.wav` / `playRightSound → right.mp3` / `playWrongSound → wrong.mp3` 的条件加入
 7. **不做 SVN/WebSocket**：发布尾段统一在 `exportProject` 中处理

@@ -417,7 +417,8 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
             }
           }
           // PageTurnBox 不携带 pages 数组，ContainerBox 子元素资源由主循环收集
-          // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
+          // 固定组件子节点与键盘预设都要进入预加载清单，否则编译进 atlas 后运行时不可见。
+          collectPreviewExportChildrenRes(meta?.exportChildren, resourceMap, imageDirs, resEntries, addedSingleFiles);
           collectPreviewExportChildrenRes(getKeyboardChildren(el), resourceMap, imageDirs, resEntries, addedSingleFiles);
         }
       }
