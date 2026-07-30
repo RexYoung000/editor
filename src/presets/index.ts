@@ -1,5 +1,5 @@
 import type { Element } from '../types';
-import { assetExport, assetSrc } from '../elements/builtinAssets';
+import { assetExport } from '../elements/builtinAssets';
 import { DEFAULT_FONT_ID } from '../elements/fontLibrary';
 import type { CourseKind } from '../utils/courseKind';
 
@@ -278,8 +278,6 @@ export interface PresetTemplate {
   id: string;
   /** i18n translation key for the label */
   labelKey: string;
-  /** Thumbnail image URL (from builtinAssets or direct path) */
-  thumbnail: string;
   /** Element list for this preset (cloned on instantiation) */
   elements: Element[];
   /** noSubPages = 该关卡不允许添加小关卡 */
@@ -343,7 +341,6 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
   {
     id: 'internal-pages-v1',
     labelKey: 'presetInternalPages',
-    thumbnail: '',
     elements: [],
     structure: 'internal',
     blank: true,
@@ -354,7 +351,6 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
   {
     id: 'video',
     labelKey: 'presetVideo',
-    thumbnail: assetSrc('preset.video'),
     elements: videoElements,
     structure: 'video',
     noSubPages: true,
@@ -365,7 +361,6 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
   {
     id: 'question-layout-aqua-01',
     labelKey: 'presetQuestionLayoutAqua',
-    thumbnail: assetSrc('preset.questionLayoutAqua.background'),
     elements: aquaQuestionLayoutElements,
     structure: 'single',
     noSubPages: true,
@@ -374,7 +369,6 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
   {
     id: 'question-layout-blue-01',
     labelKey: 'presetQuestionLayoutBlue',
-    thumbnail: assetSrc('preset.questionLayoutBlue.background'),
     elements: blueQuestionLayoutElements,
     structure: 'single',
     noSubPages: true,
@@ -383,7 +377,6 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
   {
     id: 'lesson-layout-wood-scroll-single-01',
     labelKey: 'presetWoodScroll',
-    thumbnail: assetSrc('preset.woodScroll.thumbnail'),
     elements: woodScrollElements,
     structure: 'single',
     courseKinds: ['normal'],
@@ -391,7 +384,6 @@ export const PRESET_TEMPLATES: PresetTemplate[] = [
   {
     id: 'lesson-layout-wood-scroll-internal-01',
     labelKey: 'presetWoodScroll',
-    thumbnail: assetSrc('preset.woodScroll.thumbnail'),
     elements: woodScrollElements,
     structure: 'internal',
     editorModel: 'internal-pages',

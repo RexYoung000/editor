@@ -11,6 +11,7 @@ import {
 } from '../presets';
 import type { CourseKind } from '../utils/courseKind';
 import VideoSourceDialog from './VideoSourceDialog';
+import PresetTemplatePreview from './PresetTemplatePreview';
 
 type Mode = 'stage' | 'subPage';
 type Tab = 'preset' | 'custom' | 'copyable';
@@ -305,10 +306,10 @@ export default function NewStageDialog({
                   className="aspect-[4/3] bg-slate-700 hover:bg-slate-600 border border-transparent hover:border-blue-400 rounded-lg text-base text-white flex flex-col overflow-hidden"
                 >
                   <div className="flex-1 bg-slate-900 flex items-center justify-center overflow-hidden">
-                    {preset.thumbnail
-                      ? <img src={preset.thumbnail} className="w-full h-full object-cover" alt="" />
-                      : <span className="text-2xl text-slate-500 font-medium">{t(preset.labelKey)}</span>
-                    }
+                    <PresetTemplatePreview
+                      elements={preset.elements}
+                      label={t(preset.labelKey)}
+                    />
                   </div>
                   <div className="w-full text-center px-2 py-1.5 text-xs bg-slate-700 text-slate-300 font-medium" style={{ textAlign: 'center' }}>{t(preset.labelKey)}</div>
                 </button>

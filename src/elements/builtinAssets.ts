@@ -62,7 +62,6 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'preset.woodScroll.background', src: 'runtime/game/preset/lesson-layout-wood-scroll-01/background.jpg', exportPath: 'game/preset/lesson-layout-wood-scroll-01/background.jpg' },
   { id: 'preset.woodScroll.titleFrame', src: 'runtime/game/preset/lesson-layout-wood-scroll-01/title-frame.png', exportPath: 'game/preset/lesson-layout-wood-scroll-01/title-frame.png' },
   { id: 'preset.woodScroll.soundButton', src: 'runtime/game/preset/lesson-layout-wood-scroll-01/sound-button.png', exportPath: 'game/preset/lesson-layout-wood-scroll-01/sound-button.png' },
-  { id: 'preset.woodScroll.thumbnail', src: 'editor/preset/lesson-layout-wood-scroll-01/thumbnail.png' },
   ...PRESET_VIDEOS.map((video) => ({ id: video.assetId, src: video.assetPath })),
 
   // 键盘预设1：数字键盘（参考 LessonZK 模板）

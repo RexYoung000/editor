@@ -10,6 +10,11 @@ import {
   filterPresetTemplates,
   PRESET_TEMPLATES,
 } from '../src/presets';
+import {
+  getPresetPreviewIssues,
+  isPresetPreviewVisible,
+  resolvePresetPreviewSkin,
+} from '../src/presets/preview';
 import { DEFAULT_FONT_ID } from '../src/elements/fontLibrary';
 import {
   buildExportRegressionArtifacts,
@@ -207,11 +212,6 @@ test('木纹卷轴两个稳定 ID 共享视觉并保持结构与编辑边界', (
   assert.deepEqual(single.courseKinds, ['normal']);
   assert.deepEqual(internal.courseKinds, ['normal']);
   assert.deepEqual(single.elements, internal.elements);
-  assert.equal(
-    single.thumbnail,
-    '/builtin/editor/preset/lesson-layout-wood-scroll-01/thumbnail.png',
-  );
-  assert.equal(internal.thumbnail, single.thumbnail);
 
   const images = single.elements.filter((element) => element.type === 'NewImage');
   const texts = single.elements.filter((element) => element.type === 'NewTextArea');
@@ -228,6 +228,72 @@ test('木纹卷轴两个稳定 ID 共享视觉并保持结构与编辑边界', (
   assert.equal(sound.props.skin, 'game/preset/lesson-layout-wood-scroll-01/sound-button.png');
   assert.ok(single.elements.every((element) => (element.actions ?? []).length === 0));
   assert.ok(!JSON.stringify(single.elements).includes('public/builtin/library'));
+});
+
+test('内置模板卡片直接使用母版元素并阻止无法预览的新模板进入', () => {
+  const visualPresets = PRESET_TEMPLATES.filter(
+    (preset) => !preset.blank && preset.structure !== 'video',
+  );
+  assert.deepEqual(
+    visualPresets.map((preset) => preset.id),
+    [
+      'question-layout-aqua-01',
+      'question-layout-blue-01',
+      'lesson-layout-wood-scroll-single-01',
+      'lesson-layout-wood-scroll-internal-01',
+    ],
+  );
+  for (const preset of visualPresets) {
+    assert.ok(!('thumbnail' in preset));
+    assert.deepEqual(getPresetPreviewIssues(preset.elements), [], preset.id);
+  }
+  assert.equal(
+    resolvePresetPreviewSkin('game/preset/question-layout-blue-01/title-paper.png'),
+    '/builtin/runtime/game/preset/question-layout-blue-01/title-paper.png',
+  );
+
+  const unsupported: Element = {
+    id: 'unsupported',
+    type: 'FutureWidget',
+    layaType: 'Box',
+    name: 'FutureWidget',
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    opacity: 1,
+    rotation: 0,
+    actions: [],
+    props: {},
+  };
+  assert.deepEqual(
+    getPresetPreviewIssues([unsupported]),
+    ['unsupported: unsupported type FutureWidget'],
+  );
+
+  const hidden = {
+    ...visualPresets[0].elements[0],
+    props: { ...visualPresets[0].elements[0].props, _editorHidden: true },
+  };
+  assert.equal(isPresetPreviewVisible(hidden), false);
+
+  const cyclicA = {
+    ...visualPresets[0].elements[0],
+    id: 'cyclic-a',
+    parentId: 'cyclic-b',
+  };
+  const cyclicB = {
+    ...visualPresets[0].elements[0],
+    id: 'cyclic-b',
+    parentId: 'cyclic-a',
+  };
+  assert.deepEqual(
+    getPresetPreviewIssues([cyclicA, cyclicB]).filter((issue) => issue.includes('cyclic')),
+    [
+      'cyclic-a: cyclic parent relation',
+      'cyclic-b: cyclic parent relation',
+    ],
+  );
 });
 
 test('两套题目版式使用老师可见的中文模板名称', () => {
