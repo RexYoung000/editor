@@ -9,6 +9,7 @@
 
 import type { Element } from '../types';
 import { assetExport, assetSrc } from './builtinAssets';
+import { DEFAULT_FONT_FACE } from './fontLibrary';
 
 export interface ExportChild {
   type: string;
@@ -50,7 +51,7 @@ export interface CustomAnswerKeyboardLayout {
   clearPosition: { x: number; y: number };
 }
 
-export const CUSTOM_ANSWER_KEYBOARD_FONT = 'FZLanTingYuanZhongCu';
+export const CUSTOM_ANSWER_KEYBOARD_FONT = DEFAULT_FONT_FACE;
 export const DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG: CustomAnswerKeyboardConfig = {
   answers: ['东', '南', '西', '北'],
   theme: 'yellow',

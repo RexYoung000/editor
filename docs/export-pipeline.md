@@ -97,6 +97,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 文本的编辑器画布、编辑结束后的画布、编辑器预览和正式导出共享同一套字体测量、换行、行高、粗体/斜体和尺寸模式规则。编辑态只暂时覆盖底层文本图像，退出编辑时一次提交文本与自动计算后的尺寸；预览和导出继续使用同一 PNG 烘焙路径。这样不会出现“编辑器看起来能放下、预览或发布却换行/裁切不同”的三套排版结果。
 
+字体选择与默认值以 [字体库与历史兼容](font-library.md) 为准。历史课件中的旧方正字体 ID 会在进入编辑器时迁移为“思源黑体 Regular”，字体解析入口也执行同一缺省归一化；导出只携带烘焙后的 PNG，不携带或动态加载 OTF/TTF。
+
 ### 4.2 资源收集 `collectResources(course, viewDir, stages, options)`
 
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用该入口，通过 `viewDir` 和待遍历 stages 决定课程命名空间，遍历所有元素的 `props` / `actions` / `exportChildren` / `_keyboardPreset.children`，产出 `Map<src, dest>`：

@@ -6,11 +6,12 @@ import {
   type CustomAnswerKeyboardTheme,
 } from '../elements/keyboardPresets';
 import type { Course, Element } from '../types';
+import { DEFAULT_FONT_ID } from '../elements/fontLibrary';
 import { getElementPages } from './internalPages';
 import { loadLibraryFont } from './fontLoader';
 import { renderGlyphSheetToImage, renderTextToImage } from './textToImage';
 
-export const CUSTOM_ANSWER_KEYBOARD_FONT_LIBRARY_ID = 'yizhi.lantingyuanzhongcu';
+export const CUSTOM_ANSWER_KEYBOARD_FONT_LIBRARY_ID = DEFAULT_FONT_ID;
 export const CUSTOM_ANSWER_KEYBOARD_TEXT_SIZE = { width: 84, height: 88 };
 
 export interface CustomAnswerInputGlyphMetrics {

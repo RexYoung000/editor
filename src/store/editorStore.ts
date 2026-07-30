@@ -17,6 +17,7 @@ import {
 import { getCourseDirPath } from '../utils/electronFs';
 import { isPresetTemplateAvailable, PRESET_TEMPLATES } from '../presets';
 import { getUniqueElementName, normalizeElementNames, createDefaultElement, elementMeta, rebuildSubPageCounters, getNextNumberedName, getNextItemNameForCenterMatch } from '../elements/elementMeta';
+import { migrateCourseFontLibraryIds } from '../utils/fontMigration';
 import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
 import { getElementParentContainment, getFitContainerToChildrenUpdates } from '../utils/canvasGeometry';
 import { isContainerElementType } from '../utils/elementContainers';
@@ -478,6 +479,7 @@ export const useEditorStore = create<EditorState>()(
     setCurrentCourse: (course) =>
       set((state) => {
         ensureCourseShape(course);
+        migrateCourseFontLibraryIds(course);
         const normalizeSubPage = (sp: SubPage): SubPage => ({
           ...sp,
           elements: normalizeElementNames(sp.elements),

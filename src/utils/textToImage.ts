@@ -1,11 +1,11 @@
 /**
  * 文字 → PNG 图像渲染。
  * 用 Canvas 2D API 把一段文字按 NewTextArea 的视觉属性烘焙成位图。
- * 字体由 fontLoader 统一管理,优先级:本地字体 → 库字体 → DEFAULT(派培优兰亭黑)。
+ * 字体由 fontLoader 统一管理,优先级:本地字体 → 库字体 → 思源黑体 Regular。
  */
 
 import { resolveElementFont } from './fontLoader';
-import { DEFAULT_FONT_ID } from '../elements/fontLibrary';
+import { DEFAULT_FONT_FACE, DEFAULT_FONT_ID } from '../elements/fontLibrary';
 import { loadLibraryFont } from './fontLoader';
 import { layoutText } from './textLayout';
 
@@ -32,7 +32,7 @@ async function resolveRenderFontFace(props: RenderTextProps, courseId?: string):
   if (courseId) {
     return resolveElementFont(courseId, props.fontLocalPath ?? '', props.fontLibraryId ?? '');
   }
-  return (await loadLibraryFont(DEFAULT_FONT_ID)) ?? 'FZLanTingHei';
+  return (await loadLibraryFont(DEFAULT_FONT_ID)) ?? DEFAULT_FONT_FACE;
 }
 
 /**

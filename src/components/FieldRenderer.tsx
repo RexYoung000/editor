@@ -15,7 +15,7 @@ import { getObject } from '../utils/laya/core';
 import { ColorPicker } from './ColorPicker';
 import { useI18n } from '../i18n/context';
 import { translateLabel } from '../elements/elementMetaI18n';
-import { FONT_LIBRARY, FONT_CATEGORIES, lookupFont } from '../elements/fontLibrary';
+import { FONT_LIBRARY, lookupFont, normalizeFontLibraryId } from '../elements/fontLibrary';
 import { loadLocalFont } from '../utils/fontLoader';
 import LibraryBrowser, { LibraryErrorDialog, type SelectResult } from './LibraryBrowser';
 import { parseFiniteNumberDraft } from '../utils/propertyEditSession';
@@ -815,9 +815,9 @@ export default function FieldRenderer({
       return <SpineFolderField field={field} elements={elements} val={val} isMulti={isMulti} />;
 
     case 'fontLibrary': {
-      const currentId = isMulti ? '' : ((val as string) ?? '');
+      const currentId = isMulti ? '' : normalizeFontLibraryId(val);
       const entry = currentId ? lookupFont(currentId) : undefined;
-      const displayLabel = entry ? `${entry.category} / ${entry.label}` : '';
+      const displayLabel = entry?.label ?? '';
       return (
         <Row label={field.label} tooltip={field.tooltip}>
           <select
@@ -833,16 +833,9 @@ export default function FieldRenderer({
             }}
           >
             {isMulti && <option value="" disabled>{t('multipleValues')}</option>}
-            {FONT_CATEGORIES.map((cat) => {
-              const list = FONT_LIBRARY.filter((f) => f.category === cat);
-              return (
-                <optgroup key={cat} label={cat}>
-                  {list.length === 0
-                    ? <option value="" disabled>(暂无字体)</option>
-                    : list.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-                </optgroup>
-              );
-            })}
+            {FONT_LIBRARY.map((font) => (
+              <option key={font.id} value={font.id}>{font.label}</option>
+            ))}
           </select>
         </Row>
       );
