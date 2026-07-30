@@ -191,7 +191,14 @@ export default function NewStageDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onCancel}>
-      <div className="flex max-h-[calc(100vh-32px)] w-[min(1040px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg bg-slate-800 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div
+        className={`flex w-[min(1040px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg bg-slate-800 shadow-xl ${
+          activeTab === 'preset' && activePresetStructure === 'video'
+            ? 'h-[calc(100vh-32px)]'
+            : 'max-h-[calc(100vh-32px)]'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="relative flex items-center justify-center px-8 py-5 border-b border-slate-700">
           <span className="text-2xl font-medium text-white">模板</span>
@@ -262,10 +269,10 @@ export default function NewStageDialog({
         )}
 
         {/* Content */}
-        <div className={`min-h-0 flex-1 overflow-y-auto ${
+        <div className={`min-h-0 flex-1 ${
           activeTab === 'preset' && activePresetStructure === 'video'
-            ? 'h-[min(620px,calc(100vh-190px))]'
-            : 'min-h-[360px] max-h-[560px] px-8 py-6'
+            ? 'overflow-hidden'
+            : 'min-h-[360px] max-h-[560px] overflow-y-auto px-8 py-6'
         }`}>
           {activeTab === 'preset' && activePresetStructure !== 'video' && (
             <div className="grid grid-cols-4 gap-4">
