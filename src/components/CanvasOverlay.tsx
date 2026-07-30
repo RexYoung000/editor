@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { EditorLayerGroup, Element } from '../types';
 import { useEditorStore } from '../store/editorStore';
-import { getObject } from '../utils/layaBridge';
+import { applyElementTransform, getObject } from '../utils/layaBridge';
 import { applyNewTextAreaRender } from '../utils/laya/components';
 import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
 import { resolveElementFont } from '../utils/fontLoader';
@@ -399,11 +399,16 @@ export default function CanvasOverlay({
     for (const start of transaction.roots) {
       const object = getObject(start.id);
       if (object) {
-        object.x = start.x;
-        object.y = start.y;
-        object.width = start.width;
-        object.height = start.height;
-        object.rotation = start.rotation;
+        const element = currentPageRef.current?.elements.find((item) => item.id === start.id);
+        if (element) {
+          applyElementTransform(object, { ...element, ...start });
+        } else {
+          object.x = start.x;
+          object.y = start.y;
+          object.width = start.width;
+          object.height = start.height;
+          object.rotation = start.rotation;
+        }
       }
     }
   }, []);
@@ -829,11 +834,16 @@ export default function CanvasOverlay({
       for (const preview of interaction.transaction.preview) {
         const object = getObject(preview.id);
         if (object) {
-          object.x = preview.x;
-          object.y = preview.y;
-          object.width = preview.width;
-          object.height = preview.height;
-          object.rotation = preview.rotation;
+          const element = page.elements.find((item) => item.id === preview.id);
+          if (element) {
+            applyElementTransform(object, { ...element, ...preview });
+          } else {
+            object.x = preview.x;
+            object.y = preview.y;
+            object.width = preview.width;
+            object.height = preview.height;
+            object.rotation = preview.rotation;
+          }
         }
       }
       if (interaction.duplicateIds) {
@@ -941,15 +951,20 @@ export default function CanvasOverlay({
       if (object) {
         const element = page.elements.find((item) => item.id === preview.id);
         const preserveTextMetrics = interaction.kind === 'resize' && element?.type === 'NewTextArea';
-        object.x = preview.x;
-        object.y = preview.y;
-        if (!preserveTextMetrics) {
-          object.width = preview.width;
-          object.height = preview.height;
-        } else if (element) {
+        if (!preserveTextMetrics && element) {
+          applyElementTransform(object, { ...element, ...preview });
+        } else {
+          object.x = preview.x;
+          object.y = preview.y;
+          object.rotation = preview.rotation;
+          if (!preserveTextMetrics) {
+            object.width = preview.width;
+            object.height = preview.height;
+          }
+        }
+        if (preserveTextMetrics && element) {
           scheduleTextResizePreview(element, preview.width, preview.height);
         }
-        object.rotation = preview.rotation;
       }
     }
     setPreviewTransforms(interaction.transaction.preview);

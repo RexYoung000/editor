@@ -457,9 +457,8 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
         }
         const sizeChanged = !prevEl || prevEl.width !== el.width || prevEl.height !== el.height;
         if (!prevEl || prevEl.x !== el.x || prevEl.y !== el.y || prevEl.width !== el.width || prevEl.height !== el.height || prevEl.opacity !== el.opacity || prevEl.rotation !== el.rotation) {
-          syncTransform(id, el.x, el.y, el.width, el.height);
+          syncTransform(id, el);
           obj.alpha = el.opacity;
-          obj.rotation = el.rotation;
           const isTextAreaEdit = el.layaType === 'TextArea';
           if (sizeChanged && !el.props?.skin && !obj.skin && !((obj._childs ?? obj._children) && (obj._childs ?? obj._children).length > 0) && !isTextAreaEdit && el.layaType !== 'DragViewBox' && el.type !== 'DragDropBox' && el.type !== 'DragDragBox') {
             drawPlaceholder(obj, el);

@@ -1,6 +1,6 @@
 import type { LayaObj, LayaAny } from './core';
 import type { Element } from '../../types';
-import { laya, classUtils, isPreviewMode, canvasRoot } from './core';
+import { applyElementTransform, laya, classUtils, isPreviewMode, canvasRoot } from './core';
 import { elementMeta } from '../../elements/elementMeta';
 import { lookupBuiltinByExportPath } from '../../elements/builtinAssets';
 import { readFileAsDataUrl } from '../electronFs';
@@ -254,10 +254,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
 
   if (!comp) { console.warn('[laya-bridge] Failed to create:', element.layaType ?? element.type); return null; }
 
-  comp.x = element.x;
-  comp.y = element.y;
-  comp.width = element.width;
-  comp.height = element.height;
+  applyElementTransform(comp, element);
   comp.name = element.name;
 
   if (element.layaType) {
@@ -301,6 +298,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
 }
 
 export function applyKlProps(comp: LayaObj, element: Element): void {
+  applyElementTransform(comp, element);
   // 编辑器可见性：_editorHidden=true 时在画布上隐藏，否则使用 visible 属性（翻页组件切换页）
   if (!isPreviewMode()) {
     const elProps = element.props as Record<string, unknown>;
@@ -319,8 +317,6 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
   }
 
   if (element.opacity !== undefined) comp.alpha = element.opacity;
-  if (element.rotation !== undefined) comp.rotation = element.rotation;
-
   // 合并 defaultProps 和 element.props（旧数据可能缺少 defaultProps 里的字段）
   const meta = elementMeta[element.type];
   const props: Record<string, unknown> = { ...(meta?.defaultProps ?? {}), ...(element.props ?? {}) };
@@ -502,7 +498,7 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
       } catch { /* ignore */ }
     }
     for (const [key, value] of Object.entries(props)) {
-      if (key === 'skin' || key === 'tipSkin' || key === 'stateNum' || key === 'sizeGrid' || key.startsWith('_') || (key === 'visible' && !isPreviewMode()) || key === 'isHide') continue;
+      if (key === 'skin' || key === 'tipSkin' || key === 'stateNum' || key === 'sizeGrid' || key === 'mirrorX' || key === 'mirrorY' || key.startsWith('_') || (key === 'visible' && !isPreviewMode()) || key === 'isHide') continue;
       if (value === undefined || value === null) continue;
       try { comp[key] = value; } catch { /* ignore */ }
     }
