@@ -16,6 +16,7 @@ import {
   compileInternalPagesCourse,
   internalPageActionBody,
 } from './internalPageCompiler';
+import { buildOrdinaryActionBindings, isSharedOrdinaryAction } from './ordinaryActionCompiler';
 import { collectCourseConfirmTargetIssues, getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
 import {
   buildInputRuleConfirmInitCode,
@@ -982,7 +983,7 @@ export function buildScene(
 
 // ─── 动作 → 代码片段（模块级工厂，正课/作业共用） ───
 
-function makeActionBuilder(
+export function makeActionBuilder(
   varAssignment: Map<string, string>,
   resourceMap: Map<string, string>,
   uiNamespace: string,
@@ -1520,6 +1521,8 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   // ─── DragViewBox 统一处理（每个 DVB 一对 EVENT_SUCCESS/EVENT_FAILD，合并 dropSkin + onDragJudge）───
   initCode += buildDvbInitCode(page, getVar, buildActionBody as never, uiNamespace);
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
+  initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, uiNamespace);
+  initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, uiNamespace);
 
   // 用户绑定的动作（切换显隐、播放音效等）
   const eventMap: Record<string, string> = { onClick: 'click', onClickSound: 'click', onLoad: 'display', onChange: 'change' };
@@ -1694,9 +1697,16 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
         continue;
       }
 
-      // onClickSound：在每个动作前自动播放点击音效
-      const clickSoundPrefix = rawEvent === 'onClickSound' ? `this.playSound("${uiNamespace}/sound/btn_click.wav"); ` : '';
-      for (const action of [...actions].sort((a, b) => Number(isPageAction(a)) - Number(isPageAction(b)))) {
+      const remainingActions = actions.filter((action) => (
+        !isSharedOrdinaryAction(action)
+        && !(page.editorModel === 'internal-pages' && isPageAction(action))
+      ));
+      const sortedRemainingActions = [...remainingActions].sort((a, b) => Number(isPageAction(a)) - Number(isPageAction(b)));
+      const sharedBindingHasClickSound = actions.some(isSharedOrdinaryAction);
+      for (const [index, action] of sortedRemainingActions.entries()) {
+        const clickSoundPrefix = rawEvent === 'onClickSound' && !sharedBindingHasClickSound && index === 0
+          ? `this.playSound("${uiNamespace}/sound/btn_click.wav"); `
+          : '';
         const body = buildActionBody(action, elRef, page, el);
         if (body) initCode += `        ${elRef}.on('${event}', this, function() { ${clickSoundPrefix}${body} });\n`;
       }
@@ -1910,6 +1920,7 @@ function generateHomeworkSceneTs(
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
   initCode += buildChoiceVisualInitCode(page, getVar, false);
+  initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, 'game_hw');
 
   // 作业与测评由右上角通用提交读取 result；所有 ChoiceBox 都参与聚合判定。
   for (const el of page.elements) {

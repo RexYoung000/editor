@@ -167,6 +167,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 4. **`DragObj` 带 `dropSkin` 的 `EVENT_SUCCESS / EVENT_FAILD` 监听**：找最近的 `DragViewBox` 祖先节点，挂事件——成功时切换 `slcDragObj.getChildAt(0/1)` 的 visible 实现 dropSkin 切换，失败时回滚
 5. **用户 Action 映射表 + `buildActionBody`**：
 
+普通事件绑定由正课、预习、作业和专题测评共享：`onClick`、`onClickSound`、`onLoad`、`onChange` 统一按元素和事件分组，每组只生成一个监听，再在监听中顺序执行动作。`onClickSound` 每次事件只在动作序列前播放一次点击音效。内部页面动作、SDK 判定、PageTurnBox 翻页和其他专项动作从普通事件序列中排除，由对应编译器单独生成，避免重复监听。
+
 | forge `event` | Laya 事件 | 备注 |
 |---|---|---|
 | `onClick` | `click` | 直接绑定 |
@@ -190,7 +192,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 | `animate`（Spine 目标）| `t.play(value, loop)`，`spineLoop !== 'false'` 时循环 |
 | `animate`（其他目标）| `t.play(value ?? 'shan')` |
 
-**Homework 模板** `generateHomeworkSceneTs`：继承 `ui.game_hw` 并保留 `_result` / `checkResult` getter/setter。题型组件继续通过 `onChoiceJudge`、`onInputJudge`、`onDragJudge`、`onMatchingJudge` 接入结果；显式 `onClickSdkJudge` 继续生成点击监听。除此之外，导出器会收集不属于答题判定容器且配置了非空 `_judgeAnswer` 的 `KlInputImage` / `FractionInput`，在 `checkResult()` 中按“任一未填为 `null`、全部填写且全对为 `true`、全部填写但任一错误为 `false`”聚合。未配置答案的普通输入控件不会进入判定，编辑器专用 `_judgeAnswer` 仍不写入 scene。
+**Homework 模板** `generateHomeworkSceneTs`：继承 `ui.game_hw` 并保留 `_result` / `checkResult` getter/setter，同时复用上述普通事件绑定。题型组件继续通过 `onChoiceJudge`、`onInputJudge`、`onDragJudge`、`onMatchingJudge` 接入结果；显式 `onClickSdkJudge` 继续生成点击监听。除此之外，导出器会收集不属于答题判定容器且配置了非空 `_judgeAnswer` 的 `KlInputImage` / `FractionInput`，在 `checkResult()` 中按“任一未填为 `null`、全部填写且全对为 `true`、全部填写但任一错误为 `false`”聚合。未配置答案的普通输入控件不会进入判定，编辑器专用 `_judgeAnswer` 仍不写入 scene。
 
 配置了多候选答案或 `_inputRelations` 的 `KlInputBox`，以及显式开启“启用答题判定”的 `ContainerBox`，会在正常、作业和预习场景的 `initView()` 中注入实例级判定：`isNull()` 统一检查该组全部输入格，`isRight()` 将未关联空位的候选答案判断与两框算式关系判断做 AND 聚合。输入格只归属最近的答题判定容器，嵌套容器不会重复收集。关系支持加、减、乘、除和相等，小数使用稳定容差，简单分数转换为数值后参与计算。被引用输入格会强制生成 scene `var`，编辑器专用候选、关系和容器开关字段仍从 scene 剥离。这样通用点击判定、`GameUtils.initConfirm` 和作业 `checkResult()` 无需建立平行入口即可得到同一结果；失效引用、重复占用、无效目标或无规则空位会在预览与发布前中止并返回可修复信息。
 
@@ -248,8 +250,9 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 5. **`.ts` 模板** `generatePreviewSceneTs`：
    - **有** `GameUtils.initConfirm`、PageTurnBox 翻页、DragObj `EVENT_SUCCESS/FAILD`
    - **有** `onClickSdkJudge` 通用点击判定，复用与正式工程一致的目标能力和结果分支生成器
+   - **有**与正课、作业和专题测评共享的 `onClick`、`onClickSound`、`onLoad`、`onChange` 普通事件绑定
    - **无** `btn_ok + choiceBox` 对错音效绑定（preview 通常不出题判对错）
-   - 普通用户 Action 仍保持预习现有边界；内部页面动作和通用点击判定按明确入口生成
+   - 内部页面动作、PageTurnBox 翻页和通用点击判定按明确入口单独生成，不与普通事件重复绑定
 6. **`finalConfig.json`** `buildPreviewConfigJson`：
    - 顶层 `mode: 'preview'`，`feedback: 'spirit'`，无 `noVideoMystery`
    - 视频关卡 `classType: 'yx'`
