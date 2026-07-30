@@ -22,6 +22,7 @@ interface Props {
   courseId: string;
   courseKind: CourseKind;
   mode: 'create' | 'replace';
+  embedded?: boolean;
   onConfirm: (relativePath: string) => void | Promise<void>;
   onCancel: () => void;
 }
@@ -40,6 +41,7 @@ export default function VideoSourceDialog({
   courseId,
   courseKind,
   mode,
+  embedded = false,
   onConfirm,
   onCancel,
 }: Props) {
@@ -107,14 +109,16 @@ export default function VideoSourceDialog({
   return (
     <>
       <div
-        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 p-4"
-        onClick={() => { if (!busy) onCancel(); }}
+        className={embedded ? 'contents' : 'fixed inset-0 z-[60] flex items-center justify-center bg-black/65 p-4'}
+        onClick={() => { if (!embedded && !busy) onCancel(); }}
       >
         <div
-          className="flex max-h-[calc(100vh-32px)] w-[min(1000px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl"
+          className={embedded
+            ? 'flex h-full min-h-0 w-full flex-col overflow-hidden bg-slate-900 text-slate-100'
+            : 'flex max-h-[calc(100vh-32px)] w-[min(1000px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg border border-slate-700 bg-slate-900 text-slate-100 shadow-2xl'}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-700 px-4 sm:px-6">
+          {!embedded && <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-700 px-4 sm:px-6">
             <div>
               <h2 className="text-lg font-semibold">{mode === 'create' ? '选择视频并创建关卡' : '更换视频'}</h2>
               <p className="mt-0.5 text-xs text-slate-400">仅支持 MP4，单个文件不超过 50MB</p>
@@ -129,7 +133,7 @@ export default function VideoSourceDialog({
             >
               <X size={18} />
             </button>
-          </div>
+          </div>}
 
           <div className="flex shrink-0 border-b border-slate-700 px-2 sm:px-6">
             {tabs.map((tab) => {
@@ -154,7 +158,7 @@ export default function VideoSourceDialog({
 
           <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
             {activeTab === 'preset' && (
-              <div className="flex min-h-[430px] flex-col gap-4">
+              <div className={`flex flex-col gap-4 ${embedded ? 'min-h-[360px]' : 'min-h-[430px]'}`}>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex overflow-hidden rounded border border-slate-700 bg-slate-800">
                     <button
@@ -252,7 +256,7 @@ export default function VideoSourceDialog({
             )}
 
             {activeTab === 'local' && (
-              <div className="flex min-h-[430px] items-center justify-center">
+              <div className={`flex items-center justify-center ${embedded ? 'min-h-[360px]' : 'min-h-[430px]'}`}>
                 <div className="w-full max-w-lg text-center">
                   <span className="mx-auto flex h-16 w-16 items-center justify-center rounded bg-slate-800 text-slate-400">
                     <FolderOpen size={28} />
@@ -282,7 +286,7 @@ export default function VideoSourceDialog({
             )}
 
             {activeTab === 'library' && (
-              <div className="flex min-h-[430px] items-center justify-center">
+              <div className={`flex items-center justify-center ${embedded ? 'min-h-[360px]' : 'min-h-[430px]'}`}>
                 <div className="w-full max-w-xl text-center">
                   {selectedLibrary ? (
                     <>

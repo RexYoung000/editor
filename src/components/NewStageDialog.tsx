@@ -1,10 +1,16 @@
 import { useState } from 'react';
-import { X, Trash2, FolderOpen, Pencil, Upload, Loader2, Pin } from 'lucide-react';
+import { X, Trash2, FolderOpen, Pencil, Upload, Loader2, Pin, File, PanelsTopLeft, Video } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import type { SubPage } from '../types';
 import type { CustomTemplate } from '../utils/customTemplateFs';
-import { filterPresetTemplates, type PresetTemplate } from '../presets';
+import {
+  availablePresetStructures,
+  filterPresetTemplates,
+  type PresetStructure,
+  type PresetTemplate,
+} from '../presets';
 import type { CourseKind } from '../utils/courseKind';
+import VideoSourceDialog from './VideoSourceDialog';
 
 type Mode = 'stage' | 'subPage';
 type Tab = 'preset' | 'custom' | 'copyable';
@@ -18,6 +24,7 @@ type ImportOutcome =
 
 interface Props {
   mode: Mode;
+  courseId: string;
   /** stageId — only meaningful when mode === 'subPage' */
   targetStageId?: string;
   allSubPages: SubPage[];
@@ -37,6 +44,7 @@ interface Props {
   onConfirmBlank: () => void;
   onConfirmCopy: (sourceSubPageId: string) => void;
   onConfirmPreset: (presetId: string) => void;
+  onConfirmVideo: (relativePath: string) => void;
   onConfirmTemplate: (templateId: string) => void;
   onRemoveTemplate: (templateId: string) => void;
   /** 选择/更换自定义模板根目录；返回是否成功设置（用户取消则 false） */
@@ -52,6 +60,7 @@ interface Props {
 
 export default function NewStageDialog({
   mode,
+  courseId,
   allSubPages,
   customTemplates,
   pageThumbnails,
@@ -64,6 +73,7 @@ export default function NewStageDialog({
   onConfirmBlank,
   onConfirmCopy,
   onConfirmPreset,
+  onConfirmVideo,
   onConfirmTemplate,
   onRemoveTemplate,
   onPickTemplateDir,
@@ -74,6 +84,9 @@ export default function NewStageDialog({
 }: Props) {
   const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<Tab>('preset');
+  const [activePresetStructure, setActivePresetStructure] = useState<PresetStructure>(
+    courseKind === 'review' ? 'video' : 'single',
+  );
   const [selectedCopyId, setSelectedCopyId] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -95,6 +108,28 @@ export default function NewStageDialog({
     { key: 'custom', label: t('customTemplate') },
     { key: 'copyable', label: t('copyableTemplate') },
   ];
+  const availability = {
+    courseKind,
+    mode,
+    supportsInternalPages,
+  } as const;
+  const availableStructures = availablePresetStructures(availability);
+  const allStructureTabs: Array<{ key: PresetStructure; label: string; icon: typeof File }> = [
+    { key: 'single', label: '单页面关卡', icon: File },
+    { key: 'internal', label: '内部关卡', icon: PanelsTopLeft },
+    { key: 'video', label: '视频关卡', icon: Video },
+  ];
+  const structureTabs = allStructureTabs.filter((tab) => availableStructures.includes(tab.key));
+  const visiblePresetTemplates = filterPresetTemplates(
+    presetTemplates ?? [],
+    availability,
+    activePresetStructure,
+  ).filter((preset) => !preset.blank && preset.structure !== 'video');
+  const blankInternalTemplate = filterPresetTemplates(
+    presetTemplates ?? [],
+    availability,
+    'internal',
+  ).find((preset) => preset.blank);
   const copyableSubPages = allSubPages.filter((subPage) => {
     if (!supportsInternalPages && subPage.editorModel === 'internal-pages') return false;
     return mode !== 'subPage' || !subPage.frozen;
@@ -156,7 +191,7 @@ export default function NewStageDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onCancel}>
-      <div className="bg-slate-800 rounded-lg shadow-xl w-[840px]" onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[calc(100vh-32px)] w-[min(1040px,calc(100vw-32px))] flex-col overflow-hidden rounded-lg bg-slate-800 shadow-xl" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="relative flex items-center justify-center px-8 py-5 border-b border-slate-700">
           <span className="text-2xl font-medium text-white">模板</span>
@@ -179,6 +214,29 @@ export default function NewStageDialog({
             </button>
           ))}
         </div>
+
+        {activeTab === 'preset' && (
+          <div className="flex shrink-0 border-b border-slate-700 bg-slate-900/35 px-6">
+            {structureTabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActivePresetStructure(tab.key)}
+                  className={`flex h-12 min-w-0 flex-1 items-center justify-center gap-2 border-b-2 px-3 text-sm transition-colors ${
+                    activePresetStructure === tab.key
+                      ? 'border-cyan-400 text-cyan-300'
+                      : 'border-transparent text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Icon size={16} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* 自定义模板 tab 顶部的路径条 */}
         {activeTab === 'custom' && customTemplateDir && (
@@ -204,22 +262,36 @@ export default function NewStageDialog({
         )}
 
         {/* Content */}
-        <div className="px-8 py-6 min-h-[360px] max-h-[560px] overflow-y-auto">
-          {activeTab === 'preset' && (
+        <div className={`min-h-0 flex-1 overflow-y-auto ${
+          activeTab === 'preset' && activePresetStructure === 'video'
+            ? 'h-[min(620px,calc(100vh-190px))]'
+            : 'min-h-[360px] max-h-[560px] px-8 py-6'
+        }`}>
+          {activeTab === 'preset' && activePresetStructure !== 'video' && (
             <div className="grid grid-cols-4 gap-4">
-              <button
-                onClick={onConfirmBlank}
-                className="aspect-[4/3] bg-slate-700 hover:bg-slate-600 border border-transparent hover:border-blue-400 rounded-lg text-base text-white flex flex-col items-center justify-center gap-2"
-              >
-                <span className="w-12 h-12 bg-slate-600 rounded-full flex items-center justify-center text-2xl">+</span>
-                <div className="text-base font-medium">{t('blankLevel')}</div>
-                <div className="text-xs text-slate-400 px-2 text-center">{t('blankLevelDesc')}</div>
-              </button>
-              {presetTemplates && filterPresetTemplates(presetTemplates, {
-                courseKind,
-                mode,
-                supportsInternalPages,
-              }).map((preset) => (
+              {activePresetStructure === 'single' && (
+                <button
+                  onClick={onConfirmBlank}
+                  className="aspect-[4/3] bg-slate-700 hover:bg-slate-600 border border-transparent hover:border-blue-400 rounded-lg text-base text-white flex flex-col items-center justify-center gap-2"
+                >
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-600 text-2xl">+</span>
+                  <div className="text-base font-medium">{t('blankSingleLevel')}</div>
+                  <div className="px-2 text-center text-xs text-slate-400">{t('blankSingleLevelDesc')}</div>
+                </button>
+              )}
+              {activePresetStructure === 'internal' && blankInternalTemplate && (
+                <button
+                  onClick={() => onConfirmPreset(blankInternalTemplate.id)}
+                  className="aspect-[4/3] bg-slate-700 hover:bg-slate-600 border border-transparent hover:border-cyan-400 rounded-lg text-base text-white flex flex-col items-center justify-center gap-2"
+                >
+                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-600">
+                    <PanelsTopLeft size={24} />
+                  </span>
+                  <div className="text-base font-medium">{t('blankInternalLevel')}</div>
+                  <div className="px-2 text-center text-xs text-slate-400">{t('blankInternalLevelDesc')}</div>
+                </button>
+              )}
+              {visiblePresetTemplates.map((preset) => (
                 <button
                   key={preset.id}
                   onClick={() => onConfirmPreset(preset.id)}
@@ -235,6 +307,17 @@ export default function NewStageDialog({
                 </button>
               ))}
             </div>
+          )}
+
+          {activeTab === 'preset' && activePresetStructure === 'video' && (
+            <VideoSourceDialog
+              embedded
+              courseId={courseId}
+              courseKind={courseKind}
+              mode="create"
+              onCancel={onCancel}
+              onConfirm={onConfirmVideo}
+            />
           )}
 
           {activeTab === 'custom' && (
@@ -379,7 +462,7 @@ export default function NewStageDialog({
         </div>
 
         {/* Footer */}
-        <div className="flex gap-4 px-8 py-5 border-t border-slate-700">
+        {!(activeTab === 'preset' && activePresetStructure === 'video') && <div className="flex gap-4 px-8 py-5 border-t border-slate-700">
           <button onClick={onCancel} className="flex-1 py-3 text-base bg-slate-700 hover:bg-slate-600 rounded text-slate-300">
             {t('cancel')}
           </button>
@@ -391,7 +474,7 @@ export default function NewStageDialog({
               {t('confirm')}
             </button>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* 删除模板确认弹窗 */}

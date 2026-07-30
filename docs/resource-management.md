@@ -111,6 +111,17 @@ forge 第一版不做 atlas 打包和 hash 版本控制。原因：
 也不依赖播放电脑安装；完整注册、默认字体和历史兼容规则见
 [字体库与历史兼容](font-library.md)。
 
+内置预设模板资源同样使用受版本管理的运行时快照。资源来源可以是本机
+`public/builtin/library/`，但正式模板必须复制到稳定的 ASCII 目录并通过
+`src/elements/builtinAssets.ts` 注册；模板母版只保存 `assetExport(id)`，
+编辑器缩略图使用 `assetSrc(id)`，业务代码不得保存素材库路径。资源视觉发生明显变化时新增
+模板 ID 和资源目录，不能覆盖历史模板仍引用的版本。
+
+Issue #131 的木纹卷轴快照位于
+`public/builtin/runtime/game/preset/lesson-layout-wood-scroll-01/`，包含页面背景、
+标题框和声音按钮皮肤。修改该目录后必须执行 `pnpm pack-game`，并检查
+`public/builtin/runtime/game.zip` 中三项资源完整存在。
+
 ```
 编辑器 public/uploads/          → 用户上传的资源暂存
     ↓ 导出时
@@ -131,6 +142,7 @@ forge 第一版不做 atlas 打包和 hash 版本控制。原因：
 | 场景 | 编辑器中的路径 | 导出后的路径 | config.json 中的声明 |
 |------|--------------|-------------|-------------------|
 | 共享皮肤 | `share/comp/button.png` | 不打包（GameLoader 自带） | 不需要声明 |
+| 内置模板资源 | `/builtin/runtime/game/preset/...` | `game/preset/...` | 按实际图片或音频类型声明 |
 | 用户上传 | `/uploads/btn_start.png` | `game/image/btn_start.png` | `{ "url": "game/image/btn_start.png", "type": "image" }` |
 | 用户上传音频 | `/uploads/click.wav` | `game/sound/click.wav` | `{ "url": "game/sound/click.wav", "type": "sound" }` |
 

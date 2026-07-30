@@ -6,7 +6,6 @@ import { showToast } from '../utils/toast';
 import { PRESET_TEMPLATES } from '../presets';
 import ConfirmDialog from './ConfirmDialog';
 import NewStageDialog from './NewStageDialog';
-import VideoSourceDialog from './VideoSourceDialog';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
 import { isInternalPagesSubPage } from '../utils/internalPages';
 import type { SubPage } from '../types';
@@ -182,7 +181,6 @@ export default function PageList() {
   const [deleteStageConfirm, setDeleteStageConfirm] = useState<{ stageId: string; name: string; target: 'preview' | 'normal' } | null>(null);
   const [clearAllConfirm, setClearAllConfirm] = useState(false);
   const [newStageDialog, setNewStageDialog] = useState<'normalStage' | 'previewStage' | { mode: 'subPage'; stageId: string } | null>(null);
-  const [videoSourceTarget, setVideoSourceTarget] = useState<'normal' | 'preview' | null>(null);
   const [openSubPageActions, setOpenSubPageActions] = useState<string | null>(null);
 
   useEffect(() => {
@@ -563,11 +561,7 @@ export default function PageList() {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (isVideoOnly) {
-                    setVideoSourceTarget('normal');
-                  } else {
-                    openNewStageDialog('normalStage');
-                  }
+                  openNewStageDialog('normalStage');
                 }}
                 className="flex items-center gap-1 px-2 py-1 text-xs hover:bg-slate-600 rounded text-slate-400 hover:text-white"
               >
@@ -936,6 +930,7 @@ export default function PageList() {
       {newStageDialog && (
         <NewStageDialog
           mode={newStageDialog === 'normalStage' || newStageDialog === 'previewStage' ? 'stage' : 'subPage'}
+          courseId={currentCourse.id}
           targetStageId={newStageDialog !== 'normalStage' && newStageDialog !== 'previewStage' ? newStageDialog.stageId : undefined}
           allSubPages={[
             ...currentCourse.stages.flatMap((s) => s.subPages),
@@ -989,17 +984,22 @@ export default function PageList() {
             setNewStageDialog(null);
           }}
           onConfirmPreset={(presetId) => {
-            if (presetId === 'video') {
-              setVideoSourceTarget(newStageDialog === 'previewStage' ? 'preview' : 'normal');
-              setNewStageDialog(null);
-              return;
-            }
             if (newStageDialog === 'previewStage') {
               addPreviewStageFromPreset(presetId);
             } else if (newStageDialog === 'normalStage') {
               addStageFromPreset(presetId);
             } else {
               addSubPageFromPreset(newStageDialog.stageId, presetId);
+            }
+            setNewStageDialog(null);
+          }}
+          onConfirmVideo={(relativePath) => {
+            if (newStageDialog === 'previewStage') {
+              addPreviewStageFromPreset('video', relativePath);
+            } else if (isVideoOnly) {
+              addVideoStage(relativePath);
+            } else if (newStageDialog === 'normalStage') {
+              addStageFromPreset('video', relativePath);
             }
             setNewStageDialog(null);
           }}
@@ -1025,24 +1025,6 @@ export default function PageList() {
           onImportTemplates={handleImportTemplates}
           onPinTemplate={pinCustomTemplate}
           onCancel={() => setNewStageDialog(null)}
-        />
-      )}
-      {videoSourceTarget && (
-        <VideoSourceDialog
-          courseId={currentCourse.id}
-          courseKind={kind ?? 'normal'}
-          mode="create"
-          onCancel={() => setVideoSourceTarget(null)}
-          onConfirm={(relativePath) => {
-            if (videoSourceTarget === 'preview') {
-              addPreviewStageFromPreset('video', relativePath);
-            } else if (isVideoOnly) {
-              addVideoStage(relativePath);
-            } else {
-              addStageFromPreset('video', relativePath);
-            }
-            setVideoSourceTarget(null);
-          }}
         />
       )}
     </>
