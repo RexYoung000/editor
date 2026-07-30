@@ -316,6 +316,110 @@ test('预习导出保持独立资源前缀、预习页面类型和视频差异',
   );
 });
 
+test('画笔组合导出可创建的运行节点并兼容旧内置资源路径', () => {
+  const course = previewCourseFixture();
+  const page = course.previewStages?.[0]?.subPages[0];
+  assert.ok(page);
+  page.elements.push(
+    {
+      id: 'brush-box',
+      type: 'NewBrushSprite',
+      layaType: 'Box',
+      name: 'NewBrushSprite_1',
+      x: 0,
+      y: 0,
+      width: 1920,
+      height: 1080,
+      rotation: 0,
+      opacity: 1,
+      props: {},
+      actions: [{
+        id: 'brush-init',
+        event: 'onInitBrush',
+        actionType: 'none',
+      }],
+    },
+    {
+      id: 'brush-draw',
+      type: 'BrushDrawBtn',
+      layaType: 'SelectableObj',
+      name: 'BrushDrawBtn_1',
+      parentId: 'brush-box',
+      x: 900,
+      y: 280,
+      width: 119,
+      height: 119,
+      rotation: 0,
+      opacity: 1,
+      props: {
+        _foregroundSkin: 'game/image/img/img_draw.png',
+        _bgSkin: 'game/image/img/img_anniu-xz.png',
+      },
+      actions: [],
+    },
+    {
+      id: 'brush-clear',
+      type: 'BrushClearBtn',
+      layaType: 'ScaleButton',
+      name: 'BrushClearBtn_1',
+      parentId: 'brush-box',
+      x: 1173,
+      y: 284,
+      width: 119,
+      height: 119,
+      rotation: 0,
+      opacity: 1,
+      props: {
+        skin: 'game/image/img/img_cel.png',
+        visible: true,
+        hidden: true,
+      },
+      actions: [],
+    },
+  );
+
+  const artifacts = buildPreviewExportRegressionArtifacts(course);
+  assert.deepEqual(
+    {
+      draw: artifacts.resources['game/image/img/img_draw.png'],
+      selected: artifacts.resources['game/image/img/img_anniu-xz.png'],
+      clear: artifacts.resources['game/image/img/img_cel.png'],
+    },
+    {
+      draw: 'game_preview/image/img/img_draw.png',
+      selected: 'game_preview/image/img/img_anniu-xz.png',
+      clear: 'game_preview/image/img/img_cel.png',
+    },
+    '[画笔] 旧发布路径只能保留一层 img',
+  );
+
+  const [scene] = artifacts.scenes;
+  const brush = findNode(
+    '画笔',
+    scene.scene,
+    (node) => node.props?.var === 'NewBrushSprite_1',
+    '画笔运行节点',
+  );
+  assert.equal(brush.type, 'BrushSprite', '[画笔] 必须使用当前 SDK 已注册的运行类');
+  assert.equal(
+    sceneNodes(scene.scene).some((node) => node.type === 'NewBrushSprite'),
+    false,
+    '[画笔] 不得导出当前 SDK 无法创建的 NewBrushSprite 节点',
+  );
+  const clear = findNode(
+    '画笔',
+    scene.scene,
+    (node) => node.props?.var === 'BrushClearBtn_1',
+    '画笔清空按钮',
+  );
+  assert.equal(clear.props?.visible, false, '[画笔] 清空按钮保持初始隐藏');
+  assert.match(
+    scene.source,
+    /GameUtils\.initDraw\(this, this\.BrushDrawBtn_1, this\.BrushClearBtn_1, this\.NewBrushSprite_1\);/,
+    '[画笔] 运行交互绑定必须保留',
+  );
+});
+
 test('正式与预习导出复用同一套场景节点和特殊组件规则', () => {
   const course = normalCourseFixture();
   course.previewStages = [structuredClone(course.stages[0])];

@@ -432,7 +432,7 @@ export const elementMeta: Record<string, Meta> = {
       },
     ],
   },
-  // ─── 画笔组件（commonComponents 分类，组合创建：Box + SelectableObj + ScaleButton；导出时注入 NewBrushSprite 子节点）───
+  // ─── 画笔组件（commonComponents 分类，组合创建：Box + SelectableObj + ScaleButton；导出时注入 SDK 已注册的 BrushSprite 子节点）───
   NewBrushSprite: {
     layaType: 'Box',
     label: '画笔',
@@ -461,7 +461,7 @@ export const elementMeta: Record<string, Meta> = {
     ],
     exportChildren: [
       {
-        type: 'NewBrushSprite',
+        type: 'BrushSprite',
         inheritSize: true,
         inheritProps: ['brushMode', 'brushColor', 'thickness', 'brushFillColor'],
         inheritVar: true,
