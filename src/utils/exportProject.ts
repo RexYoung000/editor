@@ -35,6 +35,7 @@ import {
 } from './choiceAnswerRules';
 import { collectCourseCustomAnswerKeyboardIssues } from './customAnswerKeyboardRules';
 import { bakeCustomAnswerKeyboardTextAssets } from './customAnswerKeyboardText';
+import { getImageMirrorTransform } from './imageMirror';
 
 // ─── Text 烘焙 ───
 
@@ -495,11 +496,18 @@ function buildSceneNode(
     props.x = element.x + element.width / 2;
     props.y = element.y + element.height / 2;
   }
+  if (meta?.mirrorable) {
+    const mirror = getImageMirrorTransform(element);
+    props.x = mirror.x;
+    props.y = mirror.y;
+    if (mirror.scaleX === -1) props.scaleX = -1;
+    if (mirror.scaleY === -1) props.scaleY = -1;
+  }
   if (element.name) props.name = element.name;
   if (element.opacity !== 1) props.alpha = element.opacity;
   if (element.rotation !== 0) props.rotation = element.rotation;
   for (const [k, v] of Object.entries(rewritten)) {
-    if (k.startsWith('_')) continue;
+    if (k.startsWith('_') || k === 'mirrorX' || k === 'mirrorY') continue;
     // scene 里只有根节点有 runtime，子节点不注入
     if (k === 'runtime') continue;
     if (k === 'hidden') continue;

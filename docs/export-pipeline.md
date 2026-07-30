@@ -132,6 +132,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程统一从 `buildScene` 进入，复用变量分配、包装节点和特殊组件子节点规则；课程类型只传入不同 `viewDir` 和场景名。节点构建遍历元素树产出 LayaAir Designer 风格结构（`{x, type, searchKey, label, compId, nodeParent, props, child}`）。特殊行为：
 
 - **DragObj/DropObj 锚点 0.5 补偿**：sdk_baiya 运行时构造函数强制 `anchorX=0.5, anchorY=0.5`（中心锚点），编辑器 `element.x/y` 是左上角。导出时 `props.x = element.x + element.width / 2`、y 同理，让 Laya 可见左上角与编辑器一致
+- **普通图片镜像补偿**：`Image` / `NewImage` 的 `mirrorX`、`mirrorY` 是课程中的编辑状态，不直接写入 scene。导出时转换为 `scaleX=-1` / `scaleY=-1`，再按图片尺寸、锚点和自身旋转方向补偿 `x/y`；镜像前后的可见外框和选区位置必须一致，正式与预习工程复用同一规则
 - **选择题 SelectableObj 五态拆子节点**：`_foregroundSkin`、`_pressedSkin`、`_bgSkin`、`_correctSkin`、`_wrongSkin` 分别生成通常、按压、选中、正确、错误图层；状态图层互斥，底框和描边使用九宫格横向拉伸
 - **DragObj `dropSkin` → 第二个 Image 子节点**：`visible: false`，`anchorX/Y = 0.5`，运行时由 `EVENT_SUCCESS` 切换显隐
 - **DropObj `tipSkin` → name=tip Image 子节点**：同时设置 `props.isNeedTip = true`；没有 tipSkin 时显式 `isNeedTip = false`
