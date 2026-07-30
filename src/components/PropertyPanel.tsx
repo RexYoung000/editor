@@ -12,7 +12,7 @@ import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import VideoSourceDialog from './VideoSourceDialog';
 import PageTurnPageList from './PageTurnPageList';
-import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock, Video } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FlipHorizontal2, FlipVertical2, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock, Video } from 'lucide-react';
 import type { Action, Element } from '../types';
 import { useI18n } from '../i18n/context';
 import { getObject, syncProps } from '../utils/layaBridge';
@@ -193,6 +193,7 @@ export default function PropertyPanel() {
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectedEditorLayerGroupId = useEditorStore((s) => s.selectedEditorLayerGroupId);
   const updateElement = useEditorStore((s) => s.updateElement);
+  const mirrorElement = useEditorStore((s) => s.mirrorElement);
   const selectElement = useEditorStore((s) => s.selectElement);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const moveElementIntoParent = useEditorStore((s) => s.moveElementIntoParent);
@@ -1358,6 +1359,32 @@ export default function PropertyPanel() {
                     </div>
                   );
                 })}
+                {single && meta?.mirrorable && (
+                  <div className="mt-2 grid grid-cols-2 gap-1" role="group" aria-label="图片镜像">
+                    <button
+                      type="button"
+                      disabled={Boolean(singleLayerState?.effectiveLocked)}
+                      onClick={() => mirrorElement(single.id, 'horizontal')}
+                      title="沿图片自身方向左右镜像"
+                      aria-label="左右镜像"
+                      className="flex min-w-0 items-center justify-center gap-1 border border-slate-600 bg-slate-700 px-1.5 py-1.5 text-[10px] text-slate-200 transition-colors hover:border-blue-500 hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <FlipHorizontal2 size={13} aria-hidden="true" />
+                      <span>左右镜像</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(singleLayerState?.effectiveLocked)}
+                      onClick={() => mirrorElement(single.id, 'vertical')}
+                      title="沿图片自身方向上下镜像"
+                      aria-label="上下镜像"
+                      className="flex min-w-0 items-center justify-center gap-1 border border-slate-600 bg-slate-700 px-1.5 py-1.5 text-[10px] text-slate-200 transition-colors hover:border-blue-500 hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <FlipVertical2 size={13} aria-hidden="true" />
+                      <span>上下镜像</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* 组件属性（按 group 分组，advanced 字段单独折叠） */}

@@ -23,6 +23,7 @@ import { getElementParentContainment, getFitContainerToChildrenUpdates } from '.
 import { isContainerElementType } from '../utils/elementContainers';
 import { getLayerDisplayName, getNextLayerCopyName, withLayerLabel } from '../utils/layerPresentation';
 import { isElementLocked } from '../utils/layerState';
+import { toggleImageMirrorProps, type ImageMirrorAxis } from '../utils/imageMirror';
 import { canAssignElementsToGroup, canNestGroup, getEditorLayerGroups, resolveEditorLayerGroups } from '../utils/layerGroups';
 import {
   cloneInternalPageWithinSubPage,
@@ -147,6 +148,7 @@ interface EditorState {
 
   addElement: (element: Element, saveToHistory?: boolean) => void;
   updateElement: (id: string, updates: Partial<Element>) => void;
+  mirrorElement: (id: string, axis: ImageMirrorAxis) => void;
   setElementEditorHidden: (id: string, hidden: boolean) => void;
   setElementsEditorHidden: (ids: string[], hidden: boolean) => void;
   setElementLocked: (id: string, locked: boolean) => void;
@@ -1579,6 +1581,21 @@ export const useEditorStore = create<EditorState>()(
           element.props.var = getUniqueElementName(updates.name, otherVars);
         }
       }),
+
+    mirrorElement: (id, axis) => {
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const element = page.elements.find((item) => item.id === id);
+        if (!element || !elementMeta[element.type]?.mirrorable) return;
+        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
+        if (isElementLocked(element, elementMap)) return;
+        element.props = toggleImageMirrorProps(element.props, axis);
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+    },
 
     setElementEditorHidden: (id, hidden) => {
       get().setElementsEditorHidden([id], hidden);
