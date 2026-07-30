@@ -274,10 +274,10 @@ test('预习导出保持独立资源前缀、预习页面类型和视频差异',
   );
   assert.equal(artifacts.scenes.length, 1, '[预习] 视频关卡不生成 scene');
   assert.match(artifacts.scenes[0].source, /extends ui\.game_preview\.Game1UI/);
-  assert.doesNotMatch(
+  assert.match(
     artifacts.scenes[0].source,
     /game_preview\/sound\/wrong\.mp3/,
-    '[预习] 普通用户 Action 当前不生成场景绑定代码',
+    '[预习] 普通用户 Action 生成场景绑定代码',
   );
 
   assert.equal(artifacts.config.mode, 'preview');

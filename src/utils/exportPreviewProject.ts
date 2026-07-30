@@ -1,4 +1,4 @@
-import type { Action, Course, SubPage, Element } from '../types';
+import type { Course, SubPage, Element } from '../types';
 import { elementMeta, type ExportChild } from '../elements/elementMeta';
 import { getKeyboardChildren } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
@@ -17,15 +17,16 @@ import {
   isLocalSkPath,
   isLocalSoundPath,
   isLocalVideoPath,
+  makeActionBuilder,
   mapGameZipEntryToProjectPath,
 } from './exportProject';
 import {
   buildInternalPageActionBindings,
   buildInternalPageRuntime,
   compileInternalPagesCourse,
-  internalPageActionBody,
 } from './internalPageCompiler';
 import { buildInputRuleConfirmInitCode, buildInputRuleInitCode, isInputRuleHost } from './inputAnswerRules';
+import { buildOrdinaryActionBindings } from './ordinaryActionCompiler';
 
 // ─── 预习场景差异 ───
 
@@ -50,28 +51,13 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     return varAssignment.get(el.id) || (el.name || el.id).replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
   };
   let initCode = '';
-  const buildActionBody = (action: Action, elementRef: string, currentPage: SubPage, source?: Element): string => {
-    const pageBody = internalPageActionBody(action);
-    if (pageBody) return pageBody;
-    const targetElement = action.targetId ? currentPage.elements.find((item) => item.id === action.targetId) : source;
-    const targetRef = targetElement && action.targetId ? `this.${getVar(targetElement)}` : elementRef;
-    if (action.actionType === 'toggleVisible') return `var t = ${targetRef}; if (t) t.visible = !t.visible;`;
-    if (action.actionType === 'setVisible') return `var t = ${targetRef}; if (t) t.visible = ${action.value === false ? 'false' : 'true'};`;
-    if (action.actionType === 'setProperty' && action.property) return `var t = ${targetRef}; if (t) t.${action.property} = ${JSON.stringify(action.value)};`;
-    if (action.actionType === 'playSound') return `this.playSound(${JSON.stringify(resourceMap.get(String(action.value)) ?? action.value)});`;
-    if (action.actionType === 'playRightSound') return 'this.playSound("game_preview/sound/right.mp3");';
-    if (action.actionType === 'playWrongSound') return 'this.playSound("game_preview/sound/wrong.mp3");';
-    if (action.actionType === 'showAnswerRight') return 'this.showAnswerFace(1);';
-    if (action.actionType === 'showAnswerRightLock') return 'this.showAnswerFace(1); this._lockBox.visible = true;';
-    if (action.actionType === 'showAnswerWrong') return 'this.showAnswerFace(2);';
-    if (action.actionType === 'animate') return `var t = ${targetRef}; if (t && t.play) t.play(${JSON.stringify(action.value ?? 'shan')});`;
-    return '';
-  };
+  const buildActionBody = makeActionBuilder(varAssignment, resourceMap, 'game_preview');
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
   initCode += buildMathKeyboardInitCode(page, getVar);
   initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
+  initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, 'game_preview');
   // onClickInitConfirm / onClickInitConfirmWithLock 事件：按判定目标注入对应确认逻辑。
   for (const el of page.elements) {
     if (!el.actions?.length) continue;
