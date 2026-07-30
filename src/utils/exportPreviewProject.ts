@@ -44,6 +44,11 @@ function detectSceneFlags(page: SubPage): SceneFlags {
   return { hasBtnConfirm, hasKlInputBox };
 }
 
+function previewSceneName(stageIndex: number, subPageIndex: number): string {
+  const stageNumber = stageIndex + 1;
+  return subPageIndex === 0 ? `Game${stageNumber}` : `Game${stageNumber}_${subPageIndex + 1}`;
+}
+
 // ─── 生成 scene 对应的 ts 文件 ───
 
 function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: SubPage, varAssignment: Map<string, string>, resourceMap: Map<string, string>): string {
@@ -339,7 +344,11 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
         return { type: 'video', videoUrl: mappedVideoUrl, classType: 'yxdh' };
       }
 
-      const sceneName = `Game${si + 1}`;
+      const subviews = stage.subPages.flatMap((page, sj) => page.frozen ? [] : [{
+        view: `view/game_preview/${previewSceneName(si, sj)}.ts`,
+        param: sj === 0 ? String(si + 1) : `${si + 1}_${sj + 1}`,
+        classType: 'yx',
+      }]);
       const resEntries: { url: string; type?: string }[] = [];
       const imageDirs = new Set<string>();
       const addedSingleFiles = new Set<string>();
@@ -440,9 +449,8 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
 
       return {
         name: `预习${si + 1}`,
-        view: `view/game_preview/${sceneName}.ts`,
+        subviews,
         res: resEntries,
-        classType: 'yx',
       };
     }),
   };
@@ -475,22 +483,24 @@ function buildPreparedPreviewExportArtifacts(
     const videoPage = stage.subPages.find((page) => page.frozen);
     const videoElement = videoPage?.elements.find((element) => element.locked && element.type === 'Video');
     if (videoElement) continue;
-    const page = stage.subPages[0];
-    if (!page || page.frozen) continue;
-    const name = `Game${si + 1}`;
-    const { json, varAssignment } = buildScene(
-      page,
-      name,
-      resourceMap,
-      'game_preview',
-      { includeCHFeedback: false },
-    );
-    const flags = detectSceneFlags(page);
-    scenes.push({
-      name,
-      scene: json,
-      source: generatePreviewSceneTs(name, flags, page, varAssignment, resourceMap),
-    });
+    for (let sj = 0; sj < stage.subPages.length; sj++) {
+      const page = stage.subPages[sj];
+      if (page.frozen) continue;
+      const name = previewSceneName(si, sj);
+      const { json, varAssignment } = buildScene(
+        page,
+        name,
+        resourceMap,
+        'game_preview',
+        { includeCHFeedback: false },
+      );
+      const flags = detectSceneFlags(page);
+      scenes.push({
+        name,
+        scene: json,
+        source: generatePreviewSceneTs(name, flags, page, varAssignment, resourceMap),
+      });
+    }
   }
   return {
     viewDir: 'game_preview',

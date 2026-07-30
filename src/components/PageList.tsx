@@ -137,6 +137,7 @@ export default function PageList() {
   const toggleStageShrink = useEditorStore((state) => state.toggleStageShrink);
   const addStage = useEditorStore((state) => state.addStage);
   const addVideoStage = useEditorStore((state) => state.addVideoStage);
+  const duplicateStage = useEditorStore((state) => state.duplicateStage);
   const deleteStage = useEditorStore((state) => state.deleteStage);
   const clearAllStages = useEditorStore((state) => state.clearAllStages);
   const reorderStages = useEditorStore((state) => state.reorderStages);
@@ -320,7 +321,7 @@ export default function PageList() {
                           input.select();
                           const finish = () => {
                             const name = input.value.trim() || stage.name;
-                            span.textContent = name;
+                            span.textContent = `${name} (${stage.subPages.length}关)`;
                             if (name !== stage.name) renamePreviewStage(stage.id, name);
                           };
                           input.onblur = finish;
@@ -330,8 +331,30 @@ export default function PageList() {
                           };
                         }}
                       >
-                        {stage.name}
+                        {stage.name} ({stage.subPages.length}关)
                       </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          duplicateStage(stage.id);
+                        }}
+                        className="p-0.5 hover:bg-blue-600 rounded opacity-0 group-hover:opacity-100"
+                        title={t('duplicateStage')}
+                      >
+                        <Copy size={12} />
+                      </button>
+                      {!stage.noSubPages && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openNewStageDialog({ mode: 'subPage', stageId: stage.id });
+                          }}
+                          className="p-0.5 hover:bg-slate-600 rounded opacity-0 group-hover:opacity-100"
+                          title={t('addSubPage')}
+                        >
+                          <Plus size={12} />
+                        </button>
+                      )}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -372,13 +395,28 @@ export default function PageList() {
                         {stage.subPages.map((sub, subIdx) => (
                           <div
                             key={sub.id}
+                            draggable
+                            onDragStart={(e) => {
+                              e.stopPropagation();
+                              setDraggedSub({ stageId: stage.id, idx: subIdx });
+                              e.dataTransfer.effectAllowed = 'move';
+                            }}
+                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (draggedSub && draggedSub.stageId === stage.id && draggedSub.idx !== subIdx) {
+                                reorderSubPages(stage.id, draggedSub.idx, subIdx);
+                              }
+                              setDraggedSub(null);
+                            }}
                             onClick={() => setCurrentSubPage(stage.id, sub.id)}
                             onDoubleClick={() => { if (isInternalPagesSubPage(sub)) enterFocusWorkspace(stage.id, sub.id); }}
                             className={`group relative p-1.5 rounded cursor-pointer ${
                               currentSubPageId === sub.id
                                 ? 'bg-rose-600'
                                 : 'bg-slate-700 hover:bg-slate-600'
-                            }`}
+                            } ${draggedSub?.stageId === stage.id && draggedSub.idx === subIdx ? 'opacity-50' : ''}`}
                           >
                             <div className="aspect-video bg-slate-900 rounded mb-1 overflow-hidden flex items-center justify-center text-[10px] text-slate-500">
                               {pageThumbnails[sub.id]
@@ -393,6 +431,22 @@ export default function PageList() {
                                 onToggle={() => setOpenSubPageActions((current) => current === `${stage.id}:${sub.id}` ? null : `${stage.id}:${sub.id}`)}
                                 onRename={(name) => renameSubPage(sub.id, name)}
                                 onEnter={() => enterFocusWorkspace(stage.id, sub.id)}
+                                onMoveUp={() => {
+                                  setOpenSubPageActions(null);
+                                  if (subIdx > 0) {
+                                    reorderSubPages(stage.id, subIdx, subIdx - 1);
+                                    setCurrentSubPage(stage.id, sub.id);
+                                  }
+                                }}
+                                onMoveDown={() => {
+                                  setOpenSubPageActions(null);
+                                  if (subIdx < stage.subPages.length - 1) {
+                                    reorderSubPages(stage.id, subIdx, subIdx + 1);
+                                    setCurrentSubPage(stage.id, sub.id);
+                                  }
+                                }}
+                                moveUpDisabled={subIdx === 0}
+                                moveDownDisabled={subIdx === stage.subPages.length - 1}
                                 onDuplicate={!sub.frozen ? () => {
                                   setOpenSubPageActions(null);
                                   duplicateSubPage(stage.id, sub.id);
@@ -475,6 +529,17 @@ export default function PageList() {
                             </div>
                           </div>
                         ))}
+                        {!stage.noSubPages && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openNewStageDialog({ mode: 'subPage', stageId: stage.id });
+                            }}
+                            className="w-full py-1 flex items-center justify-center gap-1 text-[11px] text-slate-400 hover:text-white border border-dashed border-slate-600 hover:border-slate-400 rounded"
+                          >
+                            <Plus size={11} /> {t('addSubPage')}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -608,6 +673,18 @@ export default function PageList() {
                       title={t('addSubPage')}
                     >
                       <Plus size={12} />
+                    </button>
+                  )}
+                  {!isFlat && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        duplicateStage(stage.id);
+                      }}
+                      className="p-0.5 hover:bg-blue-600 rounded opacity-0 group-hover:opacity-100"
+                      title={t('duplicateStage')}
+                    >
+                      <Copy size={12} />
                     </button>
                   )}
                   <button
@@ -871,13 +948,21 @@ export default function PageList() {
           courseKind={kind ?? 'normal'}
           supportsInternalPages={kind !== 'review'}
           stageIndexOf={(spId) => {
-            for (let i = 0; i < currentCourse.stages.length; i++) {
-              if (currentCourse.stages[i].subPages.some((sp) => sp.id === spId)) return i;
+            const allStages = [
+              ...currentCourse.stages,
+              ...(currentCourse.previewStages ?? []),
+            ];
+            for (let i = 0; i < allStages.length; i++) {
+              if (allStages[i].subPages.some((sp) => sp.id === spId)) return i;
             }
             return 0;
           }}
           subPageIndexOf={(spId) => {
-            for (const stage of currentCourse.stages) {
+            const allStages = [
+              ...currentCourse.stages,
+              ...(currentCourse.previewStages ?? []),
+            ];
+            for (const stage of allStages) {
               const idx = stage.subPages.findIndex((sp) => sp.id === spId);
               if (idx !== -1) return idx;
             }

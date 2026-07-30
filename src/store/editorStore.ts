@@ -25,6 +25,7 @@ import { isElementLocked } from '../utils/layerState';
 import { canAssignElementsToGroup, canNestGroup, getEditorLayerGroups, resolveEditorLayerGroups } from '../utils/layerGroups';
 import {
   cloneInternalPageWithinSubPage,
+  cloneStageWithNewIds,
   cloneSubPageWithNewIds,
   createInternalPagesSubPage,
   findActiveElementPage,
@@ -117,6 +118,7 @@ interface EditorState {
   addStageFromSubPage: (sourceSubPageId: string) => void;
   addStageFromTemplate: (templateId: string) => Promise<void>;
   addStageFromPreset: (presetId: string, videoUrl?: string) => void;
+  duplicateStage: (stageId: string) => void;
   deleteStage: (stageId: string) => void;
   clearAllStages: () => void;
   reorderStages: (fromIndex: number, toIndex: number) => void;
@@ -240,6 +242,15 @@ function findStageOfSubPage(course: Course | null, subPageId: string | null): St
   return (course.previewStages ?? []).find((s) => s.subPages.some((sp) => sp.id === subPageId)) ?? null;
 }
 
+type StageArea = 'normal' | 'preview';
+
+function findStageWithArea(course: Course, stageId: string): { stage: Stage; area: StageArea } | null {
+  const normal = course.stages.find((stage) => stage.id === stageId);
+  if (normal) return { stage: normal, area: 'normal' };
+  const preview = course.previewStages?.find((stage) => stage.id === stageId);
+  return preview ? { stage: preview, area: 'preview' } : null;
+}
+
 let _idSeq = 0;
 function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${(_idSeq++).toString(36)}`;
@@ -288,6 +299,15 @@ function ensureCourseShape(course: Course): Course {
   if (!course.previewStages) {
     course.previewStages = [];
   }
+  if ((course.kind ?? 'normal') === 'normal') {
+    for (const stage of course.previewStages) {
+      const isVideoStage = stage.subPages.some((subPage) =>
+        subPage.frozen && subPage.elements.some((element) => element.type === 'Video'),
+      );
+      if (!isVideoStage) stage.noSubPages = false;
+    }
+    renumberPreviewAll(course);
+  }
   if (course.previewShrinked === undefined) course.previewShrinked = false;
   if (course.normalShrinked === undefined) course.normalShrinked = false;
   return course;
@@ -297,6 +317,7 @@ function ensureCourseShape(course: Course): Course {
 const STAGE_DEFAULT_RE = /^关卡\s+\d+$/;
 const SUBPAGE_DEFAULT_RE = /^小关卡\s+\d+-\d+$/;
 const PREVIEW_STAGE_DEFAULT_RE = /^预习\s+\d+$/;
+const LEGACY_PREVIEW_SUBPAGE_DEFAULT_RE = /^预习\s+\d+$/;
 
 /** 按位置重排关卡序号，仅覆盖默认命名格式 */
 function renumberAll(course: Course): void {
@@ -317,7 +338,25 @@ function renumberPreviewAll(course: Course): void {
     if (PREVIEW_STAGE_DEFAULT_RE.test(stage.name)) {
       stage.name = `预习 ${si + 1}`;
     }
+    stage.subPages.forEach((sp, sj) => {
+      if (SUBPAGE_DEFAULT_RE.test(sp.name) || LEGACY_PREVIEW_SUBPAGE_DEFAULT_RE.test(sp.name)) {
+        sp.name = `小关卡 ${si + 1}-${sj + 1}`;
+      }
+    });
   });
+}
+
+function renumberStageArea(course: Course, area: StageArea): void {
+  if (area === 'preview') renumberPreviewAll(course);
+  else renumberAll(course);
+}
+
+function nextCopyName(sourceName: string, existingNames: string[]): string {
+  const occupied = new Set(existingNames);
+  let suffix = 1;
+  let candidate = `${sourceName} 副本`;
+  while (occupied.has(candidate)) candidate = `${sourceName} 副本 ${++suffix}`;
+  return candidate;
 }
 
 function subPageFromPreset(
@@ -916,6 +955,39 @@ export const useEditorStore = create<EditorState>()(
       get().saveHistory();
     },
 
+    duplicateStage: (stageId) =>
+      set((state) => {
+        if (!state.currentCourse || (state.currentCourse.kind ?? 'normal') !== 'normal') return;
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located) return;
+        const stages = located.area === 'preview'
+          ? state.currentCourse.previewStages ?? []
+          : state.currentCourse.stages;
+        const sourceIndex = stages.findIndex((stage) => stage.id === stageId);
+        if (sourceIndex < 0) return;
+        const copy = cloneStageWithNewIds(located.stage, genId);
+        const usesDefaultName = located.area === 'preview'
+          ? PREVIEW_STAGE_DEFAULT_RE.test(located.stage.name)
+          : STAGE_DEFAULT_RE.test(located.stage.name);
+        copy.name = usesDefaultName
+          ? located.area === 'preview' ? '预习 0' : '关卡 0'
+          : nextCopyName(located.stage.name, stages.map((stage) => stage.name));
+        for (const subPage of copy.subPages) markInternalPagesFeature(state.currentCourse, subPage);
+        stages.splice(sourceIndex + 1, 0, copy);
+        const firstSubPage = copy.subPages[0];
+        state.currentStageId = copy.id;
+        state.currentSubPageId = firstSubPage?.id ?? null;
+        state.currentInternalPageId = isInternalPagesSubPage(firstSubPage) ? firstSubPage.id : null;
+        state.focusSubPageId = null;
+        state.selectedEditorLayerGroupId = null;
+        state.selectedElementIds = firstSubPage?.frozen
+          ? firstSubPage.elements.filter((element) => element.locked).map((element) => element.id)
+          : [];
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
+        get().saveHistory();
+      }),
+
     deleteStage: (stageId) =>
       set((state) => {
         if (!state.currentCourse) return;
@@ -966,13 +1038,13 @@ export const useEditorStore = create<EditorState>()(
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `预习 ${previewNum}`,
+          name: `小关卡 ${previewNum}-1`,
           elements: [],
         };
         const newStage: Stage = {
           id: genId('stage'),
           name: `预习 ${previewNum}`,
-          noSubPages: true,
+          noSubPages: false,
           subPages: [newSub],
         };
         state.currentCourse.previewStages.push(newStage);
@@ -997,12 +1069,12 @@ export const useEditorStore = create<EditorState>()(
         })) return;
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `预习 ${previewNum}`, videoUrl);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 ${previewNum}-1`, videoUrl);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: preset.defaultStageName ?? `预习 ${previewNum}`,
-          noSubPages: true,
+          noSubPages: preset.noSubPages ?? false,
           subPages: [newSub],
         };
         state.currentCourse.previewStages.push(newStage);
@@ -1041,12 +1113,12 @@ export const useEditorStore = create<EditorState>()(
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
-        newSub.name = `预习 ${previewNum}`;
+        newSub.name = `小关卡 ${previewNum}-1`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: `预习 ${previewNum}`,
-          noSubPages: true,
+          noSubPages: sourceSub.frozen ?? false,
           subPages: [newSub],
         };
         state.currentCourse.previewStages.push(newStage);
@@ -1077,12 +1149,12 @@ export const useEditorStore = create<EditorState>()(
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
-        newSub.name = `预习 ${previewNum}`;
+        newSub.name = `小关卡 ${previewNum}-1`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: `预习 ${previewNum}`,
-          noSubPages: true,
+          noSubPages: applied.subPage.frozen ?? false,
           subPages: [newSub],
         };
         state.currentCourse.previewStages.push(newStage);
@@ -1167,12 +1239,12 @@ export const useEditorStore = create<EditorState>()(
     addSubPage: (stageId) =>
       set((state) => {
         if (!state.currentCourse) return;
-        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
-        if (!stage) return;
-        const stageIdx = state.currentCourse.stages.indexOf(stage);
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located || located.stage.noSubPages) return;
+        const stage = located.stage;
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `小关卡 ${stageIdx + 1}-${stage.subPages.length + 1}`,
+          name: '小关卡 0-0',
           elements: [],
         };
         stage.subPages.push(newSub);
@@ -1180,15 +1252,17 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
-        renumberAll(state.currentCourse);
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
         get().saveHistory();
       }),
 
     addSubPageFromSubPage: (stageId, sourceSubPageId) =>
       set((state) => {
         if (!state.currentCourse) return;
-        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
-        if (!stage) return;
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located || located.stage.noSubPages) return;
+        const stage = located.stage;
         // Find source sub-page across all stages
         let sourceSub: SubPage | null = null;
         for (const s of state.currentCourse.stages) {
@@ -1201,7 +1275,7 @@ export const useEditorStore = create<EditorState>()(
             if (found) { sourceSub = found; break; }
           }
         }
-        if (!sourceSub) return;
+        if (!sourceSub || sourceSub.frozen) return;
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
         newSub.name = `小关卡 0-0`;
@@ -1211,7 +1285,8 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
-        renumberAll(state.currentCourse);
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
         get().saveHistory();
       }),
 
@@ -1230,8 +1305,9 @@ export const useEditorStore = create<EditorState>()(
       });
       set((state) => {
         if (!state.currentCourse) return;
-        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
-        if (!stage) return;
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located || located.stage.noSubPages || applied.subPage.frozen) return;
+        const stage = located.stage;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
         newSub.name = `小关卡 0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
@@ -1240,7 +1316,8 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
-        renumberAll(state.currentCourse);
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
       });
       get().saveHistory();
     },
@@ -1289,8 +1366,9 @@ export const useEditorStore = create<EditorState>()(
           mode: 'subPage',
           supportsInternalPages: state.currentCourse.kind !== 'review',
         })) return;
-        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
-        if (!stage) return;
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located || located.stage.noSubPages || preset.frozen) return;
+        const stage = located.stage;
         const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
         markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
@@ -1303,7 +1381,8 @@ export const useEditorStore = create<EditorState>()(
         } else {
           state.selectedElementIds = [];
         }
-        renumberAll(state.currentCourse);
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
       });
       get().saveHistory();
     },
@@ -1373,7 +1452,7 @@ export const useEditorStore = create<EditorState>()(
         }
         if (!stage) return;
         const sp = stage.subPages.find((s) => s.id === subPageId);
-        if (!sp) return;
+        if (!sp || sp.frozen || stage.noSubPages) return;
         const newSub = cloneSubPageWithNewIds(sp, genId);
         // 用合法默认格式占位，下面 renumberAll 会按位置正确编号；
         // 若原 sub 是用户自定义名，则保留“副本”格式不被自动重命名覆盖
@@ -1384,7 +1463,9 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
-        renumberAll(state.currentCourse);
+        const area = state.currentCourse.previewStages?.some((item) => item.id === stageId) ? 'preview' : 'normal';
+        state.selectedStageTarget = area;
+        renumberStageArea(state.currentCourse, area);
         get().saveHistory();
       }),
 

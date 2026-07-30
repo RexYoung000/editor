@@ -285,15 +285,17 @@ test('预习导出保持独立资源前缀、预习页面类型和视频差异',
   assert.deepEqual(
     {
       name: pages[0].name,
-      view: pages[0].view,
-      classType: pages[0].classType,
+      subviews: pages[0].subviews,
     },
     {
       name: '预习1',
-      view: 'view/game_preview/Game1.ts',
-      classType: 'yx',
+      subviews: [{
+        view: 'view/game_preview/Game1.ts',
+        param: '1',
+        classType: 'yx',
+      }],
     },
-    '[预习] 普通页面配置',
+    '[预习] 普通大关卡通过 subviews 承载小关卡',
   );
   assertResource('预习', resourceEntries(pages[0]), {
     url: 'game_preview/image/img/large.png',
