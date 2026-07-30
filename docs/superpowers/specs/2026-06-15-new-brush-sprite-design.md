@@ -6,7 +6,9 @@
 
 ## 背景
 
-在「常用组件」(`commonComponents`) 下新增"画笔"组件。运行时是 sdk_baiya 已有的 `com.klzz.ui.custom.NewBrushSprite`（[baiya2.d.ts:313](../../../public/builtin/layaProjectModel/Game1_HW/libs/baiya2.d.ts#L313)），forge 这边没登记过。
+在「常用组件」(`commonComponents`) 下新增"画笔"组件。编辑器继续使用 `NewBrushSprite` 作为组合元素名称；实际运行节点使用当前预览与发布 SDK 已注册的 `com.klzz.ui.custom.BrushSprite`。`baiya2.d.ts` 虽然声明了 `NewBrushSprite`，但当前 SDK JavaScript 没有注册这个运行类，直接导出会出现 `can not create:NewBrushSprite`，并导致点击画笔开关时拿不到画板节点。
+
+`BrushSprite` 与声明中的 `NewBrushSprite` 暴露相同的画笔属性和清除接口，可以保持现有产品能力，同时兼容当前 GameLoader 预览和正式发布环境。
 
 参考 .scene 里的形态：一个 Box 容器，下挂三个节点 —— `NewBrushSprite`（铺满 Box 的画板，初始隐藏）、`SelectableObj`（开关画笔的图标按钮，可见）、`ScaleButton`（清空按钮，初始隐藏）。点 SelectableObj 切换 isSelected，画板和清空按钮跟着显隐；点清空按钮调 `NewBrushSprite.undoDraw()` 清画板。
 
@@ -35,7 +37,7 @@ GameUtils 里已经有 `GameUtils.initDraw(_view, _btnDraw, _btnReFresh, _newBru
 | `NewBrushSprite` | `Box` | 是（"画笔"按钮） | 容器 + 画笔属性载体 |
 | `BrushDrawBtn` | `SelectableObj` | 否（toolbarHidden） | 画笔开关按钮 |
 | `BrushClearBtn` | `ScaleButton` | 否（toolbarHidden） | 清空按钮 |
-| —— | —— | —— | NewBrushSprite 节点不登记成 element，导出阶段注入 |
+| —— | `BrushSprite` | —— | 运行画板节点不登记成 element，导出阶段注入 |
 
 > **取名说明**：用 `BrushDrawBtn` / `BrushClearBtn` 而不是 `SpeechSelectableObj` / 重用现有按钮，是为了让属性面板可以裁剪（只暴露皮肤/位置/状态），避免选项卡片那一堆 `_foregroundSkin / _bgSkin / _wrongSkin / cus1 / cus2 / filterColor / filterBlur` 字段干扰。
 
@@ -219,7 +221,7 @@ type ExportChild = {
 ```ts
 exportChildren: [
   {
-    type: 'NewBrushSprite',
+    type: 'BrushSprite',
     inheritSize: true,
     inheritProps: ['brushMode', 'brushColor', 'thickness', 'brushFillColor'],
     inheritVar: true,
@@ -242,6 +244,13 @@ exportChildren: [
 [src/utils/exportPreviewProject.ts](../../../src/utils/exportPreviewProject.ts) 同步修改。
 
 > z 序：注入到 child 数组**最前面**（P1 决策 A），让 NewBrushSprite 在 SelectableObj/ScaleButton 下方。参考 .scene 也是这个顺序（NewBrushSprite → SelectableObj → ScaleButton）。
+
+### 运行时兼容与资源路径
+
+- 编辑器元素类型和课件数据仍保存为 `NewBrushSprite`，只把导出的真实运行节点转换为 SDK 已注册的 `BrushSprite`，不迁移或破坏已有课件。
+- `BrushClearBtn` 保持初始隐藏；点击 `BrushDrawBtn` 后，画板和清空按钮同时显示，再次点击后同时隐藏。
+- 画笔内置资源可以沿用已有课件中的 `game/image/img/*` 发布路径。映射到具体课件工程时必须规范为 `<viewDir>/image/img/*`，不能再次补 `img` 形成 `<viewDir>/image/img/img/*`。
+- Electron 真实预览除检查首屏外，还要点击画笔开关，确认清空按钮出现、画板可绘制且控制台没有 `can not create:NewBrushSprite`、资源 404 或空节点异常。
 
 ### 变量名策略（P1 决策 A：显式 var）
 

@@ -130,6 +130,10 @@ export function builtinExportToProjectPath(exportPath: string, viewDir = 'game_l
     if (dir === 'animation') {
       return `${viewDir}/animation/${rest}`;
     }
+    // 旧画笔资源已经带 game/image/img/ 前缀，规范化时不能再次补一层 img。
+    if (dir === 'image' && rest.startsWith('img/')) {
+      return `${viewDir}/image/${rest}`;
+    }
     // game/image/xxx → <viewDir>/image/img/xxx（用户上传的按钮图等放 img 目录）
     // game/<其他>/xxx → <viewDir>/image/<其他>/xxx（内置皮肤目录按原目录名拷贝）
     const targetDir = dir === 'image' ? 'img' : dir;

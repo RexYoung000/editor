@@ -95,7 +95,10 @@ export default function NewStageDialog({
     { key: 'custom', label: t('customTemplate') },
     { key: 'copyable', label: t('copyableTemplate') },
   ];
-  const copyableSubPages = allSubPages.filter((subPage) => supportsInternalPages || subPage.editorModel !== 'internal-pages');
+  const copyableSubPages = allSubPages.filter((subPage) => {
+    if (!supportsInternalPages && subPage.editorModel === 'internal-pages') return false;
+    return mode !== 'subPage' || !subPage.frozen;
+  });
 
   const canConfirm = activeTab === 'copyable' && selectedCopyId || activeTab === 'custom' && selectedTemplateId;
 

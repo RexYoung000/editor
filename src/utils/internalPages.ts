@@ -272,6 +272,33 @@ export function cloneSubPageWithNewIds(source: SubPage, makeId: (prefix: string)
   };
 }
 
+/** 完整克隆大关卡，并把跨小关卡跳转改写到同一份关卡副本。 */
+export function cloneStageWithNewIds(source: Stage, makeId: (prefix: string) => string): Stage {
+  const subPageIdMap = new Map<string, string>();
+  const subPages = source.subPages.map((subPage) => {
+    const cloned = cloneSubPageWithNewIds(subPage, makeId);
+    subPageIdMap.set(subPage.id, cloned.id);
+    return cloned;
+  });
+  for (const subPage of subPages) {
+    for (const page of getElementPages(subPage)) {
+      for (const element of page.elements) {
+        for (const action of element.actions ?? []) {
+          if (action.actionType === 'changePage' && typeof action.value === 'string') {
+            action.value = subPageIdMap.get(action.value) ?? action.value;
+          }
+        }
+      }
+    }
+  }
+  return {
+    ...JSON.parse(JSON.stringify(source)),
+    id: makeId('stage'),
+    shrinked: false,
+    subPages,
+  };
+}
+
 export function cloneInternalPageWithinSubPage(
   source: InternalPage,
   makeId: (prefix: string) => string,

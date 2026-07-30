@@ -255,8 +255,10 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
    - 内部页面动作、PageTurnBox 翻页和通用点击判定按明确入口单独生成，不与普通事件重复绑定
 6. **`finalConfig.json`** `buildPreviewConfigJson`：
    - 顶层 `mode: 'preview'`，`feedback: 'spirit'`，无 `noVideoMystery`
-   - 视频关卡 `classType: 'yx'`
-   - 普通 page：`name: '预习<i+1>'`、`classType: 'yx'`，**无 subviews**（每个预习关卡单 page）
+   - 视频关卡保持单页配置，不生成 `subviews`
+   - 普通大关卡与正课使用相同的页面容器结构：每个 stage 生成一个 page，stage 内每个 subPage 生成一个独立场景并按顺序写入 `subviews`
+   - 第一个预习场景继续使用 `Game<i+1>` 名称以兼容既有单页工程；后续小关卡使用 `Game<i+1>_<j+1>`，每项 `classType: 'yx'`
+   - 运行时默认显示第一个 `subview`，继续由现有 PageView 协议上下切换小关卡；大关卡本身不额外生成场景
    - 普通 page 的 `res` 与正式工程保持固定子节点资源边界一致：同时收集 `elementMeta.exportChildren` 和键盘预设 children，保证输入框底图与键盘皮肤对应图集都进入预加载清单
    - 内置音效中 wrong 文件名是 **`wrong.mp3`** 而非主流程的 `wowo.mp3`
    - 也有 `onClickSound → btn_click.wav` / `playRightSound → right.mp3` / `playWrongSound → wrong.mp3` 的条件加入
@@ -264,6 +266,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 8. **模板 zip**：从 `${serverUrl}/builtin/layaProjectModel/Game1_PREVIEW.zip` 单独拉
 
 内部页面编译、页面动作生成、关系校验和页面资源遍历由正式工程与预习工程共享，不能再各自维护一份规则。正课、作业、专题测评和预习区均支持 `internal-pages-v1`；复习课和视频关卡继续走原流程。
+
+普通课件复制大关卡后，预习与正课导出都必须按副本的完整 `subPages` 重新生成页面配置和场景；不得复用原关卡 ID、场景实例或内部页面引用。视频大关卡副本继续按独立视频 page 导出。
 
 ---
 
