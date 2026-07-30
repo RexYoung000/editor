@@ -1,6 +1,6 @@
 /**
  * 位图字体生成器。
- * 根据输入字符串和 TTF 字体，生成 Laya 兼容的 AngelCode BMFont 格式（.fnt + .png）。
+ * 根据输入字符串和内置字体，生成 Laya 兼容的 AngelCode BMFont 格式（.fnt + .png）。
  */
 
 import { loadLibraryFont } from './fontLoader';
@@ -23,7 +23,7 @@ interface CharEntry {
 }
 
 /**
- * 使用方正兰亭黑简体字体，根据传入字符串生成 BMFont (.fnt + .png)。
+ * 使用指定字体（默认思源黑体 Regular），根据传入字符串生成 BMFont (.fnt + .png)。
  *
  * @param chars  需要包含的字符字符串，如 "0123456789+-=()"
  * @param options 可选参数（字号、字体路径等）

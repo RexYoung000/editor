@@ -1,5 +1,5 @@
 import { assetExport, assetSrc } from './builtinAssets';
-import { DEFAULT_FONT_ID } from './fontLibrary';
+import { DEFAULT_FONT_ID, normalizeFontLibraryId } from './fontLibrary';
 import type { Element, SubPage } from '../types';
 
 export const NEW_TEXT_DEFAULT_CONTENT = '双击编辑文本';
@@ -684,7 +684,11 @@ export function createDefaultElement(type: string, subPageId?: string): Element 
   if (type === 'NewTextArea') {
     try {
       const last = localStorage.getItem('forge_lastFontLibraryId');
-      if (last) extraProps.fontLibraryId = last;
+      if (last) {
+        const normalized = normalizeFontLibraryId(last);
+        extraProps.fontLibraryId = normalized;
+        if (normalized !== last) localStorage.setItem('forge_lastFontLibraryId', normalized);
+      }
     } catch { /* localStorage 失败时不干预 */ }
   }
   return {

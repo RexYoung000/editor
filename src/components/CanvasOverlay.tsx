@@ -5,6 +5,7 @@ import { getObject } from '../utils/layaBridge';
 import { applyNewTextAreaRender } from '../utils/laya/components';
 import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
 import { resolveElementFont } from '../utils/fontLoader';
+import { DEFAULT_FONT_FACE } from '../elements/fontLibrary';
 import { caretOffsetAtPoint, layoutText, normalizeTextSizingMode } from '../utils/textLayout';
 import type { RenderTextProps } from '../utils/textToImage';
 import { NEW_TEXT_DEFAULT_CONTENT } from '../elements/elementMeta';
@@ -299,13 +300,13 @@ export default function CanvasOverlay({
     ).then((fontFamily) => {
       if (!cancelled) setResolvedFont({ elementId: editingElement.id, fontFamily });
     }).catch(() => {
-      if (!cancelled) setResolvedFont({ elementId: editingElement.id, fontFamily: 'FZLanTingHei' });
+      if (!cancelled) setResolvedFont({ elementId: editingElement.id, fontFamily: DEFAULT_FONT_FACE });
     });
     return () => { cancelled = true; };
   }, [editingElement]);
   const overlayFontFamily = resolvedFont && resolvedFont.elementId === editingElement?.id
     ? resolvedFont.fontFamily
-    : 'FZLanTingHei';
+    : DEFAULT_FONT_FACE;
 
   useEffect(() => {
     if (!editingElement || editingElement.type !== 'NewTextArea') return;

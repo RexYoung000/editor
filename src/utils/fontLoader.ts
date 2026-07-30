@@ -1,9 +1,14 @@
-// 编辑器侧字体加载,所有 TTF 入口统一从这里走。
-// - 库字体: 按 fontEntry.url 加载 TTF,fontFace 名直接用 entry.fontFace
+// 编辑器侧字体加载,所有 OTF/TTF 入口统一从这里走。
+// - 库字体: 按 fontEntry.url 加载,fontFace 名直接用 entry.fontFace
 // - 本地字体: 通过 Electron IPC 读 <courseDir>/<relPath> 转 dataUrl,fontFace 名 = 'LocalFont_' + md5前8位
-// - resolveElementFont: 元素侧统一入口,优先本地→库→DEFAULT,失败兜底 FZLanTingHei
+// - resolveElementFont: 元素侧统一入口,优先本地→库→DEFAULT
 
-import { lookupFont, DEFAULT_FONT_ID } from '../elements/fontLibrary';
+import {
+  lookupFont,
+  DEFAULT_FONT_FACE,
+  DEFAULT_FONT_ID,
+  normalizeFontLibraryId,
+} from '../elements/fontLibrary';
 import { readFileAsDataUrl } from './electronFs';
 
 const _libCache = new Map<string, Promise<string | null>>();   // libraryId → fontFace name(或 null)
@@ -11,11 +16,11 @@ const _localCache = new Map<string, Promise<string | null>>(); // 'courseId|relP
 
 /** 加载库字体;成功返回注册后的 fontFace name,失败返回 null。重复调用零成本(Promise 缓存)。 */
 export function loadLibraryFont(id: string): Promise<string | null> {
-  if (!id) return Promise.resolve(null);
-  const cached = _libCache.get(id);
+  const normalizedId = normalizeFontLibraryId(id);
+  const cached = _libCache.get(normalizedId);
   if (cached) return cached;
   const p = (async () => {
-    const entry = lookupFont(id);
+    const entry = lookupFont(normalizedId);
     if (!entry) return null;
     try {
       const ff = new FontFace(entry.fontFace, `url(${entry.url})`);
@@ -23,11 +28,11 @@ export function loadLibraryFont(id: string): Promise<string | null> {
       document.fonts.add(ff);
       return entry.fontFace;
     } catch (e) {
-      console.warn('[fontLoader] loadLibraryFont failed:', id, e);
+      console.warn('[fontLoader] loadLibraryFont failed:', normalizedId, e);
       return null;
     }
   })();
-  _libCache.set(id, p);
+  _libCache.set(normalizedId, p);
   return p;
 }
 
@@ -68,11 +73,8 @@ export async function resolveElementFont(
     const f = await loadLocalFont(courseId, fontLocalPath);
     if (f) return f;
   }
-  if (fontLibraryId) {
-    const f = await loadLibraryFont(fontLibraryId);
-    if (f) return f;
-  }
-  // 兜底:加载并返回 DEFAULT 字体的 fontFace name(始终是 'FZLanTingHei')
+  const libraryFont = await loadLibraryFont(normalizeFontLibraryId(fontLibraryId));
+  if (libraryFont) return libraryFont;
   const fallback = await loadLibraryFont(DEFAULT_FONT_ID);
-  return fallback ?? 'FZLanTingHei';
+  return fallback ?? DEFAULT_FONT_FACE;
 }

@@ -1,5 +1,6 @@
 import type { Element } from '../types';
 import { assetExport, assetSrc } from '../elements/builtinAssets';
+import { DEFAULT_FONT_ID } from '../elements/fontLibrary';
 import type { CourseKind } from '../utils/courseKind';
 
 const videoElements: Element[] = [
@@ -29,7 +30,7 @@ const textProps = (text: string, label: string): Record<string, unknown> => ({
   italic: false,
   textSizingMode: 'fixed-width',
   mouseEnabled: false,
-  fontLibraryId: 'paipeiyou.lantinghei',
+  fontLibraryId: DEFAULT_FONT_ID,
   fontLocalPath: '',
   _editorLabel: label,
 });

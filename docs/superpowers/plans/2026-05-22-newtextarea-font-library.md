@@ -1,5 +1,10 @@
 # NewTextArea 字体库选择与本地字体上传 实现计划
 
+> **历史方案：** 本文记录 2026 年 5 月的原始实施计划，已由 Issue #129
+> 的单层字体库与历史迁移方案取代。当前有效规则见
+> [字体库与历史兼容](../../font-library.md)；下文仅保留为历史决策记录，
+> 不再作为实施或验收依据。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 给 NewTextArea 元素增加字体库选择(三类:派培优/豌豆口才/豌豆益智)与本地 TTF 上传能力,本地字体优先级高于库字体;有文字内容但未选字体的元素阻止发布。
