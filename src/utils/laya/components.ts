@@ -8,8 +8,11 @@ import {
   getCustomAnswerKeyboardLayout,
   getCustomAnswerThemeAssets,
   getKeyboardPreset,
+  getMathKeyboardChildren,
+  isMathKeyboardPresetId,
   normalizeCustomAnswerOptions,
   readCustomAnswerKeyboardConfig,
+  type ExportChild,
 } from '../../elements/keyboardPresets';
 import { getCachedVideoThumbnail } from '../videoThumbnail';
 import { getDefaultSkins, generateButtonSkin, generateCheckboxSkin, generateRadioSkin, generateInputSkin } from '../skinGenerator';
@@ -152,6 +155,34 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
 
 }
 
+export function applyMathKeyboardRender(comp: LayaObj, element: Element): void {
+  if (isPreviewMode()) return;
+  const presetId = (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (!isMathKeyboardPresetId(presetId)) return;
+  const cu = classUtils();
+  const children = getMathKeyboardChildren(element, true);
+  if (!cu || !children) return;
+
+  const renderKey = JSON.stringify([presetId, element.props._mathKeyboardTheme]);
+  if (comp._mathKeyboardRenderKey === renderKey) return;
+  comp._mathKeyboardRenderKey = renderKey;
+  comp.removeChildren?.();
+
+  const addNode = (node: ExportChild, parent: LayaObj) => {
+    const instance = cu.getInstance(node.type === 'KlKey' ? 'Box' : node.type);
+    if (!instance) return;
+    parent.addChild(instance);
+    for (const [key, value] of Object.entries(node.props)) {
+      if (key === 'runtime' || key === 'output' || value === undefined || value === null) continue;
+      try { instance[key] = value; } catch { /* ignore unsupported editor-only props */ }
+    }
+    const nested = node.type === 'KlKey' ? node.child?.slice(0, 1) : node.child;
+    nested?.forEach((child) => addNode(child, instance));
+  };
+
+  children.forEach((child) => addNode(child, comp));
+}
+
 export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj | null {
   const cu = classUtils();
   if (!cu) { console.warn('[laya-bridge] ClassUtils not ready'); return null; }
@@ -179,10 +210,15 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
       else if (resolvedType === 'TextArea') resolvedType = 'Label';
       // SoundButton 编辑模式下用 Image 替代（类似图片组件，避免实例化真 SoundButton）
       else if (resolvedType === 'SoundButton') resolvedType = 'Image';
-      // 自定义答案键盘需要按实例配置显示真实答案和主题。
+      // 可配置主题的键盘需要在编辑画布显示实例的真实布局和皮肤。
       else if (
         element.type === 'KlBaseKeyboard'
-        && (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id === 'customAnswer'
+        && (
+          (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id === 'customAnswer'
+          || isMathKeyboardPresetId(
+            (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id,
+          )
+        )
       ) resolvedType = 'Sprite';
       // Spine 动画：编辑模式下用原生 laya.ani.bone.Skeleton，绕过 KlSkeleton1 的自动重播逻辑
       // sdk_baiya 通过 View.regComponent("Skeleton", KlSkeleton1) 覆盖了 ClassUtils，
@@ -477,6 +513,7 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
   }
   if (element.type === 'KlBaseKeyboard') {
     applyCustomAnswerKeyboardRender(comp, element);
+    applyMathKeyboardRender(comp, element);
   }
 
   // DropObj 编辑模式：用 Box 渲染，手动管理 skin + tipSkin 两个子 Image

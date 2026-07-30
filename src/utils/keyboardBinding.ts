@@ -3,6 +3,7 @@ import {
   KEYBOARD_PRESETS,
   type KeyboardPreset,
 } from '../elements/keyboardPresets';
+import { assetExport } from '../elements/builtinAssets';
 
 type KeyboardProps = {
   _keyboardPreset?: { id?: unknown };
@@ -108,6 +109,15 @@ export function applyKeyboardBindingProps(
   presetId: string | undefined,
 ): Record<string, unknown> {
   const next: Record<string, unknown> = { ...(currentProps ?? {}), camp };
+  const percentPreset = presetId
+    ? ['percent', 'percentDecimal', 'percentOperators', 'percentExpression'].includes(presetId)
+    : false;
+  if (!percentPreset && next._percentKeyboardBinding === true) {
+    delete next._percentKeyboardBinding;
+    const preset = presetId ? KEYBOARD_PRESETS.find((item) => item.id === presetId) : undefined;
+    next.sheet = preset?.defaultProps.sheet ?? '0123456789°+-*/=().';
+    next.fontClipSkin = assetExport('klInput.font');
+  }
   if (presetId === 'customAnswer') {
     delete next.font;
     return {
@@ -129,6 +139,11 @@ export function applyKeyboardBindingProps(
     const preset = presetId ? KEYBOARD_PRESETS.find((item) => item.id === presetId) : undefined;
     next.sheet = preset?.defaultProps.sheet ?? '0123456789°+-*/=().';
     if (next.place === 1) next.place = 4;
+  }
+  if (percentPreset) {
+    next._percentKeyboardBinding = true;
+    next.sheet = '0123456789°+-*/=().%';
+    next.fontClipSkin = assetExport('klInput.fontPercent');
   }
   return next;
 }
