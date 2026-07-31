@@ -11,6 +11,7 @@ import { InputRuleEditor, InputRulesOverview } from './InputAnswerRulesEditor';
 import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
 import VideoSourceDialog from './VideoSourceDialog';
+import InputFontPreviewModal from './InputFontPreviewModal';
 import PageTurnPageList from './PageTurnPageList';
 import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FlipHorizontal2, FlipVertical2, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock, Video } from 'lucide-react';
 import type { Action, Element } from '../types';
@@ -43,9 +44,21 @@ import {
 import { isQuickTemplateConfirm } from '../utils/quickTemplateConfirm';
 import { layoutText, normalizeTextSizingMode } from '../utils/textLayout';
 import { createPropertyEditSession, parseFiniteNumberDraft } from '../utils/propertyEditSession';
+import { readCustomAnswerKeyboardConfig } from '../elements/keyboardPresets';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
+
+function boundCustomAnswerOptions(input: Element, elements: Element[]): string[] | undefined {
+  const inputCamp = String(input.props?.camp ?? '').trim();
+  if (!inputCamp) return undefined;
+  const keyboard = elements.find((element) => (
+    element.type === 'KlBaseKeyboard'
+    && String(element.props?.camp ?? '').trim() === inputCamp
+    && keyboardPresetId(element, elements) === 'customAnswer'
+  ));
+  return keyboard ? readCustomAnswerKeyboardConfig(keyboard).answers : undefined;
+}
 
 interface EditorLayerGroupPropertiesProps {
   group: ResolvedEditorLayerGroup;
@@ -234,6 +247,7 @@ export default function PropertyPanel() {
   const [tabImgPickerOpen, setTabImgPickerOpen] = useState(false);
   const [okBtnPickerOpen, setOkBtnPickerOpen] = useState(false);
   const [videoSourceOpen, setVideoSourceOpen] = useState(false);
+  const [inputFontPreviewOpen, setInputFontPreviewOpen] = useState(false);
   const [propertyEditSession] = useState(() => createPropertyEditSession(
     () => JSON.stringify(useEditorStore.getState().currentCourse),
     () => useEditorStore.getState().saveHistory(),
@@ -248,6 +262,7 @@ export default function PropertyPanel() {
       setTabImgPickerOpen(false);
       setOkBtnPickerOpen(false);
       setVideoSourceOpen(false);
+      setInputFontPreviewOpen(false);
     });
   }, [currentInternalPageId, currentSubPageId, propertyEditSession, selectedElementIds, selectedEditorLayerGroupId]);
 
@@ -1453,6 +1468,17 @@ export default function PropertyPanel() {
                       <div key={groupName} className="mb-2 pb-2 border-b border-slate-700">
                         <div className="text-xs text-slate-500 mb-1.5">{groupName}</div>
                         {fields.map(renderField)}
+                        {isKeyboardInput && groupName === '外观' && (
+                          <button
+                            type="button"
+                            disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                            onClick={() => setInputFontPreviewOpen(true)}
+                            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded border border-blue-500/50 bg-blue-600/30 py-1.5 text-xs text-blue-200 hover:bg-blue-600/50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Maximize2 size={13} aria-hidden="true" />
+                            调整字体大小
+                          </button>
+                        )}
                         {isKeyboardInput && groupName === '交互' && (
                           <>
                             {single?.type === 'FractionInput' && !(single.props as Record<string, unknown> | undefined)?.camp && (
@@ -1525,6 +1551,19 @@ export default function PropertyPanel() {
           setSkinEditorOpen(false);
         }}
         onClose={() => setSkinEditorOpen(false)}
+      />
+    )}
+
+    {inputFontPreviewOpen && single && (single.type === 'KlInputImage' || single.type === 'FractionInput') && (
+      <InputFontPreviewModal
+        element={single}
+        customAnswerOptions={boundCustomAnswerOptions(single, currentPage?.elements ?? [])}
+        onApply={(props) => {
+          updateElement(single.id, { props: { ...single.props, ...props } });
+          saveHistory();
+          setInputFontPreviewOpen(false);
+        }}
+        onClose={() => setInputFontPreviewOpen(false)}
       />
     )}
 

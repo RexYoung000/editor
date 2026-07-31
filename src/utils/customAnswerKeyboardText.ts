@@ -9,17 +9,21 @@ import type { Course, Element } from '../types';
 import { DEFAULT_FONT_ID } from '../elements/fontLibrary';
 import { getElementPages } from './internalPages';
 import { loadLibraryFont } from './fontLoader';
-import { renderGlyphSheetToImage, renderTextToImage } from './textToImage';
+import { renderTextToImage } from './textToImage';
+import {
+  effectiveInputFontSize,
+  getInputFontGlyphMetrics,
+  inputFontRuntimeProps,
+  readInputTextTheme,
+  renderInputFontSkin,
+  uniqueInputCharacters,
+  type InputFontGlyphMetrics,
+} from './inputFont';
 
 export const CUSTOM_ANSWER_KEYBOARD_FONT_LIBRARY_ID = DEFAULT_FONT_ID;
 export const CUSTOM_ANSWER_KEYBOARD_TEXT_SIZE = { width: 84, height: 88 };
 
-export interface CustomAnswerInputGlyphMetrics {
-  cellWidth: number;
-  cellHeight: number;
-  fontSize: number;
-  stroke: number;
-}
+export type CustomAnswerInputGlyphMetrics = InputFontGlyphMetrics;
 
 const DEFAULT_CUSTOM_ANSWER_INPUT_GLYPH_METRICS: CustomAnswerInputGlyphMetrics = {
   cellWidth: 28,
@@ -29,7 +33,6 @@ const DEFAULT_CUSTOM_ANSWER_INPUT_GLYPH_METRICS: CustomAnswerInputGlyphMetrics =
 };
 
 const textSkinCache = new Map<string, Promise<string>>();
-const inputFontSkinCache = new Map<string, Promise<string>>();
 
 export function renderCustomAnswerTextSkin(
   answer: string,
@@ -112,36 +115,7 @@ export function renderCustomAnswerInputFontSkin(
   theme: CustomAnswerKeyboardTheme,
   metrics: CustomAnswerInputGlyphMetrics = DEFAULT_CUSTOM_ANSWER_INPUT_GLYPH_METRICS,
 ): Promise<string> {
-  const style = getCustomAnswerTextStyle(theme, '字');
-  const cacheKey = JSON.stringify([characters, theme, metrics]);
-  const cached = inputFontSkinCache.get(cacheKey);
-  if (cached) return cached;
-
-  const pending = (async () => {
-    const fontFace = await loadLibraryFont(CUSTOM_ANSWER_KEYBOARD_FONT_LIBRARY_ID);
-    if (!fontFace) {
-      throw new Error('自定义答案键盘字体加载失败，无法生成输入框位图字库');
-    }
-    return renderGlyphSheetToImage(
-      characters,
-      metrics.cellWidth,
-      metrics.cellHeight,
-      {
-        fontFace,
-        fontSize: metrics.fontSize,
-        color: style.color,
-        stroke: metrics.stroke,
-        strokeColor: style.strokeColor,
-      },
-      1,
-    );
-  })().catch((error) => {
-    inputFontSkinCache.delete(cacheKey);
-    throw error;
-  });
-
-  inputFontSkinCache.set(cacheKey, pending);
-  return pending;
+  return renderInputFontSkin(characters, theme, metrics);
 }
 
 export interface CustomAnswerKeyboardTextRenderer {
@@ -174,6 +148,11 @@ export async function bakeCustomAnswerKeyboardTextAssets(
   for (const stage of allStages) {
     for (const subPage of stage.subPages) {
       for (const page of getElementPages(subPage)) {
+        const inputBindings = new Map<Element, {
+          inputSheet: string;
+          keyboardTheme: CustomAnswerKeyboardTheme;
+          maxAnswerLength: number;
+        }>();
         const keyboards = page.elements.filter((element) => (
           element.type === 'KlBaseKeyboard' && keyboardPresetId(element) === 'customAnswer'
         ));
@@ -195,22 +174,10 @@ export async function bakeCustomAnswerKeyboardTextAssets(
           const boundInputs = page.elements.filter((input) => (
             input.type === 'KlInputImage' && camp(input) === keyboardCamp
           ));
-          const inputFontSkins = await Promise.all(boundInputs.map(async (input) => {
-            const metrics = getCustomAnswerInputGlyphMetrics(
-              input.width,
-              input.height,
-              maxAnswerLength,
-            );
-            const inputFontSkin = await renderer.inputFont(inputSheet, config.theme, metrics);
-            const nextProps = { ...(input.props ?? {}) };
-            delete nextProps.font;
-            nextProps.contentType = 1;
-            nextProps.place = 1;
-            nextProps.sheet = inputSheet;
-            nextProps.fontClipSkin = inputFontSkin;
-            nextProps.contentScale = 1;
-            input.props = nextProps;
-            return inputFontSkin;
+          boundInputs.forEach((input) => inputBindings.set(input, {
+            inputSheet,
+            keyboardTheme: config.theme,
+            maxAnswerLength,
           }));
 
           keyboard.props = {
@@ -219,8 +186,60 @@ export async function bakeCustomAnswerKeyboardTextAssets(
               answers,
               theme: config.theme,
               textSkins,
-              inputFontSkin: inputFontSkins[0],
               inputSheet,
+            },
+          };
+        }
+
+        const inputs = page.elements.filter((element) => (
+          element.type === 'KlInputImage' || element.type === 'FractionInput'
+        ));
+        const renderedInputSkins = new Map<Element, string>();
+        for (const input of inputs) {
+          const binding = inputBindings.get(input);
+          const inputTheme = readInputTextTheme(input);
+          if (!inputTheme && !binding) continue;
+
+          const inputSheet = uniqueInputCharacters(binding?.inputSheet ?? input.props?.sheet);
+          if (!inputSheet) continue;
+          const metrics = inputTheme
+            ? getInputFontGlyphMetrics(effectiveInputFontSize(input), inputSheet)
+            : getCustomAnswerInputGlyphMetrics(
+                input.width,
+                input.height,
+                binding?.maxAnswerLength ?? 1,
+              );
+          const inputFontSkin = await renderer.inputFont(
+            inputSheet,
+            inputTheme ?? binding!.keyboardTheme,
+            metrics,
+          );
+          const nextProps = { ...(input.props ?? {}) };
+          delete nextProps.font;
+          nextProps.sheet = inputSheet;
+          nextProps.fontClipSkin = inputFontSkin;
+          if (binding) {
+            nextProps.contentType = 1;
+            nextProps.place = 1;
+            nextProps.contentScale = 1;
+          }
+          if (inputTheme) Object.assign(nextProps, inputFontRuntimeProps(input, metrics));
+          input.props = nextProps;
+          renderedInputSkins.set(input, inputFontSkin);
+        }
+
+        for (const keyboard of keyboards) {
+          const keyboardCamp = camp(keyboard);
+          const inputFontSkin = page.elements
+            .filter((input) => input.type === 'KlInputImage' && camp(input) === keyboardCamp)
+            .map((input) => renderedInputSkins.get(input))
+            .find((skin): skin is string => Boolean(skin));
+          if (!inputFontSkin) continue;
+          keyboard.props = {
+            ...keyboard.props,
+            _customAnswerKeyboard: {
+              ...(keyboard.props._customAnswerKeyboard as Record<string, unknown>),
+              inputFontSkin,
             },
           };
         }
