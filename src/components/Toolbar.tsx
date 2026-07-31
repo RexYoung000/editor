@@ -1,9 +1,9 @@
-import { Undo, Redo, Languages, Download, X } from 'lucide-react';
+import { Undo, Redo, Languages, Download, FolderOpen, X } from 'lucide-react';
 import { useEditorStore } from '../store/editorStore';
 import { exportProject } from '../utils/exportProject';
 import { compileBuild } from '../utils/compileBuild';
 import { showToast } from '../utils/toast';
-import { createProjectInDirectory, openProjectFromDirectory, writeBackToLocalFile, getCourseFilePath, getCourseDirPath, selectDirectory, openFolder, cleanupUnreferencedImages, collectImageReferences, saveProjectAs } from '../utils/electronFs';
+import { createProjectInDirectory, openProjectFromDirectory, writeBackToLocalFile, getCourseFilePath, getCourseDirPath, selectDirectory, openFolder, cleanupUnreferencedImages, collectImageReferences, saveProjectAs, ProjectSaveAsError } from '../utils/electronFs';
 import { useState } from 'react';
 import FileMenu from './FileMenu';
 import CreateProjectDialog from './CreateProjectDialog';
@@ -18,6 +18,7 @@ import { isFlatLesson } from '../utils/courseKind';
 import { collectInternalPageIssues, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { requestPageThumbnailFlush } from '../utils/pageThumbnailSync';
 import { commitPendingPropertyEdits } from '../utils/propertyEditSession';
+import { formatCoursePathTail } from '../utils/coursePathDisplay';
 
 export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack?: () => void }) {
   const { language, setLanguage, t } = useI18n();
@@ -35,7 +36,6 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   const setFeedback = useEditorStore((state) => state.setFeedback);
 
   const [publishError, setPublishError] = useState<string | null>(null);
-  const [errorDialog, setErrorDialog] = useState<{ title: string; message: string } | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
   const [showNewConfirm, setShowNewConfirm] = useState(false);
@@ -123,16 +123,17 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     setShowSaveAsDialog(true);
   };
 
-  const handleSaveAsConfirm = async (newId: string, dirPath: string) => {
+  const handleSaveAsConfirm = async (newId: string, dirPath: string, overwrite: boolean) => {
     if (!currentCourse) return;
-    setShowSaveAsDialog(false);
+    const { course: newCourse } = await saveProjectAs(currentCourse, newId, dirPath, overwrite);
     try {
-      const { course: newCourse } = await saveProjectAs(currentCourse, newId, dirPath);
       setCurrentCourse(newCourse);
-      showToast(t('saveAsSuccess'), 'success');
-    } catch (e) {
-      setErrorDialog({ title: t('saveAsFailed'), message: (e as Error).message });
+    } catch (error) {
+      console.error('save-as activation error:', error);
+      throw new ProjectSaveAsError('ACTIVATION_FAILED');
     }
+    const targetDir = getCourseDirPath(newCourse.id);
+    showToast(targetDir ? `${t('saveAsSuccess')}：${targetDir}` : t('saveAsSuccess'), 'success');
   };
 
   const handleOpenCourseFolder = async () => {
@@ -144,6 +145,8 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   };
 
   const isFlat = isFlatLesson(currentCourse?.kind);
+  const currentCourseDir = currentCourse ? getCourseDirPath(currentCourse.id) : null;
+  const currentCoursePathTail = currentCourseDir ? formatCoursePathTail(currentCourseDir) : '';
   const hasPreviewStages = !isFlat && (currentCourse?.previewStages?.length ?? 0) > 0;
   const canPublish = !busy && currentCourse && (currentCourse.stages.length > 0 || (currentCourse.previewStages?.length ?? 0) > 0);
   const canPreview = !busy && currentCourse && (currentCourse.stages.length > 0 || (currentCourse.previewStages?.length ?? 0) > 0);
@@ -266,10 +269,20 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
 
       {currentCourse && (
         <>
-          <div
-            className="text-sm text-slate-400 cursor-pointer hover:text-blue-400 transition-colors"
-            onClick={handleOpenCourseFolder}
-          >{currentCourse.id}</div>
+          <div className="min-w-0 flex items-center gap-1.5 text-sm text-slate-300">
+            <span className="max-w-40 truncate" title={currentCourse.id}>{currentCourse.id}</span>
+            {currentCourseDir && (
+              <button
+                onClick={handleOpenCourseFolder}
+                className="min-w-0 flex items-center gap-1 text-slate-500 hover:text-blue-400 transition-colors"
+                title={`${t('openCourseFolder')}：${currentCourseDir}`}
+                aria-label={t('openCourseFolder')}
+              >
+                <FolderOpen size={14} className="shrink-0" />
+                <span className="hidden xl:inline-block max-w-40 truncate text-xs">{currentCoursePathTail}</span>
+              </button>
+            )}
+          </div>
           <span className={`text-[10px] ml-1 ${isDirty ? 'text-amber-400' : 'text-emerald-400'}`}>{isDirty ? t('unsaved') : t('saved')}</span>
         </>
       )}
@@ -435,22 +448,6 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
           </div>
           <div className="flex gap-2 px-6 py-4 border-t border-slate-700">
             <button onClick={() => setPublishError(null)} className="flex-1 py-2.5 text-base bg-slate-700 hover:bg-slate-600 rounded text-slate-300">关闭</button>
-          </div>
-        </div>
-      </div>
-    )}
-    {errorDialog && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setErrorDialog(null)}>
-        <div className="bg-slate-800 rounded-lg shadow-xl w-[640px]" onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700">
-            <span className="text-lg font-medium text-red-400">{errorDialog.title}</span>
-            <button onClick={() => setErrorDialog(null)} className="text-slate-400 hover:text-white"><X size={20} /></button>
-          </div>
-          <div className="px-6 py-6 max-h-[400px] overflow-y-auto">
-            <p className="text-base text-slate-300 break-all">{errorDialog.message}</p>
-          </div>
-          <div className="flex gap-2 px-6 py-4 border-t border-slate-700">
-            <button onClick={() => setErrorDialog(null)} className="flex-1 py-2.5 text-base bg-slate-700 hover:bg-slate-600 rounded text-slate-300">关闭</button>
           </div>
         </div>
       </div>

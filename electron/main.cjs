@@ -7,6 +7,11 @@ const http = require('http');
 const https = require('https');
 const { Transform } = require('stream');
 const { pipeline } = require('stream/promises');
+const {
+  inspectCourseSaveTarget,
+  saveCourseAsTransaction,
+  serializeSaveAsError,
+} = require('./courseSaveAs.cjs');
 
 // 本地定义工具函数（避免引入跨模块依赖）
 function lessonSuffix(kind) {
@@ -278,6 +283,25 @@ ipcMain.handle('write-course-file', (_event, filePath, courseJson) => {
 
 ipcMain.handle('path-exists', (_event, filePath) => {
   return fs.existsSync(filePath);
+});
+
+ipcMain.handle('inspect-course-save-target', async (_event, params) => {
+  try {
+    return { ok: true, ...(await inspectCourseSaveTarget(params)) };
+  } catch (error) {
+    return serializeSaveAsError(error);
+  }
+});
+
+ipcMain.handle('save-course-as', async (_event, params) => {
+  try {
+    const result = await saveCourseAsTransaction(params);
+    courseDirMap.set(params.targetCourseId, result.targetDir);
+    return { ok: true, ...result };
+  } catch (error) {
+    console.error('save-course-as error:', error);
+    return serializeSaveAsError(error);
+  }
 });
 
 ipcMain.handle('ensure-dir', (_event, dirPath) => {
@@ -618,6 +642,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Range',
   'Access-Control-Expose-Headers': 'Content-Range, Content-Length',
+  'Cache-Control': 'no-store',
 };
 
 function handleForgeLocalProtocol(request) {
@@ -631,7 +656,8 @@ function handleForgeLocalProtocol(request) {
     const afterScheme = request.url.replace(/^forge-local:\/\//, '');
     const slashIdx = afterScheme.indexOf('/');
     const courseId = slashIdx >= 0 ? afterScheme.slice(0, slashIdx) : afterScheme;
-    const relativePath = slashIdx >= 0 ? afterScheme.slice(slashIdx + 1) : '';
+    const resourcePath = slashIdx >= 0 ? afterScheme.slice(slashIdx + 1) : '';
+    const relativePath = resourcePath.split(/[?#]/, 1)[0];
     // Standard scheme 会把 hostname 小写化，需要大小写不敏感查找
     const courseDir = courseDirMap.get(courseId)
       || [...courseDirMap.entries()].find(([k]) => k.toLowerCase() === courseId.toLowerCase())?.[1];

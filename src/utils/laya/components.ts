@@ -3,7 +3,7 @@ import type { Element } from '../../types';
 import { applyElementTransform, laya, classUtils, isPreviewMode, canvasRoot } from './core';
 import { elementMeta } from '../../elements/elementMeta';
 import { lookupBuiltinByExportPath } from '../../elements/builtinAssets';
-import { readFileAsDataUrl } from '../electronFs';
+import { getCourseResourceUrl, readFileAsDataUrl } from '../electronFs';
 import {
   getCustomAnswerKeyboardLayout,
   getCustomAnswerThemeAssets,
@@ -339,7 +339,7 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
       const animName = (props.currAniName as string) ?? '';
       const animList = Array.isArray(props._animationList) ? (props._animationList as string[]) : [];
       if (courseId && comp.load) {
-        const forgeLocalUrl = `forge-local://${courseId}/${urlStr}`;
+        const forgeLocalUrl = getCourseResourceUrl(courseId, urlStr);
         if (comp._lastSkUrl !== forgeLocalUrl) {
           comp._lastSkUrl = forgeLocalUrl;
           comp._lastAnimName = animName;
@@ -375,7 +375,8 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
     } else if (element.type === 'Video') {
       const videoUrl = (props.videoUrl as string) ?? '';
       if (videoUrl) {
-        const cached = getCachedVideoThumbnail(videoUrl);
+        const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId ?? '';
+        const cached = getCachedVideoThumbnail(videoUrl, courseId);
         if (cached) {
           props.skin = cached;
         } else {

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { EditorLayerGroup, Element } from '../types';
 import { useEditorStore } from '../store/editorStore';
+import { getCourseResourceUrl } from '../utils/electronFs';
 import { applyElementTransform, getObject } from '../utils/layaBridge';
 import { applyNewTextAreaRender } from '../utils/laya/components';
 import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
@@ -1591,7 +1592,7 @@ export default function CanvasOverlay({
               key={`video-${editingElement.id}`}
               autoPlay
               controls
-              src={`forge-local://${courseId}/${videoUrl}`}
+              src={getCourseResourceUrl(courseId, videoUrl)}
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
           </div>
