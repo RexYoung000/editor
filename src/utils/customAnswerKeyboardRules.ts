@@ -50,8 +50,8 @@ export function collectCourseCustomAnswerKeyboardIssues(course: Course): CustomA
               message: `${location}：${message}`,
             });
 
-            if (rawAnswers.length < 2 || rawAnswers.length > 9) {
-              add('自定义答案键盘需要配置 2～9 个答案');
+            if (rawAnswers.length < 2) {
+              add('自定义答案键盘至少需要配置 2 个答案');
             }
             if (answers.some((answer) => answer === '')) {
               add('自定义答案键盘存在空答案');
