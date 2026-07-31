@@ -1476,7 +1476,7 @@ export default function PropertyPanel() {
                             className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded border border-blue-500/50 bg-blue-600/30 py-1.5 text-xs text-blue-200 hover:bg-blue-600/50 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Maximize2 size={13} aria-hidden="true" />
-                            调整字体大小
+                            调整字号与间距
                           </button>
                         )}
                         {isKeyboardInput && groupName === '交互' && (

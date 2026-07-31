@@ -151,7 +151,9 @@ test('普通数字与分数混排时按实际字体缩放宽度推进位置', ()
     const source = readFileSync(join(process.cwd(), relativePath), 'utf8');
     assert.match(source, /public fontScale = 1\.3/);
     assert.match(source, /font\.scale\(this\.fontScale, this\.fontScale\)/);
-    assert.match(source, /x \+= this\.getFontClipAdvance\(str\.length\) \+ this\.getLayoutGap\(\)/);
+    assert.match(source, /if \(this\.dynamicFractionLayout && count > 0\) x \+= this\.getLayoutGap\(\)/);
+    assert.match(source, /x \+= this\.getFontClipAdvance\(str\.length\) \+ \(this\.dynamicFractionLayout \? 0 : this\.getLayoutGap\(\)\)/);
+    assert.match(source, /return \(fontWidth \+ \(count - 1\) \* advance\) \* this\.fontScale/);
     assert.match(source, /return charCount \* \(fontWidth \+ this\.getLayoutGap\(\)\) \* this\.fontScale/);
     assert.match(source, /public fractionWidthScale = 1/);
     assert.match(source, /box\.width = \(this\.fractionDigits \* this\.fontWidth \+ 20\) \* this\.fractionWidthScale/);

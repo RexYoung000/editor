@@ -20,8 +20,13 @@ import {
   INPUT_FONT_SIZE_MAX,
   INPUT_FONT_SIZE_MIN,
   INPUT_FONT_SIZE_STEP,
+  INPUT_LETTER_SPACING_MAX,
+  INPUT_LETTER_SPACING_MIN,
+  INPUT_LETTER_SPACING_STEP,
   clampInputFontSize,
+  clampInputLetterSpacing,
   effectiveInputFontSize,
+  effectiveInputLetterSpacing,
   getInputFractionLayoutMetrics,
   getInputFontGlyphMetrics,
   inputFontPercentage,
@@ -51,20 +56,26 @@ function GlyphRun({
   skin,
   cellWidth,
   cellHeight,
+  letterSpacing = 0,
   scale = 1,
+  trailingSpacing = 0,
 }: {
   text: string;
   sheet: string;
   skin: string;
   cellWidth: number;
   cellHeight: number;
+  letterSpacing?: number;
   scale?: number;
+  trailingSpacing?: number;
 }) {
   const characters = Array.from(sheet);
+  const glyphs = Array.from(text);
   return (
     <span className="inline-flex shrink-0" style={{ height: cellHeight * scale }}>
-      {Array.from(text).map((character, index) => {
+      {glyphs.map((character, index) => {
         const glyphIndex = characters.indexOf(character);
+        const isLast = index === glyphs.length - 1;
         return (
           <span
             key={`${character}-${index}`}
@@ -77,6 +88,7 @@ function GlyphRun({
               backgroundRepeat: 'no-repeat',
               backgroundSize: `${cellWidth * characters.length * scale}px ${cellHeight * scale}px`,
               backgroundPosition: glyphIndex >= 0 ? `${-glyphIndex * cellWidth * scale}px 0` : undefined,
+              marginRight: isLast ? trailingSpacing : letterSpacing * scale,
             }}
           />
         );
@@ -92,6 +104,7 @@ function FractionPreview({
   cellWidth,
   cellHeight,
   fontSize,
+  letterSpacing,
   partScale,
 }: {
   tokens: FractionInputToken[];
@@ -100,17 +113,13 @@ function FractionPreview({
   cellWidth: number;
   cellHeight: number;
   fontSize: number;
+  letterSpacing: number;
   partScale: number;
 }) {
   return (
-    <div
-      className="flex shrink-0 items-center"
-      style={{ gap: getInputFractionLayoutMetrics(
-        { cellWidth, cellHeight, fontSize, stroke: fontSize >= 18 ? 2 : 1 },
-        partScale,
-      ).tokenGap }}
-    >
+    <div className="flex shrink-0 items-center">
       {tokens.map((token, tokenIndex) => {
+        const trailingSpacing = tokenIndex < tokens.length - 1 ? letterSpacing : 0;
         if (token.kind === 'digits') {
           return (
             <GlyphRun
@@ -120,6 +129,8 @@ function FractionPreview({
               skin={skin}
               cellWidth={cellWidth}
               cellHeight={cellHeight}
+              letterSpacing={letterSpacing}
+              trailingSpacing={trailingSpacing}
             />
           );
         }
@@ -128,12 +139,17 @@ function FractionPreview({
           partScale,
           token.numerator.length,
           token.denominator.length,
+          letterSpacing,
         );
         return (
           <span
             key={`fraction-${tokenIndex}`}
             className="relative block shrink-0"
-            style={{ width: layout.width, height: layout.height }}
+            style={{
+              width: layout.width,
+              height: layout.height,
+              marginRight: trailingSpacing,
+            }}
           >
             <span className="absolute left-1/2 top-0 -translate-x-1/2">
               <GlyphRun
@@ -142,6 +158,7 @@ function FractionPreview({
                 skin={skin}
                 cellWidth={cellWidth}
                 cellHeight={cellHeight}
+                letterSpacing={letterSpacing}
                 scale={partScale}
               />
             </span>
@@ -156,6 +173,7 @@ function FractionPreview({
                 skin={skin}
                 cellWidth={cellWidth}
                 cellHeight={cellHeight}
+                letterSpacing={letterSpacing}
                 scale={partScale}
               />
             </span>
@@ -176,6 +194,10 @@ export default function InputFontPreviewModal({ element, customAnswerOptions, on
   ));
   const [fontSize, setFontSize] = useState(() => effectiveInputFontSize(element));
   const [fontSizeDraft, setFontSizeDraft] = useState(() => String(effectiveInputFontSize(element)));
+  const [letterSpacing, setLetterSpacing] = useState(() => effectiveInputLetterSpacing(element));
+  const [letterSpacingDraft, setLetterSpacingDraft] = useState(() => (
+    String(effectiveInputLetterSpacing(element))
+  ));
   const [fractionFontPercentage, setFractionFontPercentage] = useState(() => (
     Math.round(readInputFractionFontScale(element) * 100)
   ));
@@ -252,6 +274,19 @@ export default function InputFontPreviewModal({ element, customAnswerOptions, on
     setFontSize(parsed);
   };
   const commitFontSizeDraft = () => updateFontSize(fontSizeDraft);
+  const updateLetterSpacing = (value: unknown) => {
+    const next = clampInputLetterSpacing(value, letterSpacing);
+    setLetterSpacing(next);
+    setLetterSpacingDraft(String(next));
+  };
+  const updateLetterSpacingDraft = (value: string) => {
+    setLetterSpacingDraft(value);
+    if (!/^-?\d+$/.test(value)) return;
+    const parsed = Number(value);
+    if (parsed < INPUT_LETTER_SPACING_MIN || parsed > INPUT_LETTER_SPACING_MAX) return;
+    setLetterSpacing(parsed);
+  };
+  const commitLetterSpacingDraft = () => updateLetterSpacing(letterSpacingDraft);
   const updateFractionFontPercentage = (value: unknown) => {
     const parsed = Number(value);
     const next = Number.isFinite(parsed)
@@ -314,6 +349,7 @@ export default function InputFontPreviewModal({ element, customAnswerOptions, on
     onApply({
       _inputTextTheme: theme,
       _inputFontSize: fontSize,
+      _inputLetterSpacing: letterSpacing,
       _inputFontReferenceWidth: element.width,
       _inputFontReferenceHeight: element.height,
       _inputFontPreview: isFraction ? serializeFractionInput(fractionTokens) : normalSample,
@@ -328,7 +364,7 @@ export default function InputFontPreviewModal({ element, customAnswerOptions, on
       data-keep-selection
       role="dialog"
       aria-modal="true"
-      aria-label="调整输入框字体大小"
+      aria-label="调整输入框字号与间距"
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -340,7 +376,7 @@ export default function InputFontPreviewModal({ element, customAnswerOptions, on
       <div className="flex max-h-[92vh] w-[1120px] max-w-[96vw] flex-col overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-2xl">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-700 px-4">
           <div>
-            <h2 className="text-sm font-medium text-white">调整字体大小</h2>
+            <h2 className="text-sm font-medium text-white">调整字号与间距</h2>
             <div className="text-[11px] text-slate-500">{isFraction ? '分数输入框' : '普通输入框'}</div>
           </div>
           <button type="button" onClick={onClose} className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white" title="关闭">
@@ -379,6 +415,7 @@ export default function InputFontPreviewModal({ element, customAnswerOptions, on
                       cellWidth={metrics.cellWidth}
                       cellHeight={metrics.cellHeight}
                       fontSize={fontSize}
+                      letterSpacing={letterSpacing}
                       partScale={fractionFontPercentage / 100}
                     />
                   ) : (
@@ -388,6 +425,7 @@ export default function InputFontPreviewModal({ element, customAnswerOptions, on
                       skin={fontSkin}
                       cellWidth={metrics.cellWidth}
                       cellHeight={metrics.cellHeight}
+                      letterSpacing={letterSpacing}
                     />
                   )}
                 </div>
@@ -511,6 +549,39 @@ export default function InputFontPreviewModal({ element, customAnswerOptions, on
                   }}
                   className={inputClass}
                   aria-label="字体大小数值"
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between text-xs">
+                <label htmlFor="input-letter-spacing" className="font-medium text-slate-300">字符间距</label>
+                <span className="text-slate-400">{letterSpacing}px</span>
+              </div>
+              <div className="grid grid-cols-[minmax(0,1fr)_76px] items-center gap-3">
+                <input
+                  id="input-letter-spacing"
+                  type="range"
+                  min={INPUT_LETTER_SPACING_MIN}
+                  max={INPUT_LETTER_SPACING_MAX}
+                  step={INPUT_LETTER_SPACING_STEP}
+                  value={letterSpacing}
+                  onChange={(event) => updateLetterSpacing(event.target.value)}
+                  className="w-full accent-blue-500"
+                />
+                <input
+                  type="number"
+                  min={INPUT_LETTER_SPACING_MIN}
+                  max={INPUT_LETTER_SPACING_MAX}
+                  step={INPUT_LETTER_SPACING_STEP}
+                  value={letterSpacingDraft}
+                  onChange={(event) => updateLetterSpacingDraft(event.target.value)}
+                  onBlur={commitLetterSpacingDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                  className={inputClass}
+                  aria-label="字符间距数值"
                 />
               </div>
             </div>

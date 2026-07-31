@@ -346,6 +346,7 @@ export default class FractionInput extends KlInputImage {
             let count = 0;
             let values = this.analysisFormula(this.fontClipValue) //this.fontClipValue.match(this.matchReg).filter(v => !!v);
             for (let str of values) {
+                if (this.dynamicFractionLayout && count > 0) x += this.getLayoutGap();
                 if (str.charAt(0) == "<") {//分子分母 2个框
                     str = str.replace(/[\<|\>]/g, "");
                     let index = str.indexOf("_")
@@ -364,7 +365,7 @@ export default class FractionInput extends KlInputImage {
                     font1.fontClipValue = i1;
                     font2.fontClipValue = i2;
                     box.x = x;
-                    x += box.width + this.getLayoutGap();
+                    x += box.width + (this.dynamicFractionLayout ? 0 : this.getLayoutGap());
                     box.visible = true;
                 } else if (str.charAt(0) == "[") {//分子分母 3个框
                     let [i1, i2, i3] = str.match(/\d+/g) || [" ", " ", " "];
@@ -384,14 +385,14 @@ export default class FractionInput extends KlInputImage {
                     font1.fontClipValue = i2;
                     font2.fontClipValue = i3;
                     box.x = x;
-                    x += box.width + this.getLayoutGap();
+                    x += box.width + (this.dynamicFractionLayout ? 0 : this.getLayoutGap());
                     box.visible = true;
                 } else {
                     let font = this.getKlFontClip();
                     if (!font) continue;
                     font.value = str;
                     font.x = x;
-                    x += this.getFontClipAdvance(str.length) + this.getLayoutGap();
+                    x += this.getFontClipAdvance(str.length) + (this.dynamicFractionLayout ? 0 : this.getLayoutGap());
                     font.visible = true;
                 }
                 count++;
@@ -409,7 +410,7 @@ export default class FractionInput extends KlInputImage {
         
         font.scale(this.fontScale, this.fontScale);
 
-        font.spaceX = this.dynamicFractionLayout ? 0 : this.getLayoutGap();
+        font.spaceX = this.getLayoutGap();
         font.centerY = 0;
         font.name = "font_" + this.nFontClipCount;
         font.mouseEnabled = false;
@@ -435,6 +436,7 @@ export default class FractionInput extends KlInputImage {
 
         input1.place = this.fractionDigits;
         input1["contentScale"] = this.fractionPartScale;
+        if (this.dynamicFractionLayout) input1["spaceX"] = this.getLayoutGap();
         input1.frameOnce(1, this, () => {
             input1.fontClipValue = input1Value;
         })
@@ -609,8 +611,9 @@ export default class FractionInput extends KlInputImage {
     }
     private dynamicPartWidth(...values: string[]) {
         const digits = Math.max(1, ...values.map(value => Array.from(value || "").length));
+        const glyphAdvance = Math.max(1, this.fontWidth + this.getLayoutGap());
         return Math.ceil(
-            digits * this.fontWidth * this.fractionPartScale
+            (this.fontWidth + (digits - 1) * glyphAdvance) * this.fractionPartScale
             + this.fractionHorizontalPadding * 2,
         );
     }
@@ -676,9 +679,10 @@ export default class FractionInput extends KlInputImage {
         const partHeight = this.dynamicPartHeight();
         const gap = this.fractionVerticalGap;
         const structureHeight = partHeight * 2 + gap;
+        const integerDigits = Math.max(1, Array.from(integer || "").length);
+        const integerAdvance = Math.max(1, this.fontWidth + this.getLayoutGap());
         const integerWidth = Math.ceil(
-            Math.max(1, Array.from(integer || "").length) * this.fontWidth
-            + this.fractionHorizontalPadding,
+            this.fontWidth + (integerDigits - 1) * integerAdvance + this.fractionHorizontalPadding,
         );
         const integerHeight = Math.ceil(this.fontHeight);
         const fractionX = integerWidth + this.getLayoutGap();
@@ -712,25 +716,32 @@ export default class FractionInput extends KlInputImage {
         let fractionIndex = 0;
         let mixedFractionIndex = 0;
         let clipIndex = 0;
+        let renderedCount = 0;
         let x = 0;
         for (const value of this.analysisFormula(this.fontClipValue)) {
             if (value.charAt(0) == "<") {
                 const box = this.inputs[fractionIndex++];
                 if (box && box.visible) {
+                    if (renderedCount > 0) x += this.getLayoutGap();
                     box.x = x;
-                    x += box.width + this.getLayoutGap();
+                    x += box.width;
+                    renderedCount++;
                 }
             } else if (value.charAt(0) == "[") {
                 const box = this.inputs2[mixedFractionIndex++];
                 if (box && box.visible) {
+                    if (renderedCount > 0) x += this.getLayoutGap();
                     box.x = x;
-                    x += box.width + this.getLayoutGap();
+                    x += box.width;
+                    renderedCount++;
                 }
             } else {
                 const clip = this.clips[clipIndex++];
                 if (clip && clip.visible) {
+                    if (renderedCount > 0) x += this.getLayoutGap();
                     clip.x = x;
-                    x += this.getFontClipAdvance(value.length) + this.getLayoutGap();
+                    x += this.getFontClipAdvance(value.length);
+                    renderedCount++;
                 }
             }
         }
@@ -769,6 +780,12 @@ export default class FractionInput extends KlInputImage {
     private getFontClipAdvance(charCount: number): number {
         const width = Number(this.fontWidth);
         const fontWidth = Number.isFinite(width) ? width : 0;
+        if (this.dynamicFractionLayout) {
+            const count = Math.max(0, charCount);
+            if (count === 0) return 0;
+            const advance = Math.max(1, fontWidth + this.getLayoutGap());
+            return (fontWidth + (count - 1) * advance) * this.fontScale;
+        }
         return charCount * (fontWidth + this.getLayoutGap()) * this.fontScale;
     }
     private updateContentScale() {

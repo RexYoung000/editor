@@ -5,8 +5,12 @@ import { elementMeta } from '../src/elements/elementMeta';
 import {
   DEFAULT_INPUT_TEXT_THEME,
   DEFAULT_INPUT_FRACTION_FONT_SCALE,
+  DEFAULT_INPUT_LETTER_SPACING,
+  DEFAULT_FRACTION_INPUT_LETTER_SPACING,
   clampInputFractionFontScale,
+  clampInputLetterSpacing,
   effectiveInputFontSize,
+  effectiveInputLetterSpacing,
   getInputFractionLayoutMetrics,
   getInputFontGlyphMetrics,
   inputFontRuntimeProps,
@@ -54,8 +58,13 @@ test('新建普通与分数输入框默认蓝色，历史输入框不伪造新�
   assert.equal(elementMeta.KlInputImage.defaultProps?._inputTextTheme, DEFAULT_INPUT_TEXT_THEME);
   assert.equal(elementMeta.FractionInput.defaultProps?._inputTextTheme, DEFAULT_INPUT_TEXT_THEME);
   assert.equal(elementMeta.KlInputImage.defaultProps?._inputFontSize, 36);
+  assert.equal(elementMeta.KlInputImage.defaultProps?._inputLetterSpacing, DEFAULT_INPUT_LETTER_SPACING);
   assert.equal(elementMeta.KlInputImage.defaultProps?._inputFontPreview, '1234');
   assert.equal(elementMeta.FractionInput.defaultProps?._inputFontSize, 42);
+  assert.equal(
+    elementMeta.FractionInput.defaultProps?._inputLetterSpacing,
+    DEFAULT_FRACTION_INPUT_LETTER_SPACING,
+  );
   assert.equal(elementMeta.FractionInput.defaultProps?._inputFractionFontScale, DEFAULT_INPUT_FRACTION_FONT_SCALE);
   assert.equal(readInputTextTheme({ props: { _inputTextTheme: 'green' } }), 'green');
   assert.equal(readInputTextTheme({ props: { fontClipSkin: 'legacy.png' } }), undefined);
@@ -87,6 +96,24 @@ test('框体等比缩放后实际字号同比变化，非等比扩宽不放大�
   assert.equal(effectiveInputFontSize({ ...base, width: 20, height: 10 }), 12);
 });
 
+test('统一字符间距支持收紧、加宽并随框体等比缩放', () => {
+  assert.equal(clampInputLetterSpacing(-30), -20);
+  assert.equal(clampInputLetterSpacing(24), 24);
+  assert.equal(clampInputLetterSpacing(80), 60);
+
+  const normal = element('input', 'KlInputImage', {
+    _inputLetterSpacing: 4,
+    _inputFontReferenceWidth: 120,
+    _inputFontReferenceHeight: 60,
+  }, 120, 60);
+  assert.equal(effectiveInputLetterSpacing(normal), 4);
+  assert.equal(effectiveInputLetterSpacing({ ...normal, width: 240, height: 120 }), 8);
+  assert.equal(effectiveInputLetterSpacing({ ...normal, width: 240, height: 60 }), 4);
+
+  const fraction = element('fraction', 'FractionInput', {}, 360, 120);
+  assert.equal(effectiveInputLetterSpacing(fraction), DEFAULT_FRACTION_INPUT_LETTER_SPACING);
+});
+
 test('普通与分数输入框共用字形指标，窄字符和分数结构使用紧凑动态占位', () => {
   const metrics = getInputFontGlyphMetrics(42, '0123456789+-×÷=()');
   assert.deepEqual(metrics, { cellWidth: 39, cellHeight: 59, fontSize: 42, stroke: 2 });
@@ -98,16 +125,18 @@ test('普通与分数输入框共用字形指标，窄字符和分数结构使�
     verticalGap: 6,
     tokenGap: 6,
   });
-  assert.equal(getInputFractionLayoutMetrics(metrics, 0.8, 4, 2).width, 145);
+  assert.equal(getInputFractionLayoutMetrics(metrics, 0.8, 4, 2).width, 160);
+  assert.equal(getInputFractionLayoutMetrics(metrics, 0.8, 4, 2, -20).width, 97);
   assert.deepEqual(inputFontRuntimeProps(
     element('normal', 'KlInputImage', {}, 120, 60),
     metrics,
-  ), { contentScale: 1 });
+  ), { contentScale: 1, spaceX: 0 });
   assert.deepEqual(inputFontRuntimeProps(
     element('fraction', 'FractionInput', {}, 360, 120),
     metrics,
   ), {
     contentScale: 1,
+    spaceX: 6,
     fontWidth: 39,
     fontHeight: 59,
     fontScale: 1,
@@ -122,6 +151,7 @@ test('普通与分数输入框共用字形指标，窄字符和分数结构使�
     metrics,
   ), {
     contentScale: 1,
+    spaceX: 6,
     fontWidth: 39,
     fontHeight: 59,
     fontScale: 1,
@@ -163,6 +193,7 @@ test('自定义答案只提供字符集合，输入框主题不会被键盘主�
   assert.equal(input.props.sheet, '东南西北');
   assert.equal(input.props.place, 1);
   assert.equal(input.props.contentScale, 1);
+  assert.equal(input.props.spaceX, 0);
   assert.equal(input.props.fontClipSkin, 'data:image/png;base64,input-blue');
   assert.equal((keyboard.props._customAnswerKeyboard as Record<string, unknown>).theme, 'green');
 });
@@ -171,6 +202,7 @@ test('三色字体图进入导出资源，预览样例和配置字段不进入 s
   const themedInput = element('themed', 'KlInputImage', {
     _inputTextTheme: 'yellow',
     _inputFontSize: 28,
+    _inputLetterSpacing: 8,
     _inputFontReferenceWidth: 120,
     _inputFontReferenceHeight: 60,
     _inputFontPreview: '12+3',
@@ -189,10 +221,11 @@ test('三色字体图进入导出资源，预览样例和配置字段不进入 s
   });
 
   assert.equal(themedInput.props.fontClipSkin, 'data:image/png;base64,font-yellow');
+  assert.equal(themedInput.props.spaceX, 8);
   assert.equal(legacyInput.props.fontClipSkin, 'game/inputImg/jp_num40.png');
   const artifacts = buildExportRegressionArtifacts(course);
   const scene = JSON.stringify(artifacts.scenes);
   assert.match(scene, /skin_\d+\.png/);
-  assert.doesNotMatch(scene, /_inputTextTheme|_inputFontSize|_inputFontReference|_inputFontPreview|12\+3/);
+  assert.doesNotMatch(scene, /_inputTextTheme|_inputFontSize|_inputLetterSpacing|_inputFontReference|_inputFontPreview|12\+3/);
   assert.match(scene, /game_lt\/image\/inputImg\/jp_num40\.png/);
 });

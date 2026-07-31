@@ -16,6 +16,11 @@ export const INPUT_FONT_SIZE_MAX = 120;
 export const INPUT_FONT_SIZE_STEP = 1;
 export const DEFAULT_INPUT_FONT_SIZE = 36;
 export const DEFAULT_FRACTION_INPUT_FONT_SIZE = 42;
+export const INPUT_LETTER_SPACING_MIN = -20;
+export const INPUT_LETTER_SPACING_MAX = 60;
+export const INPUT_LETTER_SPACING_STEP = 1;
+export const DEFAULT_INPUT_LETTER_SPACING = 0;
+export const DEFAULT_FRACTION_INPUT_LETTER_SPACING = 6;
 export const DEFAULT_INPUT_FRACTION_FONT_SCALE = 0.64;
 export const INPUT_FRACTION_FONT_PERCENT_MIN = 40;
 export const INPUT_FRACTION_FONT_PERCENT_MAX = 100;
@@ -80,6 +85,29 @@ export function effectiveInputFontSize(element: Pick<Element, 'type' | 'width' |
 
 export function inputFontPercentage(type: string, fontSize: number): number {
   return Math.round((fontSize / defaultInputFontSize(type)) * 100);
+}
+
+export function defaultInputLetterSpacing(type: string): number {
+  return type === 'FractionInput'
+    ? DEFAULT_FRACTION_INPUT_LETTER_SPACING
+    : DEFAULT_INPUT_LETTER_SPACING;
+}
+
+export function clampInputLetterSpacing(
+  value: unknown,
+  fallback = DEFAULT_INPUT_LETTER_SPACING,
+): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(INPUT_LETTER_SPACING_MAX, Math.max(INPUT_LETTER_SPACING_MIN, Math.round(parsed)));
+}
+
+export function effectiveInputLetterSpacing(
+  element: Pick<Element, 'type' | 'width' | 'height' | 'props'>,
+): number {
+  const fallback = defaultInputLetterSpacing(element.type);
+  const configured = clampInputLetterSpacing(element.props?._inputLetterSpacing, fallback);
+  return clampInputLetterSpacing(configured * inputFontScale(element), fallback);
 }
 
 export function clampInputFractionFontScale(
@@ -152,15 +180,21 @@ export function getInputFractionLayoutMetrics(
   fractionPartScale: number,
   numeratorLength = 1,
   denominatorLength = 1,
+  letterSpacing?: number,
 ): InputFractionLayoutMetrics {
   const scale = clampInputFractionFontScale(fractionPartScale);
   const digitCount = Math.max(1, Math.round(Math.max(numeratorLength, denominatorLength)));
   const horizontalPadding = Math.max(8, Math.round(metrics.fontSize * 0.24));
   const verticalGap = Math.max(4, Math.round(metrics.fontSize * 0.14));
-  const tokenGap = Math.max(4, Math.round(metrics.fontSize * 0.14));
+  const tokenGap = clampInputLetterSpacing(
+    letterSpacing,
+    Math.max(4, Math.round(metrics.fontSize * 0.14)),
+  );
   const partHeight = metrics.cellHeight * scale;
+  const glyphAdvance = Math.max(1, metrics.cellWidth + tokenGap);
+  const textWidth = metrics.cellWidth + (digitCount - 1) * glyphAdvance;
   return {
-    width: Math.ceil(digitCount * metrics.cellWidth * scale + horizontalPadding * 2),
+    width: Math.ceil(textWidth * scale + horizontalPadding * 2),
     height: Math.ceil(partHeight * 2 + verticalGap),
     partHeight,
     horizontalPadding,
@@ -210,12 +244,14 @@ export function inputFontRuntimeProps(
   element: Pick<Element, 'type' | 'width' | 'height' | 'props'>,
   metrics: InputFontGlyphMetrics,
 ): Record<string, unknown> {
+  const letterSpacing = effectiveInputLetterSpacing(element);
   const common: Record<string, unknown> = {
     contentScale: 1,
+    spaceX: letterSpacing,
   };
   if (element.type !== 'FractionInput') return common;
   const fractionPartScale = readInputFractionFontScale(element);
-  const layout = getInputFractionLayoutMetrics(metrics, fractionPartScale);
+  const layout = getInputFractionLayoutMetrics(metrics, fractionPartScale, 1, 1, letterSpacing);
   return {
     ...common,
     fontWidth: metrics.cellWidth,
