@@ -3,9 +3,12 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import type { Element } from '../types';
 import type { PropertyDef } from '../elements/elementMeta';
 import {
+  isMathKeyboardPresetId,
   readCustomAnswerKeyboardConfig,
+  readMathKeyboardTheme,
   type CustomAnswerKeyboardConfig,
   type CustomAnswerKeyboardTheme,
+  type MathKeyboardTheme,
 } from '../elements/keyboardPresets';
 import { useEditorStore, findSubPage } from '../store/editorStore';
 import { showToast } from '../utils/toast';
@@ -415,6 +418,61 @@ const ANSWER_THEME_OPTIONS: Array<{
   { value: 'green', label: '绿色皮肤', color: '#69b77d' },
 ];
 
+function KeyboardThemeSwatches({
+  value,
+  onChange,
+}: {
+  value: MathKeyboardTheme;
+  onChange: (theme: MathKeyboardTheme) => void;
+}) {
+  return (
+    <div className="flex gap-1.5">
+      {ANSWER_THEME_OPTIONS.map((option) => {
+        const selected = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            title={option.label}
+            aria-label={option.label}
+            onClick={() => onChange(option.value)}
+            className={`h-8 w-8 flex items-center justify-center rounded border ${
+              selected ? 'border-blue-400 bg-blue-500/20' : 'border-slate-600 bg-slate-800 hover:border-slate-400'
+            }`}
+          >
+            <span
+              className="h-4 w-4 rounded-sm border border-white/40"
+              style={{ backgroundColor: option.color }}
+            />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function MathKeyboardThemeField({
+  field,
+  elements,
+  onChange,
+}: {
+  field: PropertyDef;
+  elements: Element[];
+  onChange: (key: string, value: unknown) => void;
+}) {
+  const element = elements.length === 1 ? elements[0] : null;
+  const presetId = (element?.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (!element || !isMathKeyboardPresetId(presetId)) return null;
+  return (
+    <Row label={field.label} tooltip={field.tooltip} stacked>
+      <KeyboardThemeSwatches
+        value={readMathKeyboardTheme(element)}
+        onChange={(theme) => onChange(field.key, theme)}
+      />
+    </Row>
+  );
+}
+
 function AnswerKeyboardField({
   field,
   elements,
@@ -449,28 +507,10 @@ function AnswerKeyboardField({
     <Row label={field.label} tooltip={field.tooltip} stacked>
       <div className="mb-2">
         <div className="text-[10px] text-slate-500 mb-1">键盘皮肤</div>
-        <div className="flex gap-1.5">
-          {ANSWER_THEME_OPTIONS.map((option) => {
-            const selected = config.theme === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                title={option.label}
-                aria-label={option.label}
-                onClick={() => update({ ...config, theme: option.value })}
-                className={`h-8 w-8 flex items-center justify-center rounded border ${
-                  selected ? 'border-blue-400 bg-blue-500/20' : 'border-slate-600 bg-slate-800 hover:border-slate-400'
-                }`}
-              >
-                <span
-                  className="h-4 w-4 rounded-sm border border-white/40"
-                  style={{ backgroundColor: option.color }}
-                />
-              </button>
-            );
-          })}
-        </div>
+        <KeyboardThemeSwatches
+          value={config.theme}
+          onChange={(theme) => update({ ...config, theme })}
+        />
       </div>
 
       <div className="space-y-1">
@@ -580,6 +620,9 @@ export default function FieldRenderer({
   };
 
   switch (field.type) {
+    case 'mathKeyboardTheme':
+      return <MathKeyboardThemeField field={field} elements={elements} onChange={onChange} />;
+
     case 'answerKeyboard':
       return <AnswerKeyboardField field={field} elements={elements} onChange={onChange} />;
 

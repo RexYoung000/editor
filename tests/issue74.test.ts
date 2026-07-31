@@ -81,7 +81,13 @@ test('数字与分数键盘的兼容矩阵和资源注册完整', () => {
       preset1: ['KlInputImage'],
       preset2: ['KlInputImage'],
       decimal: ['KlInputImage'],
+      percent: ['KlInputImage'],
+      percentDecimal: ['KlInputImage'],
+      percentOperators: ['KlInputImage'],
+      percentExpression: ['KlInputImage'],
       fraction: ['FractionInput'],
+      decimalFraction: ['FractionInput'],
+      mathExpression: ['FractionInput'],
       customAnswer: ['KlInputImage'],
     },
   );

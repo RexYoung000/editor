@@ -28,9 +28,38 @@ export interface KeyboardPreset {
   defaultProps: Record<string, unknown>;
   defaultSize: { width: number; height: number };
   children: ExportChild[];
+  math?: MathKeyboardDefinition;
 }
 
 export type CustomAnswerKeyboardTheme = 'yellow' | 'blue' | 'green';
+export type MathKeyboardTheme = CustomAnswerKeyboardTheme;
+
+export interface MathKeyboardKeyDefinition {
+  output: string;
+  span?: number;
+}
+
+export interface MathKeyboardDefinition {
+  columns: 3 | 5;
+  keys: MathKeyboardKeyDefinition[];
+}
+
+export interface MathKeyboardLayout {
+  columns: 3 | 5;
+  rows: number;
+  boardWidth: number;
+  boardHeight: number;
+  elementWidth: number;
+  elementHeight: number;
+  keys: Array<{
+    output: string;
+    span: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
+}
 
 export interface CustomAnswerKeyboardConfig {
   answers: string[];
@@ -58,6 +87,8 @@ export const DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG: CustomAnswerKeyboardConfig =
 };
 
 const CUSTOM_ANSWER_THEMES: CustomAnswerKeyboardTheme[] = ['yellow', 'blue', 'green'];
+const MATH_KEYBOARD_THEMES: MathKeyboardTheme[] = ['yellow', 'blue', 'green'];
+export const DEFAULT_MATH_KEYBOARD_THEME: MathKeyboardTheme = 'yellow';
 const CUSTOM_ANSWER_KEY_SIZE = { width: 84, height: 88 };
 const CUSTOM_ANSWER_BOARD_MIN_WIDTH = 330;
 const CUSTOM_ANSWER_KEY_GAP = 12;
@@ -708,112 +739,325 @@ const preset2Children: ExportChild[] = [
   },
 ];
 
-const MATH_KEY_SHEET = '0123456789+-*/=<>()p';
-const MATH_KEY_X = [69, 165, 261];
-const MATH_KEY_Y = [67, 159, 252, 344];
+export const MATH_KEY_SHEET = '0123456789+-*/=<>()p%';
+const MATH_KEY_WIDTH = 84;
+const MATH_KEY_HEIGHT = 88;
+const MATH_KEY_GAP = 12;
+const MATH_BOARD_HORIZONTAL_PADDING = 27;
+const MATH_BOARD_TOP_PADDING = 26;
+const MATH_BOARD_BOTTOM_PADDING = 32;
+const MATH_BOARD_OFFSET_X = 65;
+const MATH_BOARD_OFFSET_Y = 65;
+const MATH_ELEMENT_BOTTOM_SPACE = 39;
 
-const mathKey = (x: number, y: number, output: string | number): ExportChild => {
-  const isFraction = output === '<_>';
-  const isDelete = output === 'del';
-  const icon = isFraction
-    ? {
-        normal: assetExport('keyboard.math.fractionNormal'),
-        active: assetExport('keyboard.math.fractionActive'),
-      }
-    : null;
-  const childForState = (active: boolean): ExportChild[] => {
-    if (isDelete) {
-      return [{
-        type: 'Image',
-        props: {
-          skin: assetExport(active ? 'keyboard.math.delActive' : 'keyboard.math.delIcon'),
-          centerX: 0,
-          centerY: 0,
-        },
-      }];
+const DECIMAL_KEYS: MathKeyboardKeyDefinition[] = [
+  ...'1234567890'.split('').map((output) => ({ output })),
+  { output: '.' },
+  { output: 'del' },
+];
+
+const FRACTION_KEYS: MathKeyboardKeyDefinition[] = [
+  ...'1234567890'.split('').map((output) => ({ output })),
+  { output: '<_>' },
+  { output: 'del' },
+];
+
+const DECIMAL_FRACTION_KEYS: MathKeyboardKeyDefinition[] = [
+  ...'1234567890'.split('').map((output) => ({ output })),
+  { output: '.' },
+  { output: '<_>' },
+  { output: 'del', span: 3 },
+];
+
+const OPERATOR_KEYS: MathKeyboardKeyDefinition[] = [
+  { output: '+' },
+  { output: '-' },
+  { output: '*' },
+  { output: '/' },
+  { output: '=' },
+  { output: '(' },
+  { output: ')' },
+];
+
+const FRACTION_OPERATOR_KEYS: MathKeyboardKeyDefinition[] = OPERATOR_KEYS.map((key) => ({
+  ...key,
+  output: key.output === '*' ? '×' : key.output === '/' ? '÷' : key.output,
+}));
+
+const EXPRESSION_KEYS: MathKeyboardKeyDefinition[] = [
+  ...'1234567890'.split('').map((output) => ({ output })),
+  ...FRACTION_OPERATOR_KEYS,
+  { output: '.' },
+  { output: '<_>' },
+  { output: 'del' },
+];
+
+const PERCENT_KEYS: MathKeyboardKeyDefinition[] = [
+  ...'1234567890'.split('').map((output) => ({ output })),
+  { output: '%' },
+  { output: 'del' },
+];
+
+const PERCENT_DECIMAL_KEYS: MathKeyboardKeyDefinition[] = [
+  ...'1234567890'.split('').map((output) => ({ output })),
+  { output: '%' },
+  { output: '.' },
+  { output: 'del', span: 3 },
+];
+
+const PERCENT_OPERATOR_KEYS: MathKeyboardKeyDefinition[] = [
+  ...'1234567890'.split('').map((output) => ({ output })),
+  ...OPERATOR_KEYS,
+  { output: '%' },
+  { output: 'del', span: 2 },
+];
+
+const PERCENT_EXPRESSION_KEYS: MathKeyboardKeyDefinition[] = [
+  ...'1234567890'.split('').map((output) => ({ output })),
+  ...OPERATOR_KEYS,
+  { output: '%' },
+  { output: '.' },
+  { output: 'del' },
+];
+
+const mathDefinition = (
+  columns: MathKeyboardDefinition['columns'],
+  keys: MathKeyboardKeyDefinition[],
+): MathKeyboardDefinition => ({ columns, keys });
+
+const MATH_DEFINITIONS = {
+  decimal: mathDefinition(3, DECIMAL_KEYS),
+  percent: mathDefinition(3, PERCENT_KEYS),
+  percentDecimal: mathDefinition(3, PERCENT_DECIMAL_KEYS),
+  percentOperators: mathDefinition(5, PERCENT_OPERATOR_KEYS),
+  percentExpression: mathDefinition(5, PERCENT_EXPRESSION_KEYS),
+  fraction: mathDefinition(3, FRACTION_KEYS),
+  decimalFraction: mathDefinition(3, DECIMAL_FRACTION_KEYS),
+  mathExpression: mathDefinition(5, EXPRESSION_KEYS),
+} as const;
+
+export type MathKeyboardPresetId = keyof typeof MATH_DEFINITIONS;
+
+export function isMathKeyboardPresetId(value: unknown): value is MathKeyboardPresetId {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(MATH_DEFINITIONS, value);
+}
+
+export function isMathKeyboardTheme(value: unknown): value is MathKeyboardTheme {
+  return typeof value === 'string' && MATH_KEYBOARD_THEMES.includes(value as MathKeyboardTheme);
+}
+
+export function readMathKeyboardTheme(
+  source: Pick<Element, 'props'> | Record<string, unknown> | null | undefined,
+): MathKeyboardTheme {
+  const props = source && 'props' in source
+    ? (source.props as Record<string, unknown> | undefined)
+    : source;
+  return isMathKeyboardTheme(props?._mathKeyboardTheme)
+    ? props._mathKeyboardTheme
+    : DEFAULT_MATH_KEYBOARD_THEME;
+}
+
+export function getMathKeyboardThemeAssets(theme: MathKeyboardTheme, editor = false) {
+  const resolve = editor ? assetSrc : assetExport;
+  const prefix = `keyboard.math.${theme}`;
+  return {
+    bg: resolve(`${prefix}.bg`),
+    keyNormal: resolve(`${prefix}.keyNormal`),
+    keyActive: resolve(`${prefix}.keyActive`),
+    wideNormal: resolve(`${prefix}.wideNormal`),
+    wideActive: resolve(`${prefix}.wideActive`),
+    glyphNormal: resolve(`${prefix}.glyphNormal`),
+    glyphActive: resolve(`${prefix}.glyphActive`),
+    delNormal: resolve(`${prefix}.delNormal`),
+    delActive: resolve(`${prefix}.delActive`),
+    fractionNormal: resolve(`${prefix}.fractionNormal`),
+    fractionActive: resolve(`${prefix}.fractionActive`),
+    arrow: resolve(`${prefix}.arrow`),
+  };
+}
+
+export function getMathKeyboardLayout(definition: MathKeyboardDefinition): MathKeyboardLayout {
+  let column = 0;
+  let row = 0;
+  const keys = definition.keys.map((key) => {
+    const span = Math.max(1, Math.min(definition.columns, key.span ?? 1));
+    if (column + span > definition.columns) {
+      row += 1;
+      column = 0;
     }
-    if (icon) {
+    const width = span * MATH_KEY_WIDTH + (span - 1) * MATH_KEY_GAP;
+    const layoutKey = {
+      ...key,
+      span,
+      x: MATH_BOARD_HORIZONTAL_PADDING + column * (MATH_KEY_WIDTH + MATH_KEY_GAP) + width / 2,
+      y: MATH_BOARD_TOP_PADDING + row * (MATH_KEY_HEIGHT + MATH_KEY_GAP) + MATH_KEY_HEIGHT / 2,
+      width,
+      height: MATH_KEY_HEIGHT,
+    };
+    column += span;
+    if (column === definition.columns) {
+      row += 1;
+      column = 0;
+    }
+    return layoutKey;
+  });
+  const rows = row + (column > 0 ? 1 : 0);
+  const boardWidth = definition.columns * MATH_KEY_WIDTH
+    + (definition.columns - 1) * MATH_KEY_GAP
+    + MATH_BOARD_HORIZONTAL_PADDING * 2;
+  const boardHeight = rows * MATH_KEY_HEIGHT
+    + (rows - 1) * MATH_KEY_GAP
+    + MATH_BOARD_TOP_PADDING
+    + MATH_BOARD_BOTTOM_PADDING;
+  return {
+    columns: definition.columns,
+    rows,
+    boardWidth,
+    boardHeight,
+    elementWidth: boardWidth + MATH_BOARD_OFFSET_X * 2,
+    elementHeight: MATH_BOARD_OFFSET_Y + boardHeight + MATH_ELEMENT_BOTTOM_SPACE,
+    keys,
+  };
+}
+
+const mathKey = (
+  key: MathKeyboardLayout['keys'][number],
+  theme: MathKeyboardTheme,
+  editor = false,
+): ExportChild => {
+  const assets = getMathKeyboardThemeAssets(theme, editor);
+  const isFraction = key.output === '<_>';
+  const isDelete = key.output === 'del';
+  const childForState = (active: boolean): ExportChild[] => {
+    if (isDelete || isFraction) {
       return [{
         type: 'Image',
         props: {
-          skin: active ? icon.active : icon.normal,
+          skin: isDelete
+            ? (active ? assets.delActive : assets.delNormal)
+            : (active ? assets.fractionActive : assets.fractionNormal),
           centerX: 0,
-          centerY: 0,
+          centerY: active ? 2 : 0,
         },
       }];
     }
     return [{
       type: 'FontClip',
       props: {
-        x: 42,
-        y: 39,
+        x: key.width / 2,
+        y: MATH_KEY_HEIGHT / 2 + (active ? 2 : 0),
         anchorX: 0.5,
         anchorY: 0.5,
-        value: output === '.' ? 'p' : String(output),
-        skin: assetExport(active ? 'keyboard.math.numActive' : 'keyboard.math.numNormal'),
+        value: key.output === '.'
+          ? 'p'
+          : key.output === '×'
+            ? '*'
+            : key.output === '÷'
+              ? '/'
+              : key.output,
+        skin: active ? assets.glyphActive : assets.glyphNormal,
         sheet: MATH_KEY_SHEET,
       },
     }];
   };
+  const state = (active: boolean): ExportChild => ({
+    type: 'Image',
+    props: {
+      width: key.width,
+      height: MATH_KEY_HEIGHT,
+      skin: key.span > 1
+        ? (active ? assets.wideActive : assets.wideNormal)
+        : (active ? assets.keyActive : assets.keyNormal),
+      sizeGrid: '0,28,0,28',
+      name: active ? 'active' : 'normal',
+    },
+    child: childForState(active),
+  });
   return {
     type: 'KlKey',
     props: {
-      x,
-      y,
-      width: 84,
-      height: 88,
+      x: key.x,
+      y: key.y,
+      width: key.width,
+      height: key.height,
       anchorX: 0.5,
       anchorY: 0.5,
-      output,
+      output: key.output,
       runtime: 'com.klzz.ui.custom.KeyBoard.KlKey',
     },
-    child: [
-      {
-        type: 'Image',
-        props: {
-          skin: assetExport('keyboard.math.keyNormal'),
-          sizeGrid: '0,28,0,28',
-          name: 'normal',
-        },
-        child: childForState(false),
-      },
-      {
-        type: 'Image',
-        props: {
-          skin: assetExport('keyboard.math.keyActive'),
-          name: 'active',
-        },
-        child: childForState(true),
-      },
-    ],
+    child: [state(false), state(true)],
   };
 };
 
-function mathKeyboardChildren(specialOutput: '.' | '<_>'): ExportChild[] {
-  const outputs: Array<string | number> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0, specialOutput, 'del'];
+function mathKeyboardChildren(
+  definition: MathKeyboardDefinition,
+  theme: MathKeyboardTheme,
+  editor = false,
+): ExportChild[] {
+  const layout = getMathKeyboardLayout(definition);
+  const assets = getMathKeyboardThemeAssets(theme, editor);
   return [
     {
       type: 'Image',
       props: {
-        x: 65,
-        y: 65,
-        width: 330,
-        height: 420,
-        skin: assetExport('keyboard.math.bg'),
-        sizeGrid: '53,0,57,0',
+        x: MATH_BOARD_OFFSET_X,
+        y: MATH_BOARD_OFFSET_Y,
+        width: layout.boardWidth,
+        height: layout.boardHeight,
+        skin: assets.bg,
+        sizeGrid: '53,52,57,52',
       },
     },
-    { type: 'Image', props: { x: 230, y: 0, skin: assetExport('keyboard.math.arrow'), name: 'arrow', anchorX: 0.5 } },
+    {
+      type: 'Image',
+      props: {
+        x: layout.elementWidth / 2,
+        y: 0,
+        skin: assets.arrow,
+        name: 'arrow',
+        anchorX: 0.5,
+      },
+    },
     {
       type: 'Box',
-      props: { x: 65, y: 65, width: 330, height: 420, name: 'keysBox' },
-      child: outputs.map((output, index) => mathKey(
-        MATH_KEY_X[index % 3],
-        MATH_KEY_Y[Math.floor(index / 3)],
-        output,
-      )),
+      props: {
+        x: MATH_BOARD_OFFSET_X,
+        y: MATH_BOARD_OFFSET_Y,
+        width: layout.boardWidth,
+        height: layout.boardHeight,
+        name: 'keysBox',
+      },
+      child: layout.keys.map((key) => mathKey(key, theme, editor)),
     },
   ];
+}
+
+export function getMathKeyboardChildren(
+  element: Pick<Element, 'props'>,
+  editor = false,
+): ExportChild[] | undefined {
+  const presetId = (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (!isMathKeyboardPresetId(presetId)) return undefined;
+  return mathKeyboardChildren(MATH_DEFINITIONS[presetId], readMathKeyboardTheme(element), editor);
+}
+
+function mathPresetDefaultProps(sheet: string): Record<string, unknown> {
+  return {
+    anchorX: 0,
+    anchorY: 0,
+    sheet,
+    pattern: 13,
+    visible: false,
+    isHide: true,
+    fixed: true,
+    disabled: false,
+    _mathKeyboardTheme: DEFAULT_MATH_KEYBOARD_THEME,
+  };
+}
+
+function mathPresetSize(definition: MathKeyboardDefinition) {
+  const layout = getMathKeyboardLayout(definition);
+  return { width: layout.elementWidth, height: layout.elementHeight };
 }
 
 export const KEYBOARD_PRESETS: KeyboardPreset[] = [
@@ -857,18 +1101,54 @@ export const KEYBOARD_PRESETS: KeyboardPreset[] = [
     thumbnail: assetSrc('keyboard.decimal.thumbnail'),
     compatibleInputTypes: ['KlInputImage'],
     campPrefix: 'L12_DECIMAL',
-    defaultSize: { width: 460, height: 550 },
-    defaultProps: {
-      anchorX: 0,
-      anchorY: 0,
-      sheet: '0123456789.',
-      pattern: 13,
-      visible: false,
-      isHide: true,
-      fixed: true,
-      disabled: false,
-    },
-    children: mathKeyboardChildren('.'),
+    defaultSize: mathPresetSize(MATH_DEFINITIONS.decimal),
+    defaultProps: mathPresetDefaultProps('0123456789.'),
+    children: mathKeyboardChildren(MATH_DEFINITIONS.decimal, DEFAULT_MATH_KEYBOARD_THEME),
+    math: MATH_DEFINITIONS.decimal,
+  },
+  {
+    id: 'percent',
+    label: '数字百分比',
+    thumbnail: assetSrc('keyboard.percent.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
+    campPrefix: 'L12_PERCENT',
+    defaultSize: mathPresetSize(MATH_DEFINITIONS.percent),
+    defaultProps: mathPresetDefaultProps('0123456789%'),
+    children: mathKeyboardChildren(MATH_DEFINITIONS.percent, DEFAULT_MATH_KEYBOARD_THEME),
+    math: MATH_DEFINITIONS.percent,
+  },
+  {
+    id: 'percentDecimal',
+    label: '数字百分比与小数点',
+    thumbnail: assetSrc('keyboard.percentDecimal.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
+    campPrefix: 'L12_PERCENT_DECIMAL',
+    defaultSize: mathPresetSize(MATH_DEFINITIONS.percentDecimal),
+    defaultProps: mathPresetDefaultProps('0123456789%.'),
+    children: mathKeyboardChildren(MATH_DEFINITIONS.percentDecimal, DEFAULT_MATH_KEYBOARD_THEME),
+    math: MATH_DEFINITIONS.percentDecimal,
+  },
+  {
+    id: 'percentOperators',
+    label: '数字百分比与运算符',
+    thumbnail: assetSrc('keyboard.percentOperators.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
+    campPrefix: 'L12_PERCENT_OPERATORS',
+    defaultSize: mathPresetSize(MATH_DEFINITIONS.percentOperators),
+    defaultProps: mathPresetDefaultProps('0123456789%+-*/=()'),
+    children: mathKeyboardChildren(MATH_DEFINITIONS.percentOperators, DEFAULT_MATH_KEYBOARD_THEME),
+    math: MATH_DEFINITIONS.percentOperators,
+  },
+  {
+    id: 'percentExpression',
+    label: '数字百分比、运算符与小数点',
+    thumbnail: assetSrc('keyboard.percentExpression.thumbnail'),
+    compatibleInputTypes: ['KlInputImage'],
+    campPrefix: 'L12_PERCENT_EXPRESSION',
+    defaultSize: mathPresetSize(MATH_DEFINITIONS.percentExpression),
+    defaultProps: mathPresetDefaultProps('0123456789%+-*/=().'),
+    children: mathKeyboardChildren(MATH_DEFINITIONS.percentExpression, DEFAULT_MATH_KEYBOARD_THEME),
+    math: MATH_DEFINITIONS.percentExpression,
   },
   {
     id: 'fraction',
@@ -876,18 +1156,32 @@ export const KEYBOARD_PRESETS: KeyboardPreset[] = [
     thumbnail: assetSrc('keyboard.fraction.thumbnail'),
     compatibleInputTypes: ['FractionInput'],
     campPrefix: 'L12_FRACTION',
-    defaultSize: { width: 460, height: 550 },
-    defaultProps: {
-      anchorX: 0,
-      anchorY: 0,
-      sheet: '0123456789',
-      pattern: 13,
-      visible: false,
-      isHide: true,
-      fixed: true,
-      disabled: false,
-    },
-    children: mathKeyboardChildren('<_>'),
+    defaultSize: mathPresetSize(MATH_DEFINITIONS.fraction),
+    defaultProps: mathPresetDefaultProps('0123456789'),
+    children: mathKeyboardChildren(MATH_DEFINITIONS.fraction, DEFAULT_MATH_KEYBOARD_THEME),
+    math: MATH_DEFINITIONS.fraction,
+  },
+  {
+    id: 'decimalFraction',
+    label: '小数与分数组合',
+    thumbnail: assetSrc('keyboard.decimalFraction.thumbnail'),
+    compatibleInputTypes: ['FractionInput'],
+    campPrefix: 'L12_DECIMAL_FRACTION',
+    defaultSize: mathPresetSize(MATH_DEFINITIONS.decimalFraction),
+    defaultProps: mathPresetDefaultProps('0123456789.'),
+    children: mathKeyboardChildren(MATH_DEFINITIONS.decimalFraction, DEFAULT_MATH_KEYBOARD_THEME),
+    math: MATH_DEFINITIONS.decimalFraction,
+  },
+  {
+    id: 'mathExpression',
+    label: '数学表达式',
+    thumbnail: assetSrc('keyboard.mathExpression.thumbnail'),
+    compatibleInputTypes: ['FractionInput'],
+    campPrefix: 'L12_MATH_EXPRESSION',
+    defaultSize: mathPresetSize(MATH_DEFINITIONS.mathExpression),
+    defaultProps: mathPresetDefaultProps('0123456789.+-×÷=()'),
+    children: mathKeyboardChildren(MATH_DEFINITIONS.mathExpression, DEFAULT_MATH_KEYBOARD_THEME),
+    math: MATH_DEFINITIONS.mathExpression,
   },
   {
     id: 'customAnswer',
@@ -927,7 +1221,10 @@ export function getKeyboardChildren(element: Pick<Element, 'props'>): ExportChil
   if (typeof presetId !== 'string') return undefined;
   const preset = getKeyboardPreset(presetId);
   if (!preset) return undefined;
-  return presetId === 'customAnswer'
-    ? customAnswerKeyboardChildren(readCustomAnswerKeyboardConfig(element))
+  if (presetId === 'customAnswer') {
+    return customAnswerKeyboardChildren(readCustomAnswerKeyboardConfig(element));
+  }
+  return preset.math
+    ? mathKeyboardChildren(preset.math, readMathKeyboardTheme(element))
     : preset.children;
 }

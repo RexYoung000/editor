@@ -7,7 +7,7 @@ export const NEW_TEXT_DEFAULT_CONTENT = '双击编辑文本';
 export interface PropertyDef {
   key: string;
   label: string;
-  type: 'number' | 'text' | 'textarea' | 'color' | 'select' | 'slider' | 'boolean' | 'file' | 'elementRef' | 'spineFolder' | 'fontLibrary' | 'fontLocal' | 'matchingItemRef' | 'answerKeyboard';
+  type: 'number' | 'text' | 'textarea' | 'color' | 'select' | 'slider' | 'boolean' | 'file' | 'elementRef' | 'spineFolder' | 'fontLibrary' | 'fontLocal' | 'matchingItemRef' | 'answerKeyboard' | 'mathKeyboardTheme';
   /** 仅 type:'file' 时生效；undefined 时按 'image' 处理 */
   fileType?: 'image' | 'audio' | 'video';
   group?: string;
@@ -368,6 +368,7 @@ export const elementMeta: Record<string, Meta> = {
     defaultProps: {},
     properties: [
       ...COMMON_STATE_PROPS,
+      { key: '_mathKeyboardTheme', label: '键盘皮肤', type: 'mathKeyboardTheme', group: '外观' },
       { key: '_customAnswerKeyboard', label: '答案配置', type: 'answerKeyboard', group: '交互' },
       { key: 'camp',    label: '阵营',     type: 'text',    group: '交互' },
       { key: 'sheet',   label: '可输入字符', type: 'text',  group: '交互' },

@@ -14,13 +14,13 @@ export default function KeyboardPresetDialog({ open, onClose, onSelect, presets 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
-      <div className="bg-slate-800 rounded-lg shadow-xl w-[640px] max-w-[90vw]" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+      <div className="bg-slate-800 rounded-lg shadow-xl w-[640px] max-w-[90vw] max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between px-4 py-3 border-b border-slate-700">
           <span className="text-sm font-medium text-white">选择键盘预设</span>
           <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={16} /></button>
         </div>
 
-        <div className="p-4">
+        <div className="min-h-0 overflow-y-auto p-4">
           <div className="grid grid-cols-3 gap-4">
             {presets.map((preset) => (
               <PresetCard key={preset.id} preset={preset} onClick={() => onSelect(preset)} />
@@ -55,7 +55,7 @@ function PresetCard({ preset, onClick }: { preset: KeyboardPreset; onClick: () =
           </div>
         )}
       </div>
-      <span className="text-xs text-slate-300 group-hover:text-white">{preset.label}</span>
+      <span className="min-h-8 text-center text-xs leading-4 text-slate-300 group-hover:text-white">{preset.label}</span>
     </button>
   );
 }

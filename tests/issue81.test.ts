@@ -52,5 +52,5 @@ test('分数键盘选择器缩略图同步黄色分数图标', () => {
 
   const thumbnail = readBuiltin('editor/keyboard-fraction-thumb.png');
   assert.deepEqual(pngSize(thumbnail), { width: 460, height: 550 });
-  assert.equal(sha256(thumbnail), '1382b89ad42fc6d6c707ed4a86533c58291d4e34d2946f37e50e709af00039c4');
+  assert.equal(sha256(thumbnail), '66a7cd3f82826e2024d51c5aebedfa0854d13244805e9034b2050a729cc1289a');
 });
