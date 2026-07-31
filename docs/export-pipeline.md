@@ -99,6 +99,12 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 字体选择与默认值以 [字体库与历史兼容](font-library.md) 为准。历史课件中的旧方正字体 ID 会在进入编辑器时迁移为“思源黑体 Regular”，字体解析入口也执行同一缺省归一化；导出只携带烘焙后的 PNG，不携带或动态加载 OTF/TTF。
 
+### 4.1.1 输入框字体图烘焙
+
+`bakeCourseAssets` 在同一份课程副本中统一烘焙 `KlInputImage`、`FractionInput` 和自定义答案键盘的文字资源。显式配置了新输入框文字主题的组件按“字符表 + 黄色/蓝色/绿色主题 + 当前比例字号”生成横向 FontClip PNG，并把运行时需要的 `fontClipSkin`、`sheet`、单元宽高、字符间距与缩放参数写入副本。一个字符间距值统一控制连续字符、分子分母和字符与分数结构之间的间隔，并与字号一起按框体比例缩放。分数输入框还把独立分数字号比例转换为分子分母缩放、分数线宽度和纵向结构比例，默认 `64%`；普通输入框和分数输入框必须调用同一套样式与字形生成器，自定义答案键盘只提供答案字符集合，不能覆盖输入框自己的主题。
+
+生成结果仍是 `data:image/png;base64,...`，因此继续通过统一资源收集、路径重写和写盘链路进入 Electron 预览与正式工程，不在课件运行时加载字体文件。输入框字号弹窗保存的测试样例属于 `_` 前缀编辑器配置，在构建 scene 前剥离；它不得成为 `fontClipValue`、正确答案或运行时资源。没有新主题字段的历史输入框跳过这一步，保留原 `fontClipSkin` 和旧显示行为。
+
 ### 4.2 资源收集 `collectResources(course, viewDir, stages, options)`
 
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用该入口，通过 `viewDir` 和待遍历 stages 决定课程命名空间，遍历所有元素的 `props` / `actions` / `exportChildren` / `_keyboardPreset.children`，产出 `Map<src, dest>`：

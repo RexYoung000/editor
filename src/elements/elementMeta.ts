@@ -7,7 +7,7 @@ export const NEW_TEXT_DEFAULT_CONTENT = '双击编辑文本';
 export interface PropertyDef {
   key: string;
   label: string;
-  type: 'number' | 'text' | 'textarea' | 'color' | 'select' | 'slider' | 'boolean' | 'file' | 'elementRef' | 'spineFolder' | 'fontLibrary' | 'fontLocal' | 'matchingItemRef' | 'answerKeyboard' | 'mathKeyboardTheme';
+  type: 'number' | 'text' | 'textarea' | 'color' | 'select' | 'slider' | 'boolean' | 'file' | 'elementRef' | 'spineFolder' | 'fontLibrary' | 'fontLocal' | 'matchingItemRef' | 'answerKeyboard' | 'mathKeyboardTheme' | 'inputTextTheme';
   /** 仅 type:'file' 时生效；undefined 时按 'image' 处理 */
   fileType?: 'image' | 'audio' | 'video';
   group?: string;
@@ -149,6 +149,12 @@ const KL_INPUT_IMAGE_CONFIG = {
   defaultProps: {
     anchorX: 0, anchorY: 0,
     _judgeAnswer: '',
+    _inputTextTheme: 'blue',
+    _inputFontSize: 36,
+    _inputLetterSpacing: 0,
+    _inputFontReferenceWidth: 120,
+    _inputFontReferenceHeight: 60,
+    _inputFontPreview: '1234',
     place: 4,
     sheet: '0123456789°+-*/=().',
     fontClipSkin: assetExport('klInput.font'),
@@ -164,7 +170,8 @@ const KL_INPUT_IMAGE_CONFIG = {
     { key: '_judgeAnswer',  label: '正确答案',  type: 'text', group: '交互' },
     { key: 'place',         label: '输入位数',  type: 'number', min: 1 },
     { key: 'sheet',         label: '可输入字符', type: 'text' },
-    { key: 'fontClipSkin',  label: '字体图皮肤', type: 'file', group: '外观' },
+    { key: '_inputTextTheme', label: '文本颜色', type: 'inputTextTheme', group: '外观' },
+    { key: 'fontClipSkin',  label: '字体图皮肤', type: 'file', group: '外观', advanced: true },
     { key: 'camp',          label: '阵营',     type: 'text', group: '交互' },
     { key: 'canSelected',   label: '可选中',    type: 'boolean', group: '交互' },
     { key: 'keyBoradID',    label: '键盘ID',   type: 'number', group: '交互' },
@@ -277,7 +284,7 @@ export const elementMeta: Record<string, Meta> = {
   NewImage: { layaType: 'Image',       label: '图片',   category: 'commonComponents', mirrorable: true, defaultSize: { width: 200, height: 200 }, defaultPosition: { x: 0, y: 0 }, defaultProps: { skin: '' }, properties: [...COMMON_STATE_PROPS, { key: 'skin', label: '图片', type: 'file', group: '外观' }, { key: 'sizeGrid', label: '九宫格', type: 'text', group: '外观' }] },
   // 双击进入行内编辑（HTML textarea 浮层），编辑模式下用 Laya Label 实时显示文字；
   // 此条目刻意未配置 placeholderImage —— 是 commonComponents「必须用 Image 占位」约定的破例（需要画布上 live 显示用户输入）。
-  // 导出阶段由 exportProject.ts 的 bakeTextElements() 用 Canvas 2D 把文字烘焙成 PNG data URL，
+  // 导出阶段由 exportProject.ts 的 bakeCourseAssets() 用 Canvas 2D 把文字烘焙成 PNG data URL，
   // 把元素就地替换成 type/layaType='Image'，下游流程对 NewTextArea 完全无感。
   NewTextArea: {
     layaType: 'TextArea',
@@ -333,6 +340,13 @@ export const elementMeta: Record<string, Meta> = {
       anchorX: 0,
       anchorY: 0,
       _judgeAnswer: '',
+      _inputTextTheme: 'blue',
+      _inputFontSize: 42,
+      _inputLetterSpacing: 6,
+      _inputFontReferenceWidth: 360,
+      _inputFontReferenceHeight: 120,
+      _inputFontPreview: '12<3_4>',
+      _inputFractionFontScale: 0.64,
       place: 11,
       sheet: FRACTION_INPUT_SHEET,
       lineSkin: assetExport('keyboard.math.fractionLine'),
@@ -353,6 +367,7 @@ export const elementMeta: Record<string, Meta> = {
       { key: 'place', label: '最大字符数', type: 'number', min: 3, max: 60, group: '交互' },
       { key: 'camp', label: '阵营', type: 'text', group: '交互' },
       { key: 'canSelected', label: '可输入', type: 'boolean', group: '交互' },
+      { key: '_inputTextTheme', label: '文本颜色', type: 'inputTextTheme', group: '外观' },
       { key: 'align', label: '内容对齐', type: 'select', options: [{ label: '左', value: 'left' }, { label: '中', value: 'center' }, { label: '右', value: 'right' }], group: '外观' },
       { key: 'lineSkin', label: '分数线皮肤', type: 'file', group: '外观', advanced: true },
       { key: 'fontClipSkin', label: '数字字体图', type: 'file', group: '外观', advanced: true },

@@ -46,7 +46,7 @@ import { getImageMirrorTransform } from './imageMirror';
  *
  * 副作用：返回的 Course 是深拷贝；调用方拿到的是新对象。
  */
-async function bakeTextElements(course: Course): Promise<Course> {
+async function bakeCourseAssets(course: Course): Promise<Course> {
   const cloned = structuredClone(course) as Course;
   const allStages = [...cloned.stages, ...(cloned.previewStages ?? [])];
   for (const stage of allStages) {
@@ -2807,7 +2807,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
     await eApi.removeDir(`${dirPath}/esBuild`);
   }
 
-  const baked = compileInternalPagesCourse(await bakeTextElements(course));
+  const baked = compileInternalPagesCourse(await bakeCourseAssets(course));
   const resourceMap = collectResources(baked, namespace(course.kind));
 
   // 补充 Spine 动画目录中的音频文件到 resourceMap

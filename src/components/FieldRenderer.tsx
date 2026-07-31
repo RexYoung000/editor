@@ -7,9 +7,8 @@ import {
   readCustomAnswerKeyboardConfig,
   readMathKeyboardTheme,
   type CustomAnswerKeyboardConfig,
-  type CustomAnswerKeyboardTheme,
-  type MathKeyboardTheme,
 } from '../elements/keyboardPresets';
+import { readInputTextTheme } from '../utils/inputFont';
 import { useEditorStore, findSubPage } from '../store/editorStore';
 import { showToast } from '../utils/toast';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
@@ -22,6 +21,7 @@ import { FONT_LIBRARY, lookupFont, normalizeFontLibraryId } from '../elements/fo
 import { loadLocalFont } from '../utils/fontLoader';
 import LibraryBrowser, { LibraryErrorDialog, type SelectResult } from './LibraryBrowser';
 import { parseFiniteNumberDraft } from '../utils/propertyEditSession';
+import ThemeSwatches from './ThemeSwatches';
 
 function getVal(elements: Element[], key: string): unknown {
   if (elements.length === 0) return '';
@@ -408,49 +408,6 @@ interface Props {
   onEditCommit?: () => void;
 }
 
-const ANSWER_THEME_OPTIONS: Array<{
-  value: CustomAnswerKeyboardTheme;
-  label: string;
-  color: string;
-}> = [
-  { value: 'yellow', label: '黄色皮肤', color: '#f5c84b' },
-  { value: 'blue', label: '蓝色皮肤', color: '#55a7e8' },
-  { value: 'green', label: '绿色皮肤', color: '#69b77d' },
-];
-
-function KeyboardThemeSwatches({
-  value,
-  onChange,
-}: {
-  value: MathKeyboardTheme;
-  onChange: (theme: MathKeyboardTheme) => void;
-}) {
-  return (
-    <div className="flex gap-1.5">
-      {ANSWER_THEME_OPTIONS.map((option) => {
-        const selected = value === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            title={option.label}
-            aria-label={option.label}
-            onClick={() => onChange(option.value)}
-            className={`h-8 w-8 flex items-center justify-center rounded border ${
-              selected ? 'border-blue-400 bg-blue-500/20' : 'border-slate-600 bg-slate-800 hover:border-slate-400'
-            }`}
-          >
-            <span
-              className="h-4 w-4 rounded-sm border border-white/40"
-              style={{ backgroundColor: option.color }}
-            />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function MathKeyboardThemeField({
   field,
   elements,
@@ -465,10 +422,34 @@ function MathKeyboardThemeField({
   if (!element || !isMathKeyboardPresetId(presetId)) return null;
   return (
     <Row label={field.label} tooltip={field.tooltip} stacked>
-      <KeyboardThemeSwatches
+      <ThemeSwatches
         value={readMathKeyboardTheme(element)}
         onChange={(theme) => onChange(field.key, theme)}
       />
+    </Row>
+  );
+}
+
+function InputTextThemeField({
+  field,
+  elements,
+  onChange,
+}: {
+  field: PropertyDef;
+  elements: Element[];
+  onChange: (key: string, value: unknown) => void;
+}) {
+  const element = elements.length === 1 ? elements[0] : null;
+  if (!element || (element.type !== 'KlInputImage' && element.type !== 'FractionInput')) return null;
+  const theme = readInputTextTheme(element);
+  return (
+    <Row label={field.label} tooltip={field.tooltip} stacked>
+      <ThemeSwatches
+        value={theme}
+        labelSuffix="文字"
+        onChange={(nextTheme) => onChange(field.key, nextTheme)}
+      />
+      {!theme && <div className="mt-1 text-[10px] text-slate-500">沿用历史字体图</div>}
     </Row>
   );
 }
@@ -507,7 +488,7 @@ function AnswerKeyboardField({
     <Row label={field.label} tooltip={field.tooltip} stacked>
       <div className="mb-2">
         <div className="text-[10px] text-slate-500 mb-1">键盘皮肤</div>
-        <KeyboardThemeSwatches
+        <ThemeSwatches
           value={config.theme}
           onChange={(theme) => update({ ...config, theme })}
         />
@@ -621,6 +602,9 @@ export default function FieldRenderer({
   switch (field.type) {
     case 'mathKeyboardTheme':
       return <MathKeyboardThemeField field={field} elements={elements} onChange={onChange} />;
+
+    case 'inputTextTheme':
+      return <InputTextThemeField field={field} elements={elements} onChange={onChange} />;
 
     case 'answerKeyboard':
       return <AnswerKeyboardField field={field} elements={elements} onChange={onChange} />;
