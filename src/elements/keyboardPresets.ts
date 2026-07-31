@@ -77,7 +77,7 @@ export interface CustomAnswerKeyboardLayout {
   boardWidth: number;
   boardHeight: number;
   answerPositions: Array<{ x: number; y: number; width: number }>;
-  clearPosition: { x: number; y: number };
+  clearPosition: { x: number; y: number; width: number };
 }
 
 export const CUSTOM_ANSWER_KEYBOARD_FONT = DEFAULT_FONT_FACE;
@@ -129,8 +129,7 @@ export function readCustomAnswerKeyboardConfig(
 export function normalizeCustomAnswerOptions(value: unknown): string[] {
   if (!Array.isArray(value)) return [...DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers];
   return value
-    .map((answer) => String(answer).trim())
-    .slice(0, 9);
+    .map((answer) => String(answer).trim());
 }
 
 function customAnswerKeyTargetWidth(answer: string): number {
@@ -143,58 +142,136 @@ function customAnswerRowWidth(widths: number[]): number {
     + Math.max(0, widths.length - 1) * CUSTOM_ANSWER_KEY_GAP;
 }
 
-function getCustomAnswerKeyboardRows(keyWidths: number[]): number[][] {
-  const candidates: number[][][] = [];
-  const visit = (start: number, rows: number[][]) => {
-    if (start === keyWidths.length) {
-      candidates.push(rows);
-      return;
-    }
-    for (let end = start + 1; end <= keyWidths.length; end += 1) {
-      const row = keyWidths.slice(start, end);
-      if (customAnswerRowWidth(row) > CUSTOM_ANSWER_MAX_CONTENT_WIDTH) break;
-      visit(end, [...rows, row]);
-    }
-  };
-  visit(0, []);
+interface CustomAnswerRowCandidate {
+  end: number;
+  widths: number[];
+  width: number;
+}
 
-  const score = (rows: number[][]) => {
-    const rowWidths = rows.map(customAnswerRowWidth);
-    const maxRowWidth = Math.max(...rowWidths);
-    const clearKeyIsAlone = rows.at(-1)?.length === 1 ? 1 : 0;
-    const raggedness = rowWidths.reduce(
-      (sum, width) => sum + (maxRowWidth - width) ** 2,
-      0,
+interface CustomAnswerRowPlan {
+  row: number[] | null;
+  rowWidth: number;
+  raggedness: number;
+  next: CustomAnswerRowPlan | null;
+}
+
+function customAnswerRowCandidates(keyWidths: number[], start: number): CustomAnswerRowCandidate[] {
+  const candidates: CustomAnswerRowCandidate[] = [];
+  for (let end = start + 1; end <= keyWidths.length; end += 1) {
+    const widths = keyWidths.slice(start, end);
+    const width = customAnswerRowWidth(widths);
+    if (width > CUSTOM_ANSWER_MAX_CONTENT_WIDTH) break;
+    candidates.push({ end, widths, width });
+  }
+  return candidates;
+}
+
+function getMinimumCustomAnswerRowCounts(
+  candidatesByStart: CustomAnswerRowCandidate[][],
+  maxRowWidth: number,
+): number[] {
+  const keyCount = candidatesByStart.length;
+  const minimumRows = Array.from({ length: keyCount + 1 }, () => Number.POSITIVE_INFINITY);
+  minimumRows[keyCount] = 0;
+  for (let start = keyCount - 1; start >= 0; start -= 1) {
+    for (const candidate of candidatesByStart[start]) {
+      if (candidate.width > maxRowWidth) continue;
+      minimumRows[start] = Math.min(minimumRows[start], minimumRows[candidate.end] + 1);
+    }
+  }
+  return minimumRows;
+}
+
+function isBetterCustomAnswerRowPlan(
+  candidate: CustomAnswerRowPlan,
+  current: CustomAnswerRowPlan | null,
+): boolean {
+  if (!current) return true;
+  let candidateRow: CustomAnswerRowPlan | null = candidate;
+  let currentRow: CustomAnswerRowPlan | null = current;
+  while (candidateRow?.row && currentRow?.row) {
+    if (candidateRow.rowWidth !== currentRow.rowWidth) {
+      return candidateRow.rowWidth > currentRow.rowWidth;
+    }
+    candidateRow = candidateRow.next;
+    currentRow = currentRow.next;
+  }
+  if (candidate.raggedness !== current.raggedness) {
+    return candidate.raggedness < current.raggedness;
+  }
+  return false;
+}
+
+function getBestCustomAnswerRowPlan(
+  candidatesByStart: CustomAnswerRowCandidate[][],
+  minimumRows: number[],
+  maxRowWidth: number,
+): CustomAnswerRowPlan | null {
+  const keyCount = candidatesByStart.length;
+  const plans = Array<CustomAnswerRowPlan | null>(keyCount + 1).fill(null);
+  plans[keyCount] = { row: null, rowWidth: 0, raggedness: 0, next: null };
+
+  for (let start = keyCount - 1; start >= 0; start -= 1) {
+    let best: CustomAnswerRowPlan | null = null;
+    for (const candidate of candidatesByStart[start]) {
+      if (candidate.width > maxRowWidth) continue;
+      if (minimumRows[candidate.end] + 1 !== minimumRows[start]) continue;
+      const suffix = plans[candidate.end];
+      if (!suffix) continue;
+      const plan: CustomAnswerRowPlan = {
+        row: candidate.widths,
+        rowWidth: candidate.width,
+        raggedness: (maxRowWidth - candidate.width) ** 2 + suffix.raggedness,
+        next: suffix,
+      };
+      if (isBetterCustomAnswerRowPlan(plan, best)) best = plan;
+    }
+    plans[start] = best;
+  }
+  return plans[0];
+}
+
+function getCustomAnswerKeyboardRows(keyWidths: number[]): number[][] {
+  const candidatesByStart = keyWidths.map((_, start) => customAnswerRowCandidates(keyWidths, start));
+  const minimumRowCount = getMinimumCustomAnswerRowCounts(
+    candidatesByStart,
+    CUSTOM_ANSWER_MAX_CONTENT_WIDTH,
+  )[0];
+  const possibleMaxRowWidths = Array.from(new Set(
+    candidatesByStart.flatMap((candidates) => candidates.map((candidate) => candidate.width)),
+  )).sort((left, right) => left - right);
+
+  // 依次锁定最少行数、最窄底板和靠前行优先排满，清空键可单独铺满末行。
+  for (const maxRowWidth of possibleMaxRowWidths) {
+    const minimumRows = getMinimumCustomAnswerRowCounts(
+      candidatesByStart,
+      maxRowWidth,
     );
-    return [rows.length, clearKeyIsAlone, maxRowWidth, raggedness];
-  };
-  candidates.sort((left, right) => {
-    const leftScore = score(left);
-    const rightScore = score(right);
-    for (let index = 0; index < leftScore.length; index += 1) {
-      if (leftScore[index] !== rightScore[index]) {
-        return leftScore[index] - rightScore[index];
-      }
+    if (minimumRows[0] !== minimumRowCount) continue;
+    const plan = getBestCustomAnswerRowPlan(
+      candidatesByStart,
+      minimumRows,
+      maxRowWidth,
+    );
+    if (plan) {
+      const rows: number[][] = [];
+      for (let row = plan; row.row; row = row.next!) rows.push(row.row);
+      return rows;
     }
-    const leftRowWidths = left.map(customAnswerRowWidth);
-    const rightRowWidths = right.map(customAnswerRowWidth);
-    for (let index = 0; index < leftRowWidths.length; index += 1) {
-      if (leftRowWidths[index] !== rightRowWidths[index]) {
-        return rightRowWidths[index] - leftRowWidths[index];
-      }
-    }
-    return 0;
-  });
-  return candidates[0] ?? keyWidths.map((width) => [width]);
+  }
+  return keyWidths.map((width) => [width]);
 }
 
 export function getCustomAnswerKeyboardLayout(answersOrCount: string[] | number): CustomAnswerKeyboardLayout {
+  const requestedCount = typeof answersOrCount === 'number' && Number.isFinite(answersOrCount)
+    ? Math.max(0, Math.round(answersOrCount))
+    : 0;
   const answers = Array.isArray(answersOrCount)
     ? normalizeCustomAnswerOptions(answersOrCount)
-    : Array.from({ length: Math.round(answersOrCount) }, () => '字');
-  const count = Math.max(2, Math.min(9, answers.length));
+    : Array.from({ length: requestedCount }, () => '字');
+  const count = Math.max(2, answers.length);
   const layoutAnswers = answers.length >= 2
-    ? answers.slice(0, count)
+    ? answers
     : DEFAULT_CUSTOM_ANSWER_KEYBOARD_CONFIG.answers.slice(0, count);
   const keyWidths = [
     ...layoutAnswers.map(customAnswerKeyTargetWidth),
@@ -224,19 +301,22 @@ export function getCustomAnswerKeyboardLayout(answersOrCount: string[] | number)
       cursorX += width + CUSTOM_ANSWER_KEY_GAP;
     });
   });
-  const clearPosition = keyPositions.at(-1) ?? {
+  const clearBasePosition = keyPositions.at(-1) ?? {
     x: CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING + CUSTOM_ANSWER_CLEAR_KEY_WIDTH / 2,
     y: firstY,
     width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
   };
+  const clearLeft = clearBasePosition.x - clearBasePosition.width / 2;
+  const clearWidth = boardWidth - CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING - clearLeft;
   return {
     rowCount: rows.length,
     boardWidth,
     boardHeight,
     answerPositions: keyPositions.slice(0, -1),
     clearPosition: {
-      x: clearPosition.x,
-      y: clearPosition.y,
+      x: clearLeft + clearWidth / 2,
+      y: clearBasePosition.y,
+      width: clearWidth,
     },
   };
 }
@@ -352,16 +432,18 @@ function customAnswerKey(
 }
 
 function customAnswerClearKey(
-  position: { x: number; y: number },
+  position: { x: number; y: number; width: number },
   theme: CustomAnswerKeyboardTheme,
 ): ExportChild {
   const assets = getCustomAnswerThemeAssets(theme);
+  const width = position.width;
   const state = (pressed: boolean): ExportChild => ({
     type: 'Image',
     props: {
-      width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
+      width,
       height: CUSTOM_ANSWER_KEY_SIZE.height,
       skin: pressed ? assets.wideActive : assets.wideNormal,
+      sizeGrid: '0,28,0,28',
       name: pressed ? 'active' : 'normal',
     },
     child: [{
@@ -377,7 +459,7 @@ function customAnswerClearKey(
     type: 'KlKey',
     props: {
       ...position,
-      width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
+      width,
       height: CUSTOM_ANSWER_KEY_SIZE.height,
       anchorX: 0.5,
       anchorY: 0.5,

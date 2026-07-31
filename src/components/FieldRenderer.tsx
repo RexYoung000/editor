@@ -580,9 +580,8 @@ function AnswerKeyboardField({
 
       <button
         type="button"
-        disabled={config.answers.length >= 9}
         onClick={() => update({ ...config, answers: [...config.answers, ''] })}
-        className="mt-1.5 w-full flex items-center justify-center gap-1 py-1.5 rounded border border-slate-600 bg-slate-700 text-xs text-slate-200 hover:bg-slate-600 disabled:opacity-40"
+        className="mt-1.5 w-full flex items-center justify-center gap-1 py-1.5 rounded border border-slate-600 bg-slate-700 text-xs text-slate-200 hover:bg-slate-600"
       >
         <Plus size={13} />
         新增答案
@@ -595,7 +594,7 @@ function AnswerKeyboardField({
           {hasLong && <div>每项答案最多 4 个字符。</div>}
         </div>
       )}
-      <div className="mt-1 text-[10px] text-slate-500">{config.answers.length}/9 项</div>
+      <div className="mt-1 text-[10px] text-slate-500">{config.answers.length} 项</div>
     </Row>
   );
 }
