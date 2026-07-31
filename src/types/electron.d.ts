@@ -22,6 +22,7 @@ export type CourseSaveAsErrorCode =
   | 'PERMISSION_DENIED'
   | 'FILE_BUSY'
   | 'RECOVERY_FAILED'
+  | 'ACTIVATION_FAILED'
   | 'SAVE_AS_FAILED';
 
 export type CourseSaveTargetState =

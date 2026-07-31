@@ -33,6 +33,7 @@ const ERROR_KEY_BY_CODE: Record<CourseSaveAsErrorCode, string> = {
   PERMISSION_DENIED: 'saveAsPermissionDenied',
   FILE_BUSY: 'saveAsFileBusy',
   RECOVERY_FAILED: 'saveAsRecoveryFailed',
+  ACTIVATION_FAILED: 'saveAsActivationFailed',
   SAVE_AS_FAILED: 'saveAsUnknownError',
 };
 

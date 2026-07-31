@@ -3,7 +3,7 @@ import { useEditorStore } from '../store/editorStore';
 import { exportProject } from '../utils/exportProject';
 import { compileBuild } from '../utils/compileBuild';
 import { showToast } from '../utils/toast';
-import { createProjectInDirectory, openProjectFromDirectory, writeBackToLocalFile, getCourseFilePath, getCourseDirPath, selectDirectory, openFolder, cleanupUnreferencedImages, collectImageReferences, saveProjectAs } from '../utils/electronFs';
+import { createProjectInDirectory, openProjectFromDirectory, writeBackToLocalFile, getCourseFilePath, getCourseDirPath, selectDirectory, openFolder, cleanupUnreferencedImages, collectImageReferences, saveProjectAs, ProjectSaveAsError } from '../utils/electronFs';
 import { useState } from 'react';
 import FileMenu from './FileMenu';
 import CreateProjectDialog from './CreateProjectDialog';
@@ -126,7 +126,12 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   const handleSaveAsConfirm = async (newId: string, dirPath: string, overwrite: boolean) => {
     if (!currentCourse) return;
     const { course: newCourse } = await saveProjectAs(currentCourse, newId, dirPath, overwrite);
-    setCurrentCourse(newCourse);
+    try {
+      setCurrentCourse(newCourse);
+    } catch (error) {
+      console.error('save-as activation error:', error);
+      throw new ProjectSaveAsError('ACTIVATION_FAILED');
+    }
     const targetDir = getCourseDirPath(newCourse.id);
     showToast(targetDir ? `${t('saveAsSuccess')}：${targetDir}` : t('saveAsSuccess'), 'success');
   };

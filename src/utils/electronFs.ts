@@ -99,7 +99,8 @@ export async function saveProjectAs(
   const sourceDir = getDir(course.id);
   if (!sourceDir) throw new ProjectSaveAsError('SOURCE_NOT_FOUND');
 
-  const newCourse: Course = { ...course, id: newId };
+  // Store 中的课程会被 Immer 冻结；另存后的编辑对象不能继续引用原课程的嵌套数据。
+  const newCourse: Course = JSON.parse(JSON.stringify({ ...course, id: newId }));
   const result = await api().saveCourseAs({
     sourceDir,
     sourceCourseId: course.id,
