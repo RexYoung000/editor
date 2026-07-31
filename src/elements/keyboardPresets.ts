@@ -169,7 +169,6 @@ function customAnswerRowCandidates(keyWidths: number[], start: number): CustomAn
 function getMinimumCustomAnswerRowCounts(
   candidatesByStart: CustomAnswerRowCandidate[][],
   maxRowWidth: number,
-  avoidClearKeyAlone: boolean,
 ): number[] {
   const keyCount = candidatesByStart.length;
   const minimumRows = Array.from({ length: keyCount + 1 }, () => Number.POSITIVE_INFINITY);
@@ -177,8 +176,6 @@ function getMinimumCustomAnswerRowCounts(
   for (let start = keyCount - 1; start >= 0; start -= 1) {
     for (const candidate of candidatesByStart[start]) {
       if (candidate.width > maxRowWidth) continue;
-      const clearKeyIsAlone = candidate.end === keyCount && candidate.widths.length === 1;
-      if (avoidClearKeyAlone && clearKeyIsAlone) continue;
       minimumRows[start] = Math.min(minimumRows[start], minimumRows[candidate.end] + 1);
     }
   }
@@ -190,9 +187,6 @@ function isBetterCustomAnswerRowPlan(
   current: CustomAnswerRowPlan | null,
 ): boolean {
   if (!current) return true;
-  if (candidate.raggedness !== current.raggedness) {
-    return candidate.raggedness < current.raggedness;
-  }
   let candidateRow: CustomAnswerRowPlan | null = candidate;
   let currentRow: CustomAnswerRowPlan | null = current;
   while (candidateRow?.row && currentRow?.row) {
@@ -202,6 +196,9 @@ function isBetterCustomAnswerRowPlan(
     candidateRow = candidateRow.next;
     currentRow = currentRow.next;
   }
+  if (candidate.raggedness !== current.raggedness) {
+    return candidate.raggedness < current.raggedness;
+  }
   return false;
 }
 
@@ -209,7 +206,6 @@ function getBestCustomAnswerRowPlan(
   candidatesByStart: CustomAnswerRowCandidate[][],
   minimumRows: number[],
   maxRowWidth: number,
-  avoidClearKeyAlone: boolean,
 ): CustomAnswerRowPlan | null {
   const keyCount = candidatesByStart.length;
   const plans = Array<CustomAnswerRowPlan | null>(keyCount + 1).fill(null);
@@ -219,8 +215,6 @@ function getBestCustomAnswerRowPlan(
     let best: CustomAnswerRowPlan | null = null;
     for (const candidate of candidatesByStart[start]) {
       if (candidate.width > maxRowWidth) continue;
-      const clearKeyIsAlone = candidate.end === keyCount && candidate.widths.length === 1;
-      if (avoidClearKeyAlone && clearKeyIsAlone) continue;
       if (minimumRows[candidate.end] + 1 !== minimumRows[start]) continue;
       const suffix = plans[candidate.end];
       if (!suffix) continue;
@@ -242,30 +236,22 @@ function getCustomAnswerKeyboardRows(keyWidths: number[]): number[][] {
   const minimumRowCount = getMinimumCustomAnswerRowCounts(
     candidatesByStart,
     CUSTOM_ANSWER_MAX_CONTENT_WIDTH,
-    false,
   )[0];
-  const avoidClearKeyAlone = getMinimumCustomAnswerRowCounts(
-    candidatesByStart,
-    CUSTOM_ANSWER_MAX_CONTENT_WIDTH,
-    true,
-  )[0] === minimumRowCount;
   const possibleMaxRowWidths = Array.from(new Set(
     candidatesByStart.flatMap((candidates) => candidates.map((candidate) => candidate.width)),
   )).sort((left, right) => left - right);
 
-  // 依次锁定最少行数、清空键不独占、最窄底板和最均衡分行，保持原有布局评分顺序。
+  // 依次锁定最少行数、最窄底板和靠前行优先排满，清空键可单独铺满末行。
   for (const maxRowWidth of possibleMaxRowWidths) {
     const minimumRows = getMinimumCustomAnswerRowCounts(
       candidatesByStart,
       maxRowWidth,
-      avoidClearKeyAlone,
     );
     if (minimumRows[0] !== minimumRowCount) continue;
     const plan = getBestCustomAnswerRowPlan(
       candidatesByStart,
       minimumRows,
       maxRowWidth,
-      avoidClearKeyAlone,
     );
     if (plan) {
       const rows: number[][] = [];

@@ -100,13 +100,13 @@ test('自定义答案键盘将答案与清空键按整体宽度生成稳定布�
   assert.deepEqual(mixed.answerPositions.map(({ width }) => width), [168, 168, 168, 84]);
   assert.deepEqual(
     mixed.answerPositions.map(({ x }) => x),
-    [111, 291, 111, 69],
+    [111, 291, 111, 249],
   );
   assert.deepEqual(
     mixed.answerPositions.map(({ x, width }) => x - width / 2),
-    [27, 207, 27, 27],
+    [27, 207, 27, 207],
   );
-  assert.deepEqual(mixed.clearPosition, { x: 249, y: 260, width: 252 });
+  assert.deepEqual(mixed.clearPosition, { x: 201, y: 260, width: 348 });
   const crowded = getCustomAnswerKeyboardLayout(Array.from({ length: 9 }, () => '第三次'));
   assert.equal(crowded.boardWidth, 416);
   assert.equal(crowded.rowCount, 5);
@@ -117,7 +117,7 @@ test('自定义答案键盘将答案与清空键按整体宽度生成稳定布�
   );
 });
 
-test('自定义答案键盘优先减少行数并避免清空键单独成行', () => {
+test('自定义答案键盘优先减少行数并向前排满答案', () => {
   const directions = getCustomAnswerKeyboardLayout(['东', '南', '西', '北', '我要走开']);
   assert.equal(directions.rowCount, 2);
   assert.equal(directions.boardWidth, 458);

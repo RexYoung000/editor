@@ -73,16 +73,33 @@ test('50 项答案使用可扩展排版并完整生成所有按键', () => {
   assert.equal(outputs?.at(-1), ' ');
 });
 
-test('末行清空键通过九宫格拉伸填满底板剩余宽度', () => {
-  for (const count of [15, 19]) {
+test('答案优先向前排满，末行清空键通过九宫格填满剩余宽度', () => {
+  for (const count of [8, 15, 19]) {
     const answers = singleCharacterAnswers(count);
     const layout = getCustomAnswerKeyboardLayout(answers);
     const leftPadding = layout.answerPositions[0].x - layout.answerPositions[0].width / 2;
+    assert.deepEqual(
+      layout.answerPositions.slice(0, 8).map(({ x, y }) => [x, y]),
+      [
+        [69, 60],
+        [165, 60],
+        [261, 60],
+        [357, 60],
+        [69, 160],
+        [165, 160],
+        [261, 160],
+        [357, 160],
+      ],
+    );
+    if (count === 8) {
+      assert.equal(layout.rowCount, 3);
+      assert.deepEqual(layout.clearPosition, { x: 213, y: 260, width: 372 });
+    }
     assert.equal(
       layout.clearPosition.x + layout.clearPosition.width / 2,
       layout.boardWidth - leftPadding,
     );
-    assert.equal(layout.clearPosition.width, 276);
+    assert.equal(layout.clearPosition.width, 372);
 
     const children = getKeyboardChildren(keyboard(answers));
     const keysBox = children?.find((node) => node.props.name === 'keysBox');
@@ -90,7 +107,7 @@ test('末行清空键通过九宫格拉伸填满底板剩余宽度', () => {
     assert.equal(clearKey?.props.width, layout.clearPosition.width);
     assert.deepEqual(
       clearKey?.child?.map((state) => [state.props.width, state.props.sizeGrid]),
-      [[276, '0,28,0,28'], [276, '0,28,0,28']],
+      [[372, '0,28,0,28'], [372, '0,28,0,28']],
     );
     assert.ok(clearKey?.child?.every((state) => state.child?.[0]?.props.centerX === 0));
   }
