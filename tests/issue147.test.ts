@@ -15,6 +15,10 @@ function answerOptions(count: number): string[] {
   return Array.from({ length: count }, (_, index) => `选项${index + 1}`);
 }
 
+function singleCharacterAnswers(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => String.fromCodePoint(0x4e00 + index));
+}
+
 function keyboard(answers: string[]): Element {
   return {
     id: 'keyboard-147',
@@ -67,6 +71,29 @@ test('50 项答案使用可扩展排版并完整生成所有按键', () => {
   assert.equal(outputs?.length, 51);
   assert.deepEqual(outputs?.slice(0, 50), answers);
   assert.equal(outputs?.at(-1), ' ');
+});
+
+test('末行清空键通过九宫格拉伸填满底板剩余宽度', () => {
+  for (const count of [15, 19]) {
+    const answers = singleCharacterAnswers(count);
+    const layout = getCustomAnswerKeyboardLayout(answers);
+    const leftPadding = layout.answerPositions[0].x - layout.answerPositions[0].width / 2;
+    assert.equal(
+      layout.clearPosition.x + layout.clearPosition.width / 2,
+      layout.boardWidth - leftPadding,
+    );
+    assert.equal(layout.clearPosition.width, 276);
+
+    const children = getKeyboardChildren(keyboard(answers));
+    const keysBox = children?.find((node) => node.props.name === 'keysBox');
+    const clearKey = keysBox?.child?.at(-1);
+    assert.equal(clearKey?.props.width, layout.clearPosition.width);
+    assert.deepEqual(
+      clearKey?.child?.map((state) => [state.props.width, state.props.sizeGrid]),
+      [[276, '0,28,0,28'], [276, '0,28,0,28']],
+    );
+    assert.ok(clearKey?.child?.every((state) => state.child?.[0]?.props.centerX === 0));
+  }
 });
 
 test('发布校验只保留至少 2 项的下限，不限制较大答案数量', () => {

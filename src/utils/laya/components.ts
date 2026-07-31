@@ -140,15 +140,17 @@ export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element)
     comp.addChild(key);
   });
 
+  const clearWidth = layout.clearPosition.width;
   const clear = makeImage(
     assets.wideNormal,
-    boardX + layout.clearPosition.x - 91,
+    boardX + layout.clearPosition.x - clearWidth / 2,
     65 + layout.clearPosition.y - 44,
-    182,
+    clearWidth,
     88,
   );
   if (clear) {
-    const icon = makeImage(assets.clearNormal, (182 - 65) / 2, (88 - 55) / 2);
+    clear.sizeGrid = '0,28,0,28';
+    const icon = makeImage(assets.clearNormal, (clearWidth - 65) / 2, (88 - 55) / 2);
     if (icon) clear.addChild(icon);
     comp.addChild(clear);
   }

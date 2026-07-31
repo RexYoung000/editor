@@ -92,7 +92,7 @@ test('自定义答案键盘将答案与清空键按整体宽度生成稳定布�
   assert.equal(nine.boardHeight, 336);
   assert.equal(nine.answerPositions[0].y, 60);
   assert.equal(nine.answerPositions[8].y, 260);
-  assert.deepEqual(nine.clearPosition, { x: 214, y: 260 });
+  assert.deepEqual(nine.clearPosition, { x: 261, y: 260, width: 276 });
 
   const mixed = getCustomAnswerKeyboardLayout(['第一次', '第二次', '第三次', '北']);
   assert.equal(mixed.boardWidth, 402);
@@ -106,7 +106,7 @@ test('自定义答案键盘将答案与清空键按整体宽度生成稳定布�
     mixed.answerPositions.map(({ x, width }) => x - width / 2),
     [27, 207, 27, 27],
   );
-  assert.deepEqual(mixed.clearPosition, { x: 214, y: 260 });
+  assert.deepEqual(mixed.clearPosition, { x: 249, y: 260, width: 252 });
   const crowded = getCustomAnswerKeyboardLayout(Array.from({ length: 9 }, () => '第三次'));
   assert.equal(crowded.boardWidth, 416);
   assert.equal(crowded.rowCount, 5);
@@ -132,7 +132,7 @@ test('自定义答案键盘优先减少行数并避免清空键单独成行', ()
       [132, 160, 210],
     ],
   );
-  assert.deepEqual(directions.clearPosition, { x: 340, y: 160 });
+  assert.deepEqual(directions.clearPosition, { x: 340, y: 160, width: 182 });
   assert.equal(
     directions.boardHeight - (directions.clearPosition.y + 88 / 2),
     32,
@@ -149,7 +149,7 @@ test('自定义答案键盘优先减少行数并避免清空键单独成行', ()
       [111, 160, 168],
     ],
   );
-  assert.deepEqual(phrases.clearPosition, { x: 298, y: 160 });
+  assert.deepEqual(phrases.clearPosition, { x: 298, y: 160, width: 182 });
 });
 
 test('每个键盘实例按答案和主题动态生成中文按键、清空键与文字图片', () => {

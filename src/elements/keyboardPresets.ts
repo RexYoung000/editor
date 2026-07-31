@@ -77,7 +77,7 @@ export interface CustomAnswerKeyboardLayout {
   boardWidth: number;
   boardHeight: number;
   answerPositions: Array<{ x: number; y: number; width: number }>;
-  clearPosition: { x: number; y: number };
+  clearPosition: { x: number; y: number; width: number };
 }
 
 export const CUSTOM_ANSWER_KEYBOARD_FONT = DEFAULT_FONT_FACE;
@@ -315,19 +315,22 @@ export function getCustomAnswerKeyboardLayout(answersOrCount: string[] | number)
       cursorX += width + CUSTOM_ANSWER_KEY_GAP;
     });
   });
-  const clearPosition = keyPositions.at(-1) ?? {
+  const clearBasePosition = keyPositions.at(-1) ?? {
     x: CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING + CUSTOM_ANSWER_CLEAR_KEY_WIDTH / 2,
     y: firstY,
     width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
   };
+  const clearLeft = clearBasePosition.x - clearBasePosition.width / 2;
+  const clearWidth = boardWidth - CUSTOM_ANSWER_BOARD_HORIZONTAL_PADDING - clearLeft;
   return {
     rowCount: rows.length,
     boardWidth,
     boardHeight,
     answerPositions: keyPositions.slice(0, -1),
     clearPosition: {
-      x: clearPosition.x,
-      y: clearPosition.y,
+      x: clearLeft + clearWidth / 2,
+      y: clearBasePosition.y,
+      width: clearWidth,
     },
   };
 }
@@ -443,16 +446,18 @@ function customAnswerKey(
 }
 
 function customAnswerClearKey(
-  position: { x: number; y: number },
+  position: { x: number; y: number; width: number },
   theme: CustomAnswerKeyboardTheme,
 ): ExportChild {
   const assets = getCustomAnswerThemeAssets(theme);
+  const width = position.width;
   const state = (pressed: boolean): ExportChild => ({
     type: 'Image',
     props: {
-      width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
+      width,
       height: CUSTOM_ANSWER_KEY_SIZE.height,
       skin: pressed ? assets.wideActive : assets.wideNormal,
+      sizeGrid: '0,28,0,28',
       name: pressed ? 'active' : 'normal',
     },
     child: [{
@@ -468,7 +473,7 @@ function customAnswerClearKey(
     type: 'KlKey',
     props: {
       ...position,
-      width: CUSTOM_ANSWER_CLEAR_KEY_WIDTH,
+      width,
       height: CUSTOM_ANSWER_KEY_SIZE.height,
       anchorX: 0.5,
       anchorY: 0.5,
