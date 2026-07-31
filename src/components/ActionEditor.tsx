@@ -7,6 +7,7 @@ import { useEditorStore } from '../store/editorStore';
 import { getElementPages, isInternalPagesSubPage, isPageAction } from '../utils/internalPages';
 import { findSubPage } from '../utils/findSubPage';
 import { createElementMap, isElementLocked } from '../utils/layerState';
+import { getLayerDisplayName } from '../utils/layerPresentation';
 import {
   getSdkJudgeCapability,
   getSdkJudgeConditionLabel,
@@ -31,6 +32,10 @@ const ELEMENT_TARGET_ACTIONS = new Set([
   'pageTurnNextLoop',
   'pageTurnGoTo',
 ]);
+
+function getActionElementLabel(element: Element): string {
+  return getLayerDisplayName(element, elementMeta[element.type]?.label);
+}
 
 interface Props {
   element: Element;
@@ -201,15 +206,16 @@ export default function ActionEditor({
     groupId?: string,
     judgeTarget?: Element,
   ): Action {
+    const target = targetId ? allElements.find((item) => item.id === targetId) : undefined;
     return {
       id: generateId(),
       event,
       targetId,
-      targetNameSnapshot: targetId ? allElements.find((item) => item.id === targetId)?.name : undefined,
+      targetNameSnapshot: target ? getActionElementLabel(target) : undefined,
       actionType: 'toggleVisible',
       groupId: groupId ?? generateId(),
       judgeTargetId: judgeTarget?.id,
-      judgeTargetNameSnapshot: judgeTarget?.name,
+      judgeTargetNameSnapshot: judgeTarget ? getActionElementLabel(judgeTarget) : undefined,
     };
   }
 
@@ -299,7 +305,7 @@ export default function ActionEditor({
       branchId,
       branchCondition: condition,
       judgeTargetId: judgeTarget?.id,
-      judgeTargetNameSnapshot: judgeTarget?.name,
+      judgeTargetNameSnapshot: judgeTarget ? getActionElementLabel(judgeTarget) : undefined,
     };
   }
 
@@ -362,7 +368,7 @@ export default function ActionEditor({
       ? {
           ...action,
           judgeTargetId: judgeTarget?.id,
-          judgeTargetNameSnapshot: judgeTarget?.name,
+          judgeTargetNameSnapshot: judgeTarget ? getActionElementLabel(judgeTarget) : undefined,
         }
       : action,
     );
@@ -410,7 +416,7 @@ export default function ActionEditor({
                 onClick={() => selectElement(source.id, false)}
                 className="border border-slate-600 bg-slate-800 px-1.5 py-0.5 text-slate-300 hover:bg-slate-700"
               >
-                {source.name ?? source.id}
+                {getActionElementLabel(source)}
               </button>
             ))}
           </div>
@@ -480,7 +486,7 @@ export default function ActionEditor({
                   if (!isValid) {
                     const firstValid = allElements.find((el) => isInputRuleHost(el) || el.layaType === 'ChoiceBox');
                     patch.targetId = firstValid?.id;
-                    patch.targetNameSnapshot = firstValid?.name;
+                    patch.targetNameSnapshot = firstValid ? getActionElementLabel(firstValid) : undefined;
                   }
                 }
                 // 切到 onClickInitGameConfirm*：如果当前 target 不是 DragViewBox 或 MatchingGame，默认选画布上第一个
@@ -491,6 +497,7 @@ export default function ActionEditor({
                   if (!isValid) {
                     const firstValid = allElements.find((el) => el.type === 'DragViewBox' || el.type === 'MatchingGame');
                     patch.targetId = firstValid?.id;
+                    patch.targetNameSnapshot = firstValid ? getActionElementLabel(firstValid) : undefined;
                   }
                 }
                 updateGroup(group, patch);
@@ -557,7 +564,7 @@ export default function ActionEditor({
                     )}
                     {sdkJudgeTargets.map((item) => (
                       <option key={item.id} value={item.id}>
-                        {item.name ?? item.id} ({elementMeta[item.type]?.label ?? item.type})
+                        {getActionElementLabel(item)} ({elementMeta[item.type]?.label ?? item.type})
                       </option>
                     ))}
                   </select>
@@ -621,12 +628,18 @@ export default function ActionEditor({
               <span className="text-slate-500 w-7 shrink-0">{t('target')}</span>
               <select
                 value={group.targetId ?? ''}
-                onChange={(e) => updateGroup(group, { targetId: e.target.value || undefined })}
+                onChange={(e) => {
+                  const nextTarget = allElements.find((item) => item.id === e.target.value);
+                  updateGroup(group, {
+                    targetId: nextTarget?.id,
+                    targetNameSnapshot: nextTarget ? getActionElementLabel(nextTarget) : undefined,
+                  });
+                }}
                 className="flex-1 min-w-0 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
               >
                 {!group.targetId && <option value="">请选择画笔</option>}
                 {allElements.filter((el) => el.type === 'NewBrushSprite').map((el) => (
-                  <option key={el.id} value={el.id}>{el.name ?? el.id} (画笔)</option>
+                  <option key={el.id} value={el.id}>{getActionElementLabel(el)} (画笔)</option>
                 ))}
               </select>
             </div>
@@ -650,7 +663,7 @@ export default function ActionEditor({
                       const nextTarget = allElements.find((item) => item.id === e.target.value);
                       updateGroup(group, {
                         targetId: nextTarget?.id,
-                        targetNameSnapshot: nextTarget?.name,
+                        targetNameSnapshot: nextTarget ? getActionElementLabel(nextTarget) : undefined,
                       });
                     }}
                     className={`flex-1 min-w-0 border rounded px-1 py-0.5 ${targetMissing ? 'bg-red-950/50 border-red-700 text-red-200' : 'bg-slate-700 border-slate-600 text-slate-200'}`}
@@ -668,7 +681,7 @@ export default function ActionEditor({
                       if (isInitGameConfirm) return el.type === 'DragViewBox' || el.type === 'MatchingGame';
                       return true;
                     }).map((el) => (
-                      <option key={el.id} value={el.id}>{el.name ?? el.id} ({elementMeta[el.type]?.label ?? el.type})</option>
+                      <option key={el.id} value={el.id}>{getActionElementLabel(el)} ({elementMeta[el.type]?.label ?? el.type})</option>
                     ))}
                   </select>
                 </div>
@@ -754,13 +767,19 @@ export default function ActionEditor({
                       <span className="w-12 shrink-0 text-slate-500">动作目标</span>
                       <select
                         value={action.targetId ?? ''}
-                        onChange={(event) => update(i, { targetId: event.target.value || undefined })}
+                        onChange={(event) => {
+                          const nextTarget = allElements.find((item) => item.id === event.target.value);
+                          update(i, {
+                            targetId: nextTarget?.id,
+                            targetNameSnapshot: nextTarget ? getActionElementLabel(nextTarget) : undefined,
+                          });
+                        }}
                         className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-700 px-1 py-0.5 text-slate-200"
                       >
-                        <option value="">当前触发元素（{element.name ?? element.id}）</option>
+                        <option value="">当前触发元素（{getActionElementLabel(element)}）</option>
                         {allElements.filter((item) => item.id !== element.id).map((item) => (
                           <option key={item.id} value={item.id}>
-                            {item.name ?? item.id} ({elementMeta[item.type]?.label ?? item.type})
+                            {getActionElementLabel(item)} ({elementMeta[item.type]?.label ?? item.type})
                           </option>
                         ))}
                       </select>
@@ -885,7 +904,7 @@ export default function ActionEditor({
                             <option value="0">无可用页面</option>
                           ) : (
                             containerBoxes.map((box, idx) => (
-                              <option key={box.id} value={idx}>{box.name}</option>
+                              <option key={box.id} value={idx}>{getActionElementLabel(box)}</option>
                             ))
                           )}
                         </select>
