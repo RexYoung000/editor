@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readCourseFile: (filePath) => ipcRenderer.invoke('read-course-file', filePath),
   writeCourseFile: (filePath, courseJson) => ipcRenderer.invoke('write-course-file', filePath, courseJson),
   pathExists: (filePath) => ipcRenderer.invoke('path-exists', filePath),
+  inspectCourseSaveTarget: (params) => ipcRenderer.invoke('inspect-course-save-target', params),
+  saveCourseAs: (params) => ipcRenderer.invoke('save-course-as', params),
   ensureDir: (dirPath) => ipcRenderer.invoke('ensure-dir', dirPath),
   openFolder: (folderPath) => ipcRenderer.invoke('open-folder', folderPath),
   getPlatform: () => ipcRenderer.invoke('get-platform'),

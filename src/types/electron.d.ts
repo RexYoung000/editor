@@ -8,6 +8,46 @@ type ElectronEventListener<K extends ElectronEventChannel> = (
   payload: ElectronEventPayloads[K],
 ) => void;
 
+export type CourseSaveAsErrorCode =
+  | 'INVALID_COURSE_ID'
+  | 'INVALID_PATH'
+  | 'SOURCE_NOT_FOUND'
+  | 'SOURCE_INVALID'
+  | 'CURRENT_PATH'
+  | 'TARGET_INSIDE_SOURCE'
+  | 'SOURCE_INSIDE_TARGET'
+  | 'TARGET_INVALID'
+  | 'TARGET_REQUIRES_CONFIRMATION'
+  | 'DISK_FULL'
+  | 'PERMISSION_DENIED'
+  | 'FILE_BUSY'
+  | 'RECOVERY_FAILED'
+  | 'SAVE_AS_FAILED';
+
+export type CourseSaveTargetState =
+  | 'available'
+  | 'current'
+  | 'target-inside-source'
+  | 'source-inside-target'
+  | 'replaceable'
+  | 'invalid';
+
+export type CourseSaveTargetResult =
+  | {
+    ok: true;
+    state: CourseSaveTargetState;
+    sourceDir: string;
+    parentDir: string;
+    targetDir: string;
+    targetExists?: boolean;
+    hasVersionControlMetadata?: boolean;
+  }
+  | { ok: false; code: CourseSaveAsErrorCode };
+
+export type CourseSaveAsResult =
+  | { ok: true; targetDir: string; filePath: string; replaced: boolean }
+  | { ok: false; code: CourseSaveAsErrorCode };
+
 export interface ElectronAPI {
   selectDirectory: () => Promise<string | null>;
   listDirectory: (dirPath: string) => Promise<Array<{ name: string; isDir: boolean }>>;
@@ -15,6 +55,19 @@ export interface ElectronAPI {
   readCourseFile: (filePath: string) => Promise<import('./index').Course>;
   writeCourseFile: (filePath: string, courseJson: string) => Promise<boolean>;
   pathExists: (filePath: string) => Promise<boolean>;
+  inspectCourseSaveTarget: (params: {
+    sourceDir: string;
+    parentPath: string;
+    targetCourseId: string;
+  }) => Promise<CourseSaveTargetResult>;
+  saveCourseAs: (params: {
+    sourceDir: string;
+    sourceCourseId: string;
+    targetCourseId: string;
+    parentPath: string;
+    courseJson: string;
+    overwrite: boolean;
+  }) => Promise<CourseSaveAsResult>;
   ensureDir: (dirPath: string) => Promise<string>;
   openFolder: (folderPath: string) => Promise<boolean>;
   getPlatform: () => Promise<{ isElectron: boolean; platform: string }>;

@@ -17,6 +17,7 @@ import { layoutText } from '../utils/textLayout';
 import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
+import { getCourseResourceVersion } from '../utils/electronFs';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
 import { isElementLocked } from '../utils/layerState';
 import { findCanvasElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
@@ -153,6 +154,7 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
     [currentCourse, currentSubPageId, currentInternalPageId],
   );
   const currentCourseId = currentCourse?.id ?? null;
+  const currentCourseResourceVersion = currentCourseId ? getCourseResourceVersion(currentCourseId) : 0;
   const workbenchReadonly = isInternalPagesWorkbenchReadonly(currentCourse, currentSubPageId, focusSubPageId);
 
   useEffect(() => {
@@ -381,7 +383,7 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
     }
     clearAllObjects();
     prevElementsRef.current = new Map();
-  }, [currentCourseId, flushThumbnail, layaReady]);
+  }, [currentCourseId, currentCourseResourceVersion, flushThumbnail, layaReady]);
 
   // ─── 页面切换：全量重建 ───
   useEffect(() => {
@@ -422,7 +424,7 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
     prevElementsRef.current = new Map(currentPage.elements.map(e => [e.id, { ...e, props: { ...e.props } }]));
     renderedThumbnailTargetRef.current = nextTarget;
     scheduleThumbnail(nextTarget);
-  }, [cancelThumbnail, currentCourseId, currentPage?.id, flushThumbnail, layaReady, scheduleThumbnail]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cancelThumbnail, currentCourseId, currentCourseResourceVersion, currentPage?.id, flushThumbnail, layaReady, scheduleThumbnail]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── 统一同步 effect：增删改 + z-order ───
   useEffect(() => {
@@ -519,7 +521,7 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
             } catch { /* ignore */ }
           }
         };
-        const cached = getCachedVideoThumbnail(videoUrl);
+        const cached = getCachedVideoThumbnail(videoUrl, courseId);
         if (cached) {
           applyThumbnail(cached);
         } else {

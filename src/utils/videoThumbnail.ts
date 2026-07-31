@@ -3,22 +3,23 @@
  * 用于编辑器中 Video 组件的缩略图显示。
  */
 
-// 缓存已提取的缩略图：videoUrl → dataUrl，避免重复加载
+import { getCourseResourceUrl } from './electronFs';
+
+// 缓存已提取的缩略图：带活动目录版本的资源 URL → dataUrl，避免跨副本复用旧画面。
 const thumbnailCache = new Map<string, string | null>();
 
-export function getCachedVideoThumbnail(videoUrl: string): string | null | undefined {
-  return thumbnailCache.get(videoUrl);
+export function getCachedVideoThumbnail(videoUrl: string, courseId: string): string | null | undefined {
+  return thumbnailCache.get(resolveVideoSrc(videoUrl, courseId));
 }
 
 export async function extractVideoFirstFrame(
   videoUrl: string,
   courseId: string,
 ): Promise<string | null> {
-  if (thumbnailCache.has(videoUrl)) return thumbnailCache.get(videoUrl) ?? null;
+  const src = resolveVideoSrc(videoUrl, courseId);
+  if (thumbnailCache.has(src)) return thumbnailCache.get(src) ?? null;
 
   try {
-    const src = resolveVideoSrc(videoUrl, courseId);
-
     const video = document.createElement('video');
     video.preload = 'auto';
     video.muted = true;
@@ -64,14 +65,14 @@ export async function extractVideoFirstFrame(
 
     video.src = ''; // 释放资源
 
-    thumbnailCache.set(videoUrl, dataUrl);
+    thumbnailCache.set(src, dataUrl);
     return dataUrl;
   } catch {
-    thumbnailCache.set(videoUrl, null);
+    thumbnailCache.set(src, null);
     return null;
   }
 }
 
 function resolveVideoSrc(videoUrl: string, courseId: string): string {
-  return `forge-local://${courseId}/${videoUrl}`;
+  return getCourseResourceUrl(courseId, videoUrl);
 }
