@@ -47,7 +47,6 @@ import {
   setChoiceCorrectOptionIds as applyChoiceCorrectOptionIds,
 } from '../utils/choiceAnswerRules';
 import { assetExport } from '../elements/builtinAssets';
-import type { LayerSelectionMode } from '../utils/layerTree';
 
 type InternalPagePlacement = { pageGroupId?: string; afterPageId?: string };
 type SelectionOrigin = 'canvas' | 'layer' | 'other';
@@ -88,7 +87,6 @@ interface EditorState {
   selectedEditorLayerGroupId: string | null;
   primarySelectedElementId: string | null;
   hoveredElementId: string | null;
-  layerSelectionMode: LayerSelectionMode;
   selectionOrigin: SelectionOrigin;
   selectedStageTarget?: 'preview' | 'normal';
   clipboard: Element[];
@@ -174,7 +172,6 @@ interface EditorState {
   selectElement: (id: string, multi?: boolean, origin?: SelectionOrigin) => void;
   selectElements: (ids: string[], origin?: SelectionOrigin, primaryId?: string) => void;
   selectEditorLayerGroup: (groupId: string | null, multi?: boolean, origin?: SelectionOrigin) => void;
-  setLayerSelectionMode: (mode: LayerSelectionMode) => void;
   setHoveredElementId: (id: string | null) => void;
   selectAll: () => void;
   clearSelection: () => void;
@@ -439,7 +436,6 @@ export const useEditorStore = create<EditorState>()(
     selectedEditorLayerGroupId: null,
     primarySelectedElementId: null,
     hoveredElementId: null,
-    layerSelectionMode: 'component',
     selectionOrigin: 'other',
     selectedStageTarget: undefined,
     clipboard: [],
@@ -2161,11 +2157,6 @@ export const useEditorStore = create<EditorState>()(
         state.primarySelectedElementId = remove
           ? (state.selectedElementIds.at(-1) ?? null)
           : (group.memberIds.at(-1) ?? state.selectedElementIds.at(-1) ?? null);
-      }),
-
-    setLayerSelectionMode: (mode) =>
-      set((state) => {
-        state.layerSelectionMode = mode;
       }),
 
     setHoveredElementId: (id) =>

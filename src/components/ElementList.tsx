@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
-import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, ChevronRight, ChevronDown, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, Search, Maximize2, Minimize2, Crosshair, X } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, ChevronRight, ChevronDown, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, Search, Crosshair, X } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import { findActiveElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
@@ -66,6 +66,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const setElementLocked = useEditorStore((s) => s.setElementLocked);
   const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
   const addEditorLayerGroup = useEditorStore((s) => s.addEditorLayerGroup);
+  const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
   const setEditorLayerGroupMembers = useEditorStore((s) => s.setEditorLayerGroupMembers);
   const setEditorLayerGroupParent = useEditorStore((s) => s.setEditorLayerGroupParent);
   const deleteElement = useEditorStore((s) => s.deleteElement);
@@ -312,16 +313,6 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     window.setTimeout(() => scrollToLayerRow(targetKind, targetId), 0);
   };
 
-  const expandAll = () => {
-    setExpandedContainers(new Set(elements.filter((element) => elements.some((child) => child.parentId === element.id)).map((element) => element.id)));
-    setExpandedGroups(new Set(layerGroups.map((group) => group.id)));
-  };
-
-  const collapseAll = () => {
-    setExpandedContainers(new Set());
-    setExpandedGroups(new Set());
-  };
-
   const commitLayerName = (el: typeof elements[0], value: string) => {
     const normalized = value.trim();
     setEditingLayerId(null);
@@ -338,6 +329,13 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       return;
     }
     setExpandedGroups((previous) => new Set(previous).add(groupId));
+  };
+
+  const deleteLayerGroup = (group: ResolvedEditorLayerGroup) => {
+    const contents = group.memberIds.length > 0 ? '及其成员' : '';
+    if (!window.confirm(`确定删除图层组“${group.name}”${contents}吗？此操作可以撤销。`)) return;
+    deleteEditorLayerGroup(group.id, true);
+    selectEditorLayerGroup(null);
   };
 
   const handleDragStart = (e: React.DragEvent, el: typeof elements[0]) => {
@@ -538,7 +536,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
         {renderDropIndicator(parentId, visualIndex, editorGroupId)}
         <div
           data-layer-row={getLayerNodeKey('element', el.id)}
-          className={`flex items-center gap-1 py-1 text-xs transition-colors ${
+          className={`group flex items-center gap-1 py-1 text-xs transition-colors ${
             isDragging ? 'opacity-40' :
             isContainerTarget ? 'ring-2 ring-blue-500 rounded mx-1' :
             isFocused ? 'ring-2 ring-cyan-300/90 rounded mx-1' :
@@ -647,8 +645,22 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             )}
             <span className="text-slate-500 text-[10px] shrink-0">{meta?.label || el.type}</span>
           </div>
-          {isSelected && !selectedEditorLayerGroupId && !effectiveLocked && !pageFrozen && (
-            <button onClick={() => { deleteElement(el.id); clearSelection(); }} className="p-0.5 hover:bg-red-900 rounded text-red-400" title={t('deleteElement')}><Trash2 size={11} /></button>
+          {!effectiveLocked && !pageFrozen && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!window.confirm(t('deleteElementConfirm'))) return;
+                const wasSelected = selectedElementIds.includes(el.id);
+                deleteElement(el.id);
+                if (wasSelected) clearSelection();
+              }}
+              className={`p-0.5 rounded text-red-400 hover:bg-red-900 ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+              title={t('deleteElement')}
+              aria-label={`删除图层 ${layerName}`}
+            >
+              <Trash2 size={11} />
+            </button>
           )}
         </div>
         {expanded && children.map((child, index) => renderEl(child, depth + 1, index))}
@@ -669,7 +681,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       <div key={`layer-group-${group.id}`}>
         <div
           data-layer-row={getLayerNodeKey('group', group.id)}
-          className={`flex items-center gap-1 py-1 text-xs ${
+          className={`group flex items-center gap-1 py-1 text-xs ${
             dropTarget?.kind === 'into-group' && dropTarget.groupId === group.id
               ? 'ring-2 ring-emerald-500 bg-emerald-950/30'
               : isFocused
@@ -734,6 +746,20 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             {group.name}
           </span>
           <span className="text-[10px] text-slate-500 shrink-0">{members.length}</span>
+          {!pageFrozen && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                deleteLayerGroup(group);
+              }}
+              className={`p-0.5 rounded text-red-400 hover:bg-red-900 ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+              title="删除图层组及其成员"
+              aria-label={`删除图层组 ${group.name}`}
+            >
+              <Trash2 size={11} />
+            </button>
+          )}
         </div>
         {expanded && (
           <div>
@@ -829,12 +855,6 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             <option value="">选择类型</option>
             {typeOptions.map((type) => <option key={type} value={type}>{elementMeta[type]?.label ?? type}</option>)}
           </select>
-          <button type="button" onClick={expandAll} className="rounded p-1.5 text-slate-500 hover:bg-slate-700 hover:text-slate-200" title="展开全部图层" aria-label="展开全部图层">
-            <Maximize2 size={12} />
-          </button>
-          <button type="button" onClick={collapseAll} className="rounded p-1.5 text-slate-500 hover:bg-slate-700 hover:text-slate-200" title="收起全部图层" aria-label="收起全部图层">
-            <Minimize2 size={12} />
-          </button>
         </div>
         {(searchTerm || layerFilter !== 'all' || typeFilter) && (
           <div className="flex items-center justify-between text-[10px] text-slate-500" aria-live="polite">

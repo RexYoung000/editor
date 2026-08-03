@@ -29,7 +29,6 @@ import {
   normalizeSelection,
   resolveMarqueeSelection,
   resolvePointerSelection,
-  resolvePointerSelectionByMode,
   selectElementsInRect,
 } from '../utils/canvasSelection';
 import {
@@ -63,7 +62,6 @@ import {
   type SnapResult,
 } from '../utils/canvasSnap';
 import { isChoiceOption } from '../utils/choiceAnswerRules';
-import { resolveEditorLayerGroups } from '../utils/layerGroups';
 import {
   createEqualSpacingItems,
   getDistanceHintBetweenRects,
@@ -535,33 +533,15 @@ export default function CanvasOverlay({
     const toggle = event.metaKey || event.ctrlKey;
     const duplicateOnDrag = IS_MAC ? event.altKey : event.ctrlKey;
     const editorLayerGroupIds = new Set(page.editorLayerGroups?.map((group) => group.id) ?? []);
-    const resolvedLayerGroups = resolveEditorLayerGroups(page);
-    const selectionGroupIds = store.layerSelectionMode === 'group'
-      ? new Set(resolvedLayerGroups.map((group) => group.id))
-      : editorLayerGroupIds;
     if (hit) {
       const hitWasSelected = currentIds.includes(hit.id);
       const delayedMacToggle = IS_MAC && event.metaKey && hitWasSelected;
-      const modeSelection = resolvePointerSelectionByMode(
-        page.elements,
-        currentIds,
-        hit.id,
-        toggle,
-        store.layerSelectionMode,
-        resolvedLayerGroups,
-      );
       const preserveSelection = duplicateOnDrag && hitWasSelected
         || hitWasSelected && (!toggle || delayedMacToggle);
-      let pointerSelection: string[];
-      if (modeSelection.editorLayerGroupId) {
-        store.selectEditorLayerGroup(modeSelection.editorLayerGroupId, preserveSelection ? false : toggle, 'canvas');
-        pointerSelection = useEditorStore.getState().selectedElementIds;
-      } else {
-        pointerSelection = preserveSelection
-          ? normalizeSelection(page.elements, currentIds, undefined, selectionGroupIds)
-          : modeSelection.ids;
-        store.selectElements(pointerSelection, 'canvas', hit.id);
-      }
+      const pointerSelection = preserveSelection
+        ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
+        : resolvePointerSelection(page.elements, currentIds, hit.id, toggle, editorLayerGroupIds);
+      store.selectElements(pointerSelection, 'canvas', hit.id);
       const elementMap = new Map(page.elements.map((element) => [element.id, element]));
       const transaction = isElementLocked(hit, elementMap)
         ? null
@@ -579,11 +559,11 @@ export default function CanvasOverlay({
         started: false,
         transaction,
         clickSelection: delayedMacToggle
-          ? resolvePointerSelection(page.elements, currentIds, hit.id, true, selectionGroupIds)
+          ? resolvePointerSelection(page.elements, currentIds, hit.id, true, editorLayerGroupIds)
           : duplicateOnDrag && toggle
-          ? resolvePointerSelection(page.elements, currentIds, hit.id, true, selectionGroupIds)
+          ? resolvePointerSelection(page.elements, currentIds, hit.id, true, editorLayerGroupIds)
           : hitWasSelected && !toggle
-            ? normalizeSelection(page.elements, currentIds, undefined, selectionGroupIds)
+            ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
             : null,
         clickPrimaryId: hit.id,
         duplicateOnDrag,

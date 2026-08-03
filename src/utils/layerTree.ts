@@ -2,8 +2,6 @@ import type { EditorLayerGroup, Element } from '../types';
 import type { ResolvedEditorLayerGroup } from './layerGroups';
 import { createElementMap, getElementLayerState, type LayerState } from './layerState';
 
-export type LayerSelectionMode = 'component' | 'group';
-
 export type LayerFilter = 'all' | 'selected' | 'hidden' | 'locked' | 'type';
 
 export type LayerNodeKind = 'element' | 'group';

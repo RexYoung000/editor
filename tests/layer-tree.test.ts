@@ -8,7 +8,6 @@ import {
   getLayerTreeVisibility,
 } from '../src/utils/layerTree';
 import { resolveEditorLayerGroups } from '../src/utils/layerGroups';
-import { resolvePointerSelectionByMode } from '../src/utils/canvasSelection';
 
 function element(id: string, overrides: Partial<Element> = {}): Element {
   return {
@@ -103,31 +102,6 @@ test('图层树视觉顺序支持容器、图层组和 Shift 连续选择', () =
 
   assert.deepEqual(order, ['group-high', 'group-low', 'container', 'child-high', 'child-low', 'low']);
   assert.deepEqual(getLayerRangeSelection(order, 'group-low', 'child-high'), ['group-low', 'container', 'child-high']);
-});
-
-test('画布选择模式在编辑器图层组与实际组件之间保持边界', () => {
-  const elements = [
-    element('group-member', { groupId: 'editor-group' }),
-    element('legacy-member', { groupId: 'legacy-group' }),
-    element('plain'),
-  ];
-  const groups = resolveEditorLayerGroups({
-    elements,
-    editorLayerGroups: [{ id: 'editor-group', name: '编辑组' }],
-  });
-
-  assert.deepEqual(
-    resolvePointerSelectionByMode(elements, [], 'group-member', false, 'group', groups),
-    { ids: ['group-member'], editorLayerGroupId: 'editor-group' },
-  );
-  assert.deepEqual(
-    resolvePointerSelectionByMode(elements, [], 'legacy-member', false, 'group', groups),
-    { ids: ['legacy-member'] },
-  );
-  assert.deepEqual(
-    resolvePointerSelectionByMode(elements, [], 'legacy-member', false, 'component', groups),
-    { ids: ['legacy-member'] },
-  );
 });
 
 test('图层行定位会返回运行父级和编辑器组的展开路径', () => {
