@@ -26,6 +26,12 @@ import { isElementLocked } from '../utils/layerState';
 import { toggleImageMirrorProps, type ImageMirrorAxis } from '../utils/imageMirror';
 import { canAssignElementsToGroup, canNestGroup, getEditorLayerGroups, resolveEditorLayerGroups } from '../utils/layerGroups';
 import {
+  getSelectionAlignmentUpdates,
+  getSelectionGeometryUpdates,
+  type SelectionAlignmentDirection,
+  type SelectionGeometryChange,
+} from '../utils/selectionSet';
+import {
   cloneInternalPageWithinSubPage,
   cloneStageWithNewIds,
   cloneSubPageWithNewIds,
@@ -181,7 +187,8 @@ interface EditorState {
   duplicateElementsForDrag: (sourceIds: string[]) => ElementPasteResult | null;
   updateElementsWithoutHistory: (updates: Array<Pick<Element, 'id' | 'x' | 'y' | 'width' | 'height' | 'rotation'>>) => void;
   removeElementsWithoutHistory: (ids: string[]) => void;
-  alignElements: (direction: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => void;
+  updateSelectionSetGeometry: (change: SelectionGeometryChange, saveToHistory?: boolean) => void;
+  alignElements: (direction: SelectionAlignmentDirection) => void;
   groupElements: () => void;
   ungroupElements: () => void;
   undo: () => void;
@@ -2402,74 +2409,61 @@ export const useEditorStore = create<EditorState>()(
         state.selectedElementIds = state.selectedElementIds.filter((id) => !removing.has(id));
       }),
 
-    alignElements: (direction) =>
+    updateSelectionSetGeometry: (change, saveToHistory = false) => {
+      let changed = false;
       set((state) => {
         const page = findCurrentSubPage(state);
-        if (!page) return;
-        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
-        const els = page.elements.filter((e) => state.selectedElementIds.includes(e.id) && !isElementLocked(e, elementMap));
-        if (els.length < 2) return;
+        if (!page || ('frozen' in page && page.frozen)) return;
+        const updates = getSelectionGeometryUpdates(
+          page.elements,
+          state.selectedElementIds,
+          change,
+          page.editorLayerGroups?.map((group) => group.id),
+        );
+        const elementMap = new Map(page.elements.map((element) => [element.id, element]));
+        updates.forEach((update) => {
+          const element = elementMap.get(update.id);
+          if (!element || isElementLocked(element, elementMap)) return;
+          const nextHeight = isChoiceOption(element, page.elements) ? 77 : update.height;
+          if (
+            element.x === update.x
+            && element.y === update.y
+            && element.width === update.width
+            && element.height === nextHeight
+          ) return;
+          element.x = update.x;
+          element.y = update.y;
+          element.width = update.width;
+          element.height = nextHeight;
+          changed = true;
+        });
+      });
+      if (changed && saveToHistory) get().saveHistory();
+    },
 
-        switch (direction) {
-          case 'left': {
-            const minX = Math.min(...els.map((e) => e.x));
-            els.forEach((e) => { e.x = minX; });
-            break;
-          }
-          case 'right': {
-            const maxR = Math.max(...els.map((e) => e.x + e.width));
-            els.forEach((e) => { e.x = maxR - e.width; });
-            break;
-          }
-          case 'centerH': {
-            const minX = Math.min(...els.map((e) => e.x));
-            const maxR = Math.max(...els.map((e) => e.x + e.width));
-            const cx = (minX + maxR) / 2;
-            els.forEach((e) => { e.x = cx - e.width / 2; });
-            break;
-          }
-          case 'top': {
-            const minY = Math.min(...els.map((e) => e.y));
-            els.forEach((e) => { e.y = minY; });
-            break;
-          }
-          case 'bottom': {
-            const maxB = Math.max(...els.map((e) => e.y + e.height));
-            els.forEach((e) => { e.y = maxB - e.height; });
-            break;
-          }
-          case 'centerV': {
-            const minY = Math.min(...els.map((e) => e.y));
-            const maxB = Math.max(...els.map((e) => e.y + e.height));
-            const cy = (minY + maxB) / 2;
-            els.forEach((e) => { e.y = cy - e.height / 2; });
-            break;
-          }
-          case 'distributeH': {
-            if (els.length < 3) return;
-            const sorted = [...els].sort((a, b) => a.x - b.x);
-            const minX = sorted[0].x;
-            const maxR = sorted[sorted.length - 1].x + sorted[sorted.length - 1].width;
-            const totalW = sorted.reduce((s, e) => s + e.width, 0);
-            const gap = (maxR - minX - totalW) / (sorted.length - 1);
-            let cx = minX;
-            sorted.forEach((e) => { e.x = Math.round(cx); cx += e.width + gap; });
-            break;
-          }
-          case 'distributeV': {
-            if (els.length < 3) return;
-            const sorted = [...els].sort((a, b) => a.y - b.y);
-            const minY = sorted[0].y;
-            const maxB = sorted[sorted.length - 1].y + sorted[sorted.length - 1].height;
-            const totalH = sorted.reduce((s, e) => s + e.height, 0);
-            const gap = (maxB - minY - totalH) / (sorted.length - 1);
-            let cy = minY;
-            sorted.forEach((e) => { e.y = Math.round(cy); cy += e.height + gap; });
-            break;
-          }
-        }
-        get().saveHistory();
-      }),
+    alignElements: (direction) => {
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page || ('frozen' in page && page.frozen)) return;
+        const updates = getSelectionAlignmentUpdates(
+          page.elements,
+          state.selectedElementIds,
+          direction,
+          page.editorLayerGroups?.map((group) => group.id),
+        );
+        const elementMap = new Map(page.elements.map((element) => [element.id, element]));
+        updates.forEach((update) => {
+          const element = elementMap.get(update.id);
+          if (!element || isElementLocked(element, elementMap)) return;
+          if (element.x === update.x && element.y === update.y) return;
+          element.x = update.x;
+          element.y = update.y;
+          changed = true;
+        });
+      });
+      if (changed) get().saveHistory();
+    },
 
     groupElements: () => {
       let changed = false;
