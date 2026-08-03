@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
-import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, ChevronRight, ChevronDown, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, ChevronRight, ChevronDown, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, Search, Crosshair, X } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import { findActiveElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
@@ -15,6 +15,14 @@ import {
 import { createElementMap, getElementLayerState } from '../utils/layerState';
 import { getNextEditorLayerGroupName, resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
 import { showToast } from '../utils/toast';
+import {
+  getLayerAncestorKeys,
+  getLayerNodeKey,
+  getLayerRangeSelection,
+  getLayerTreeElementOrder,
+  getLayerTreeVisibility,
+  type LayerFilter,
+} from '../utils/layerTree';
 
 type DropTarget =
   | {
@@ -26,6 +34,12 @@ type DropTarget =
   }
   | { kind: 'into-container'; containerId: string }
   | { kind: 'into-group'; groupId: string };
+
+type LayerSelectModifiers = {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+};
 
 export default function ElementList({ showHeader = true }: { showHeader?: boolean } = {}) {
   const { t } = useI18n();
@@ -39,14 +53,20 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   ));
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectedEditorLayerGroupId = useEditorStore((s) => s.selectedEditorLayerGroupId);
+  const primarySelectedElementId = useEditorStore((s) => s.primarySelectedElementId);
+  const selectionOrigin = useEditorStore((s) => s.selectionOrigin);
+  const hoveredElementId = useEditorStore((s) => s.hoveredElementId);
   const selectElement = useEditorStore((s) => s.selectElement);
+  const selectElements = useEditorStore((s) => s.selectElements);
   const selectEditorLayerGroup = useEditorStore((s) => s.selectEditorLayerGroup);
+  const setHoveredElementId = useEditorStore((s) => s.setHoveredElementId);
   const updateElement = useEditorStore((s) => s.updateElement);
   const setElementEditorHidden = useEditorStore((s) => s.setElementEditorHidden);
   const setElementsEditorHidden = useEditorStore((s) => s.setElementsEditorHidden);
   const setElementLocked = useEditorStore((s) => s.setElementLocked);
   const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
   const addEditorLayerGroup = useEditorStore((s) => s.addEditorLayerGroup);
+  const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
   const setEditorLayerGroupMembers = useEditorStore((s) => s.setEditorLayerGroupMembers);
   const setEditorLayerGroupParent = useEditorStore((s) => s.setEditorLayerGroupParent);
   const deleteElement = useEditorStore((s) => s.deleteElement);
@@ -61,22 +81,35 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const [layerDraft, setLayerDraft] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [expandedContainers, setExpandedContainers] = useState<Set<string>>(new Set());
+  const [searchTerm, setSearchTerm] = useState('');
+  const [layerFilter, setLayerFilter] = useState<LayerFilter>('all');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [focusedLayerKey, setFocusedLayerKey] = useState<string | null>(null);
+  const selectionAnchorRef = useRef<string | null>(null);
+  const focusClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipNextGroupPreferenceSave = useRef(false);
+  const skipNextContainerPreferenceSave = useRef(false);
 
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
-  const elements = currentPage?.elements ?? [];
-  const elementMap = createElementMap(elements);
-  const layerGroups = currentPage ? resolveEditorLayerGroups(currentPage) : [];
+  const elements = useMemo(() => currentPage?.elements ?? [], [currentPage?.elements]);
+  const elementMap = useMemo(() => createElementMap(elements), [elements]);
+  const layerGroups = useMemo(() => currentPage ? resolveEditorLayerGroups(currentPage) : [], [currentPage]);
   const explicitLayerGroupIds = new Set(currentPage?.editorLayerGroups?.map((group) => group.id) ?? []);
   const pageFrozen = Boolean(currentPage && 'frozen' in currentPage && currentPage.frozen);
   const groupPreferenceKey = currentCourse && currentPage
     ? `forge.layer-groups.${currentCourse.id}.${currentPage.id}`
     : null;
+  const containerPreferenceKey = currentCourse && currentPage
+    ? `forge.layer-containers.${currentCourse.id}.${currentPage.id}`
+    : null;
 
   useEffect(() => {
     skipNextGroupPreferenceSave.current = true;
+    skipNextContainerPreferenceSave.current = true;
     if (!groupPreferenceKey) {
       setExpandedGroups(new Set()); // eslint-disable-line react-hooks/set-state-in-effect
+      setExpandedContainers(new Set());
       return;
     }
     try {
@@ -85,7 +118,18 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     } catch {
       setExpandedGroups(new Set());
     }
-  }, [groupPreferenceKey]);
+    try {
+      const saved = containerPreferenceKey ? localStorage.getItem(containerPreferenceKey) : null;
+      if (saved === null) {
+        setExpandedContainers(new Set(elements.filter((element) => elements.some((child) => child.parentId === element.id)).map((element) => element.id)));
+      } else {
+        const parsed = JSON.parse(saved);
+        setExpandedContainers(new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []));
+      }
+    } catch {
+      setExpandedContainers(new Set());
+    }
+  }, [containerPreferenceKey, elements, groupPreferenceKey]);
 
   useEffect(() => {
     if (!groupPreferenceKey) return;
@@ -95,6 +139,120 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     }
     localStorage.setItem(groupPreferenceKey, JSON.stringify([...expandedGroups]));
   }, [expandedGroups, groupPreferenceKey]);
+
+  useEffect(() => {
+    if (!containerPreferenceKey) return;
+    if (skipNextContainerPreferenceSave.current) {
+      skipNextContainerPreferenceSave.current = false;
+      return;
+    }
+    localStorage.setItem(containerPreferenceKey, JSON.stringify([...expandedContainers]));
+  }, [containerPreferenceKey, expandedContainers]);
+
+  useEffect(() => {
+    selectionAnchorRef.current = null;
+    setHoveredElementId(null);
+  }, [currentPage?.id, setHoveredElementId]);
+
+  const getElementSearchText = (element: typeof elements[number]): string => {
+    const parts: string[] = [];
+    const visited = new Set<string>();
+    let current: typeof element | undefined = element;
+    while (current && !visited.has(current.id)) {
+      visited.add(current.id);
+      const meta = elementMeta[current.type];
+      parts.push(
+        getLayerDisplayName(current, meta?.label),
+        current.id,
+        current.name ?? '',
+        current.type,
+        meta?.label ?? '',
+      );
+      current = current.parentId ? elementMap.get(current.parentId) : undefined;
+    }
+    const group = currentPage ? layerGroups.find((candidate) => candidate.id === element.groupId) : undefined;
+    if (group) {
+      const groupNames: string[] = [];
+      const visitedGroups = new Set<string>();
+      let currentGroup: ResolvedEditorLayerGroup | undefined = group;
+      while (currentGroup && !visitedGroups.has(currentGroup.id)) {
+        visitedGroups.add(currentGroup.id);
+        groupNames.push(currentGroup.name, currentGroup.id);
+        currentGroup = currentGroup.parentGroupId
+          ? layerGroups.find((candidate) => candidate.id === currentGroup?.parentGroupId)
+          : undefined;
+      }
+      parts.push(...groupNames);
+    }
+    return parts.join(' ');
+  };
+
+  const elementSearchText = new Map(elements.map((element) => [element.id, getElementSearchText(element)]));
+  const groupSearchText = new Map(layerGroups.map((group) => {
+    const parts: string[] = [];
+    const visitedGroups = new Set<string>();
+    let currentGroup: ResolvedEditorLayerGroup | undefined = group;
+    while (currentGroup && !visitedGroups.has(currentGroup.id)) {
+      visitedGroups.add(currentGroup.id);
+      parts.push(currentGroup.name, currentGroup.id);
+      currentGroup = currentGroup.parentGroupId
+        ? layerGroups.find((candidate) => candidate.id === currentGroup?.parentGroupId)
+        : undefined;
+    }
+    return [group.id, parts.join(' ')] as const;
+  }));
+  const layerStates = new Map(elements.map((element) => [element.id, getElementLayerState(element, elementMap)]));
+  const visibility = getLayerTreeVisibility({
+    elements,
+    groups: layerGroups,
+    searchTerm,
+    filter: layerFilter,
+    typeFilter,
+    selectedIds: selectedElementIds,
+    selectedGroupId: selectedEditorLayerGroupId,
+    elementSearchText,
+    groupSearchText,
+    layerStates,
+  });
+  const expandedElementIds = new Set([...expandedContainers, ...visibility.autoExpandedElementIds]);
+  const expandedGroupIds = new Set([...expandedGroups, ...visibility.autoExpandedGroupIds]);
+  const visibleElementOrder = getLayerTreeElementOrder(
+    elements,
+    layerGroups,
+    visibility.visibleElementIds,
+    visibility.visibleGroupIds,
+    expandedElementIds,
+    expandedGroupIds,
+  );
+  const typeOptions = [...new Set(elements.map((element) => element.type))]
+    .sort((left, right) => (elementMeta[left]?.label ?? left).localeCompare(elementMeta[right]?.label ?? right, 'zh-CN'));
+
+  useEffect(() => {
+    if (!currentPage || selectionOrigin !== 'canvas') return;
+    const targetKind = selectedEditorLayerGroupId ? 'group' : primarySelectedElementId ? 'element' : null;
+    const targetId = selectedEditorLayerGroupId ?? primarySelectedElementId ?? selectedElementIds.at(-1);
+    if (!targetKind || !targetId) return;
+    const ancestors = getLayerAncestorKeys(targetId, targetKind, elements, layerGroups);
+    const targetKey = getLayerNodeKey(targetKind, targetId);
+    const scrollTimer = window.setTimeout(() => {
+      if (ancestors.elementIds.length > 0) {
+        setExpandedContainers((previous) => new Set([...previous, ...ancestors.elementIds]));
+      }
+      if (ancestors.groupIds.length > 0) {
+        setExpandedGroups((previous) => new Set([...previous, ...ancestors.groupIds]));
+      }
+      window.setTimeout(() => {
+        const row = [...document.querySelectorAll<HTMLElement>('[data-layer-row]')]
+          .find((candidate) => candidate.dataset.layerRow === targetKey);
+        if (!row) return;
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFocusedLayerKey(targetKey);
+        if (focusClearTimerRef.current) clearTimeout(focusClearTimerRef.current);
+        focusClearTimerRef.current = setTimeout(() => setFocusedLayerKey(null), 900);
+      }, 0);
+    }, 0);
+    return () => window.clearTimeout(scrollTimer);
+  }, [currentPage, elements, layerGroups, primarySelectedElementId, selectedEditorLayerGroupId, selectedElementIds, selectionOrigin]);
 
   if (!currentPage) return null;
 
@@ -110,6 +268,50 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
 
   const getChildren = (parentId: string | undefined) => elements.filter(e => e.parentId === parentId);
   const getVisualChildren = (parentId: string | undefined) => getVisualSiblings(elements, parentId);
+  const isElementVisible = (id: string) => visibility.visibleElementIds.has(id);
+  const isGroupVisible = (id: string) => visibility.visibleGroupIds.has(id);
+  const isElementExpanded = (id: string) => expandedElementIds.has(id);
+  const isGroupExpanded = (id: string) => expandedGroupIds.has(id);
+
+  const handleElementSelect = (el: typeof elements[number], event: LayerSelectModifiers) => {
+    const toggle = event.ctrlKey || event.metaKey;
+    if (event.shiftKey && !toggle) {
+      const range = getLayerRangeSelection(visibleElementOrder, selectionAnchorRef.current, el.id);
+      if (range.length > 0) {
+        selectElements(range, 'layer', el.id);
+      }
+    } else {
+      selectElement(el.id, toggle, 'layer');
+      selectionAnchorRef.current = el.id;
+    }
+    if (!event.shiftKey || !selectionAnchorRef.current) selectionAnchorRef.current = el.id;
+  };
+
+  const handleGroupSelect = (groupId: string, event?: LayerSelectModifiers) => {
+    selectionAnchorRef.current = null;
+    selectEditorLayerGroup(groupId, Boolean(event?.ctrlKey || event?.metaKey), 'layer');
+  };
+
+  const scrollToLayerRow = (targetKind: 'element' | 'group', targetId: string) => {
+    const targetKey = getLayerNodeKey(targetKind, targetId);
+    const row = [...document.querySelectorAll<HTMLElement>('[data-layer-row]')]
+      .find((candidate) => candidate.dataset.layerRow === targetKey);
+    if (!row) return;
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFocusedLayerKey(targetKey);
+    if (focusClearTimerRef.current) clearTimeout(focusClearTimerRef.current);
+    focusClearTimerRef.current = setTimeout(() => setFocusedLayerKey(null), 900);
+  };
+
+  const locateSelection = () => {
+    const targetKind = selectedEditorLayerGroupId ? 'group' : 'element';
+    const targetId = selectedEditorLayerGroupId ?? primarySelectedElementId ?? selectedElementIds.at(-1);
+    if (!targetId) return;
+    const ancestors = getLayerAncestorKeys(targetId, targetKind, elements, layerGroups);
+    setExpandedContainers((previous) => new Set([...previous, ...ancestors.elementIds]));
+    setExpandedGroups((previous) => new Set([...previous, ...ancestors.groupIds]));
+    window.setTimeout(() => scrollToLayerRow(targetKind, targetId), 0);
+  };
 
   const commitLayerName = (el: typeof elements[0], value: string) => {
     const normalized = value.trim();
@@ -127,6 +329,13 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
       return;
     }
     setExpandedGroups((previous) => new Set(previous).add(groupId));
+  };
+
+  const deleteLayerGroup = (group: ResolvedEditorLayerGroup) => {
+    const contents = group.memberIds.length > 0 ? '及其成员' : '';
+    if (!window.confirm(`确定删除图层组“${group.name}”${contents}吗？此操作可以撤销。`)) return;
+    deleteEditorLayerGroup(group.id, true);
+    selectEditorLayerGroup(null);
   };
 
   const handleDragStart = (e: React.DragEvent, el: typeof elements[0]) => {
@@ -312,20 +521,27 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
     const effectiveLocked = layerState.effectiveLocked;
     const isDragging = draggedId === el.id;
     const isContainerTarget = dropTarget?.kind === 'into-container' && dropTarget.containerId === el.id;
-    const children = getVisualChildren(el.id).filter((child) => !child.groupId);
+    const children = getVisualChildren(el.id).filter((child) => !child.groupId && isElementVisible(child.id));
+    const hasChildren = children.length > 0;
+    const expanded = isElementExpanded(el.id);
     const parentId = el.parentId;
     const editorGroupId = el.groupId && explicitLayerGroupIds.has(el.groupId) ? el.groupId : undefined;
     const layerName = getLayerDisplayName(el, meta?.label);
     const isEditingLayer = editingLayerId === el.id;
+    const isFocused = focusedLayerKey === getLayerNodeKey('element', el.id);
+    const isHovered = hoveredElementId === el.id;
 
     return (
       <div key={el.id}>
         {renderDropIndicator(parentId, visualIndex, editorGroupId)}
         <div
-          className={`flex items-center gap-1 py-1 text-xs transition-colors ${
+          data-layer-row={getLayerNodeKey('element', el.id)}
+          className={`group flex items-center gap-1 py-1 text-xs transition-colors ${
             isDragging ? 'opacity-40' :
             isContainerTarget ? 'ring-2 ring-blue-500 rounded mx-1' :
+            isFocused ? 'ring-2 ring-cyan-300/90 rounded mx-1' :
             isSelected ? 'bg-blue-600/30 text-blue-300' :
+            isHovered ? 'bg-cyan-400/15 text-cyan-100' :
             layerState.effectiveHidden ? 'text-slate-500 opacity-50 hover:bg-slate-700' :
             inheritedLocked ? 'text-amber-200/80 hover:bg-slate-700' :
             'text-slate-300 hover:bg-slate-700'
@@ -336,11 +552,32 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
           onDragEnd={handleDragEnd}
           onDragOver={(e) => handleDragOverRow(e, el)}
           onDrop={handleDropRow}
+          onMouseEnter={() => setHoveredElementId(el.id)}
+          onMouseLeave={() => {
+            if (useEditorStore.getState().hoveredElementId === el.id) setHoveredElementId(null);
+          }}
           onClick={(event) => {
             if ((event.target as HTMLElement).closest('button, input')) return;
-            selectElement(el.id, event.shiftKey || event.ctrlKey || event.metaKey);
+            handleElementSelect(el, event);
           }}
         >
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setExpandedContainers((previous) => {
+                  const next = new Set(previous);
+                  if (next.has(el.id)) next.delete(el.id); else next.add(el.id);
+                  return next;
+                });
+              }}
+              className="p-0.5 shrink-0 text-slate-500 hover:text-slate-200"
+              aria-label={expanded ? '收起子图层' : '展开子图层'}
+            >
+              {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            </button>
+          ) : <span className="w-[18px] shrink-0" />}
           <button
             onClick={(event) => { event.stopPropagation(); setElementEditorHidden(el.id, !editorHidden); }}
             className={`p-0.5 shrink-0 rounded ${layerState.effectiveHidden ? (inheritedHidden ? 'text-amber-400 hover:text-amber-200' : 'text-slate-600 hover:text-slate-400') : 'text-slate-400 hover:text-slate-200'}`}
@@ -363,7 +600,13 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             tabIndex={0}
             onClick={(e) => {
               e.stopPropagation();
-              selectElement(el.id, e.shiftKey || e.ctrlKey || e.metaKey);
+              handleElementSelect(el, e);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleElementSelect(el, e);
+              }
             }}
             className="flex items-center gap-2 flex-1 min-w-0 text-left"
             title={`${layerName} · ${el.name || el.type} · ${meta?.label || el.type}`}
@@ -402,29 +645,47 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             )}
             <span className="text-slate-500 text-[10px] shrink-0">{meta?.label || el.type}</span>
           </div>
-          {isSelected && !selectedEditorLayerGroupId && !effectiveLocked && !pageFrozen && (
-            <button onClick={() => { deleteElement(el.id); clearSelection(); }} className="p-0.5 hover:bg-red-900 rounded text-red-400" title={t('deleteElement')}><Trash2 size={11} /></button>
+          {!effectiveLocked && !pageFrozen && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!window.confirm(t('deleteElementConfirm'))) return;
+                const wasSelected = selectedElementIds.includes(el.id);
+                deleteElement(el.id);
+                if (wasSelected) clearSelection();
+              }}
+              className={`p-0.5 rounded text-red-400 hover:bg-red-900 ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+              title={t('deleteElement')}
+              aria-label={`删除图层 ${layerName}`}
+            >
+              <Trash2 size={11} />
+            </button>
           )}
         </div>
-        {children.map((child, index) => renderEl(child, depth + 1, index))}
-        {renderDropIndicator(el.id, children.length)}
+        {expanded && children.map((child, index) => renderEl(child, depth + 1, index))}
+        {expanded && renderDropIndicator(el.id, children.length)}
       </div>
     );
   };
 
   const renderGroup = (group: ResolvedEditorLayerGroup, depth: number): ReactElement => {
-    const expanded = expandedGroups.has(group.id);
+    const expanded = isGroupExpanded(group.id);
     const members = elements
-      .filter((element) => group.memberIds.includes(element.id))
+      .filter((element) => group.memberIds.includes(element.id) && isElementVisible(element.id))
       .reverse();
-    const childGroups = layerGroups.filter((candidate) => candidate.parentGroupId === group.id);
+    const childGroups = layerGroups.filter((candidate) => candidate.parentGroupId === group.id && isGroupVisible(candidate.id));
     const isSelected = selectedEditorLayerGroupId === group.id;
+    const isFocused = focusedLayerKey === getLayerNodeKey('group', group.id);
     return (
       <div key={`layer-group-${group.id}`}>
         <div
-          className={`flex items-center gap-1 py-1 text-xs ${
+          data-layer-row={getLayerNodeKey('group', group.id)}
+          className={`group flex items-center gap-1 py-1 text-xs ${
             dropTarget?.kind === 'into-group' && dropTarget.groupId === group.id
               ? 'ring-2 ring-emerald-500 bg-emerald-950/30'
+              : isFocused
+                ? 'ring-2 ring-cyan-300/90 rounded mx-1'
               : isSelected
                 ? 'bg-blue-600/30 text-blue-200'
                 : group.crossRuntimeParent
@@ -433,7 +694,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
           }`}
           style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: '8px' }}
           aria-selected={isSelected}
-          onClick={() => selectEditorLayerGroup(group.id)}
+          onClick={(event) => handleGroupSelect(group.id, event)}
           title={group.crossRuntimeParent ? '旧版跨运行父级编组：保持原有编组行为，重新编组后可转换为新图层组' : `${group.name} · ${members.length} 个成员`}
           onDragOver={(event) => {
             event.preventDefault();
@@ -473,18 +734,32 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             className="truncate flex-1 cursor-pointer"
             onClick={(event) => {
               event.stopPropagation();
-              selectEditorLayerGroup(group.id);
+              handleGroupSelect(group.id, event);
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                selectEditorLayerGroup(group.id);
+                handleGroupSelect(group.id, event);
               }
             }}
           >
             {group.name}
           </span>
           <span className="text-[10px] text-slate-500 shrink-0">{members.length}</span>
+          {!pageFrozen && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                deleteLayerGroup(group);
+              }}
+              className={`p-0.5 rounded text-red-400 hover:bg-red-900 ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+              title="删除图层组及其成员"
+              aria-label={`删除图层组 ${group.name}`}
+            >
+              <Trash2 size={11} />
+            </button>
+          )}
         </div>
         {expanded && (
           <div>
@@ -522,15 +797,91 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
           </button>
         </div>
       )}
+      <div className="shrink-0 border-b border-slate-700/80 bg-slate-800 px-2 py-2 space-y-1.5">
+        <div className="flex items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1 rounded border border-slate-600 bg-slate-900/60 px-1.5 focus-within:border-cyan-400">
+            <Search size={12} className="shrink-0 text-slate-500" />
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="搜索图层名称、标识或类型"
+              aria-label="搜索图层"
+              className="min-w-0 flex-1 bg-transparent py-1 text-[11px] text-slate-200 outline-none placeholder:text-slate-600"
+            />
+            {searchTerm && (
+              <button type="button" onClick={() => setSearchTerm('')} className="shrink-0 text-slate-500 hover:text-slate-200" aria-label="清空图层搜索">
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={locateSelection}
+            disabled={!selectedEditorLayerGroupId && !primarySelectedElementId && selectedElementIds.length === 0}
+            className="rounded p-1.5 text-slate-400 hover:bg-slate-700 hover:text-cyan-200 disabled:opacity-30"
+            title="在图层面板中定位当前选择"
+            aria-label="在图层面板中定位当前选择"
+          >
+            <Crosshair size={13} />
+          </button>
+        </div>
+        <div className="flex items-center gap-1">
+          <select
+            value={layerFilter}
+            onChange={(event) => {
+              const value = event.target.value as LayerFilter;
+              setLayerFilter(value);
+              if (value !== 'type') setTypeFilter('');
+            }}
+            aria-label="图层筛选"
+            className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-1.5 py-1 text-[11px] text-slate-300 outline-none focus:border-cyan-400"
+          >
+            <option value="all">全部图层</option>
+            <option value="selected">仅选中</option>
+            <option value="hidden">隐藏</option>
+            <option value="locked">锁定</option>
+            <option value="type">按组件类型</option>
+          </select>
+          <select
+            value={typeFilter}
+            onChange={(event) => {
+              setTypeFilter(event.target.value);
+              setLayerFilter(event.target.value ? 'type' : 'all');
+            }}
+            aria-label="按组件类型筛选"
+            disabled={layerFilter !== 'type' && !typeFilter}
+            className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-900 px-1.5 py-1 text-[11px] text-slate-300 outline-none focus:border-cyan-400 disabled:opacity-40"
+          >
+            <option value="">选择类型</option>
+            {typeOptions.map((type) => <option key={type} value={type}>{elementMeta[type]?.label ?? type}</option>)}
+          </select>
+        </div>
+        {(searchTerm || layerFilter !== 'all' || typeFilter) && (
+          <div className="flex items-center justify-between text-[10px] text-slate-500" aria-live="polite">
+            <span>显示 {visibility.visibleElementIds.size} / {elements.length} 个图层</span>
+            <button
+              type="button"
+              onClick={() => { setSearchTerm(''); setLayerFilter('all'); setTypeFilter(''); }}
+              className="text-cyan-400 hover:text-cyan-200"
+            >
+              清除筛选
+            </button>
+          </div>
+        )}
+      </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
         {elements.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <span className="text-xs text-slate-500">{t('noElements')}</span>
           </div>
+        ) : visibility.visibleElementIds.size === 0 && visibility.visibleGroupIds.size === 0 ? (
+          <div className="flex h-32 items-center justify-center px-5 text-center text-xs text-slate-500">
+            没有匹配的图层，试试清除搜索或筛选条件
+          </div>
         ) : (
           <div className="py-1">
-            {layerGroups.filter((group) => !group.parentGroupId).map((group) => renderGroup(group, 0))}
-            {topLevel.filter((el) => !el.groupId).map((el, index) => renderEl(el, 0, index))}
+            {layerGroups.filter((group) => !group.parentGroupId && isGroupVisible(group.id)).map((group) => renderGroup(group, 0))}
+            {topLevel.filter((el) => !el.groupId && isElementVisible(el.id)).map((el, index) => renderEl(el, 0, index))}
             {renderDropIndicator(undefined, topLevel.length)}
           </div>
         )}

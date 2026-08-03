@@ -134,6 +134,7 @@ interface MovePointer extends PointerBase {
   startWorld: CanvasPoint;
   transaction: MoveTransaction;
   clickSelection: string[] | null;
+  clickPrimaryId: string | null;
   duplicateOnDrag: boolean;
   duplicateIds: string[] | null;
   originalSelection: string[];
@@ -208,6 +209,7 @@ export default function CanvasOverlay({
   setSelectAllTextOnEdit,
   onTextSessionEnd,
 }: CanvasOverlayProps) {
+  const hoveredElementId = useEditorStore((state) => state.hoveredElementId);
   const interactionRef = useRef<PointerInteraction | null>(null);
   const [localMarquee, setLocalMarqueeState] = useState<MarqueeState | null>(null);
   const localMarqueeRef = useRef<MarqueeState | null>(null);
@@ -450,7 +452,7 @@ export default function CanvasOverlay({
       }
       if (interaction.kind === 'move' && interaction.duplicateIds) {
         store.removeElementsWithoutHistory(interaction.duplicateIds);
-        store.selectElements(interaction.originalSelection);
+        store.selectElements(interaction.originalSelection, 'other');
       }
       setLocalMarquee(null);
       return;
@@ -459,7 +461,7 @@ export default function CanvasOverlay({
     if (interaction.kind !== 'marquee') {
       if (!interaction.started) {
         if (interaction.kind === 'move' && interaction.clickSelection) {
-          store.selectElements(interaction.clickSelection);
+          store.selectElements(interaction.clickSelection, 'canvas', interaction.clickPrimaryId ?? undefined);
         }
         return;
       }
@@ -467,7 +469,7 @@ export default function CanvasOverlay({
         restorePreview(interaction);
         if (interaction.kind === 'move' && interaction.duplicateIds) {
           store.removeElementsWithoutHistory(interaction.duplicateIds);
-          store.selectElements(interaction.originalSelection);
+          store.selectElements(interaction.originalSelection, 'other');
         }
         return;
       }
@@ -504,7 +506,7 @@ export default function CanvasOverlay({
       hits,
       interaction.toggle,
       editorLayerGroupIds,
-    ));
+    ), 'canvas');
   }, [cancelTextResizePreview, commitPageTurnPosition, restorePreview, setLocalMarquee]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
@@ -534,12 +536,12 @@ export default function CanvasOverlay({
     if (hit) {
       const hitWasSelected = currentIds.includes(hit.id);
       const delayedMacToggle = IS_MAC && event.metaKey && hitWasSelected;
-      const pointerSelection = duplicateOnDrag && hitWasSelected
-        ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
-        : hitWasSelected && (!toggle || delayedMacToggle)
+      const preserveSelection = duplicateOnDrag && hitWasSelected
+        || hitWasSelected && (!toggle || delayedMacToggle);
+      const pointerSelection = preserveSelection
         ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
         : resolvePointerSelection(page.elements, currentIds, hit.id, toggle, editorLayerGroupIds);
-      store.selectElements(pointerSelection);
+      store.selectElements(pointerSelection, 'canvas', hit.id);
       const elementMap = new Map(page.elements.map((element) => [element.id, element]));
       const transaction = isElementLocked(hit, elementMap)
         ? null
@@ -561,8 +563,9 @@ export default function CanvasOverlay({
           : duplicateOnDrag && toggle
           ? resolvePointerSelection(page.elements, currentIds, hit.id, true, editorLayerGroupIds)
           : hitWasSelected && !toggle
-            ? resolvePointerSelection(page.elements, currentIds, hit.id, false, editorLayerGroupIds)
+            ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
             : null,
+        clickPrimaryId: hit.id,
         duplicateOnDrag,
         duplicateIds: null,
         originalSelection: currentIds,
@@ -667,9 +670,26 @@ export default function CanvasOverlay({
     ));
   }, [pointerToWorld, selectedIds]);
 
+  const updateCanvasHover = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-canvas-interactive]') || target.closest('[data-container-handle]')) {
+      useEditorStore.getState().setHoveredElementId(null);
+      return;
+    }
+    const page = currentPageRef.current;
+    const point = pointerToWorld(event.clientX, event.clientY);
+    if (!page || !point) {
+      useEditorStore.getState().setHoveredElementId(null);
+      return;
+    }
+    const hit = findTopElementAtPoint(page.elements, point, []);
+    useEditorStore.getState().setHoveredElementId(hit?.id ?? null);
+  }, [pointerToWorld]);
+
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const interaction = interactionRef.current;
     if (!interaction) {
+      updateCanvasHover(event);
       updateHoverDistance(event);
       return;
     }
@@ -971,7 +991,7 @@ export default function CanvasOverlay({
     setPreviewTransforms(interaction.transaction.preview);
     setPreviewFrame(interaction.transaction.previewFrame);
     setPreviewAngle(interaction.kind === 'rotate' ? interaction.transaction.angleDelta : null);
-  }, [overlayFontFamily, pageHeight, pageWidth, pointerToWorld, scheduleTextResizePreview, setLocalMarquee, updateHoverDistance]);
+  }, [overlayFontFamily, pageHeight, pageWidth, pointerToWorld, scheduleTextResizePreview, setLocalMarquee, updateCanvasHover, updateHoverDistance]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (interactionRef.current?.pointerId !== event.pointerId) return;
@@ -1058,6 +1078,12 @@ export default function CanvasOverlay({
     includeLocked: true,
     editorLayerGroupIds,
   });
+  const hoveredElement = hoveredElementId
+    ? displayElements.find((element) => element.id === hoveredElementId) ?? null
+    : null;
+  const hoveredFrame = hoveredElement && !selectedIds.includes(hoveredElement.id)
+    ? getSelectionFrame(displayElements, [hoveredElement.id], { includeLocked: true, editorLayerGroupIds })
+    : null;
   const canTransform = getTransformRootIds(displayElements, selectedIds, editorLayerGroupIds).length > 0;
   const selectedTextMode = selectedElement?.type === 'NewTextArea'
     ? normalizeTextSizingMode(selectedElement.props.textSizingMode)
@@ -1097,7 +1123,10 @@ export default function CanvasOverlay({
       onPointerUp={handlePointerUp}
       onPointerCancel={() => finishInteraction(false)}
       onPointerLeave={() => {
-        if (!interactionRef.current) setDistanceHint(null);
+        if (!interactionRef.current) {
+          setDistanceHint(null);
+          useEditorStore.getState().setHoveredElementId(null);
+        }
       }}
       onDoubleClick={handleDoubleClick}
     >
@@ -1348,6 +1377,38 @@ export default function CanvasOverlay({
           </div>
         );
       })}
+
+      {hoveredElement && hoveredFrame && (() => {
+        const origin = worldRectToScreen(
+          hoveredFrame.origin.x,
+          hoveredFrame.origin.y,
+          0,
+          0,
+          panX,
+          panY,
+          zoom,
+        );
+        return (
+          <div
+            data-canvas-hover={hoveredElement.id}
+            style={{
+              position: 'absolute',
+              left: origin.left,
+              top: origin.top,
+              width: hoveredFrame.width * zoom,
+              height: hoveredFrame.height * zoom,
+              border: '1px solid rgba(34, 211, 238, 0.9)',
+              background: 'rgba(34, 211, 238, 0.06)',
+              boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.22)',
+              boxSizing: 'border-box',
+              pointerEvents: 'none',
+              transform: `rotate(${hoveredFrame.rotation}deg)`,
+              transformOrigin: '0 0',
+              zIndex: 35,
+            }}
+          />
+        );
+      })()}
 
       {selectionFrame && !(editingElement && selectedElement?.id === editingElement.id) && (() => {
         const origin = worldRectToScreen(
