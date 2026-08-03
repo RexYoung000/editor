@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { elementMeta } from '../elements/elementMeta';
-import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, ChevronRight, ChevronDown, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal, Search, Crosshair, X } from 'lucide-react';
+import { Trash2, Eye, EyeOff, Lock, Unlock, Folder, FolderOpen, FolderPlus, ChevronRight, ChevronDown, Search, Crosshair, X } from 'lucide-react';
 import { useI18n } from '../i18n/context';
 import { findActiveElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
 import { isContainerElementType } from '../utils/elementContainers';
@@ -62,9 +62,7 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const setHoveredElementId = useEditorStore((s) => s.setHoveredElementId);
   const updateElement = useEditorStore((s) => s.updateElement);
   const setElementEditorHidden = useEditorStore((s) => s.setElementEditorHidden);
-  const setElementsEditorHidden = useEditorStore((s) => s.setElementsEditorHidden);
   const setElementLocked = useEditorStore((s) => s.setElementLocked);
-  const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
   const addEditorLayerGroup = useEditorStore((s) => s.addEditorLayerGroup);
   const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
   const setEditorLayerGroupMembers = useEditorStore((s) => s.setEditorLayerGroupMembers);
@@ -73,7 +71,6 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
   const reorderElement = useEditorStore((s) => s.reorderElement);
   const setElementParent = useEditorStore((s) => s.setElementParent);
   const clearSelection = useEditorStore((s) => s.clearSelection);
-  const alignElements = useEditorStore((s) => s.alignElements);
 
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
@@ -883,32 +880,6 @@ export default function ElementList({ showHeader = true }: { showHeader?: boolea
             {layerGroups.filter((group) => !group.parentGroupId && isGroupVisible(group.id)).map((group) => renderGroup(group, 0))}
             {topLevel.filter((el) => !el.groupId && isElementVisible(el.id)).map((el, index) => renderEl(el, 0, index))}
             {renderDropIndicator(undefined, topLevel.length)}
-          </div>
-        )}
-        {!selectedEditorLayerGroupId && selectedElementIds.length >= 2 && (
-          <div className="px-2 py-1.5 border-t border-slate-700">
-            <div className="flex gap-1 mb-1">
-              <button onClick={() => setElementsEditorHidden(selectedElementIds, true)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="隐藏选中图层" aria-label="隐藏选中图层"><EyeOff size={12} /></button>
-              <button onClick={() => setElementsEditorHidden(selectedElementIds, false)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="显示选中图层" aria-label="显示选中图层"><Eye size={12} /></button>
-              <button onClick={() => setElementsLocked(selectedElementIds, true)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="锁定选中图层" aria-label="锁定选中图层"><Lock size={12} /></button>
-              <button onClick={() => setElementsLocked(selectedElementIds, false)} className="p-1 hover:bg-slate-700 rounded text-slate-400" title="解锁选中图层" aria-label="解锁选中图层"><Unlock size={12} /></button>
-            </div>
-            <div className="text-[10px] text-slate-500 mb-1">{t('align')}</div>
-            <div className="flex gap-1 mb-1">
-              <button onClick={() => alignElements('left')} className="p-1 hover:bg-slate-700 rounded text-slate-400" title={t('alignLeft')}><AlignStartVertical size={12} /></button>
-              <button onClick={() => alignElements('centerH')} className="p-1 hover:bg-slate-700 rounded text-slate-400" title={t('alignCenterH')}><AlignCenterVertical size={12} /></button>
-              <button onClick={() => alignElements('right')} className="p-1 hover:bg-slate-700 rounded text-slate-400" title={t('alignRight')}><AlignEndVertical size={12} /></button>
-              <span className="w-px bg-slate-700" />
-              <button onClick={() => alignElements('top')} className="p-1 hover:bg-slate-700 rounded text-slate-400" title={t('alignTop')}><AlignStartHorizontal size={12} /></button>
-              <button onClick={() => alignElements('centerV')} className="p-1 hover:bg-slate-700 rounded text-slate-400" title={t('alignCenterV')}><AlignCenterHorizontal size={12} /></button>
-              <button onClick={() => alignElements('bottom')} className="p-1 hover:bg-slate-700 rounded text-slate-400" title={t('alignBottom')}><AlignEndHorizontal size={12} /></button>
-            </div>
-            {selectedElementIds.length >= 3 && (
-              <div className="flex gap-1">
-                <button onClick={() => alignElements('distributeH')} className="flex-1 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded text-slate-400">{t('distributeH')}</button>
-                <button onClick={() => alignElements('distributeV')} className="flex-1 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded text-slate-400">{t('distributeV')}</button>
-              </div>
-            )}
           </div>
         )}
       </div>

@@ -9,6 +9,7 @@ import {
 import { applyKlProps, applyEditorLayerVisibility, drawPlaceholder } from '../utils/laya/components';
 import { objects, canvasRoot, laya } from '../utils/laya/core';
 import CanvasOverlay from './CanvasOverlay';
+import SelectionArrangeToolbar from './SelectionArrangeToolbar';
 import { useI18n } from '../i18n/context';
 import CanvasRuler, { RULER_PX } from './CanvasRuler';
 import { LockKeyhole, PanelTopOpen } from 'lucide-react';
@@ -1051,6 +1052,7 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
             弹窗编辑 · 主界面底板只读
           </div>
         )}
+        <SelectionArrangeToolbar />
         {workbenchReadonly && (
           <div
             role="button"

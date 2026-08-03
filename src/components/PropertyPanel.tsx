@@ -45,6 +45,7 @@ import { isQuickTemplateConfirm } from '../utils/quickTemplateConfirm';
 import { layoutText, normalizeTextSizingMode } from '../utils/textLayout';
 import { createPropertyEditSession, parseFiniteNumberDraft } from '../utils/propertyEditSession';
 import { readCustomAnswerKeyboardConfig } from '../elements/keyboardPresets';
+import { getSelectionSetBounds, type SelectionGeometryKey } from '../utils/selectionSet';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -204,6 +205,7 @@ export default function PropertyPanel() {
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
   const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
+  const primarySelectedElementId = useEditorStore((s) => s.primarySelectedElementId);
   const selectedEditorLayerGroupId = useEditorStore((s) => s.selectedEditorLayerGroupId);
   const updateElement = useEditorStore((s) => s.updateElement);
   const mirrorElement = useEditorStore((s) => s.mirrorElement);
@@ -214,6 +216,7 @@ export default function PropertyPanel() {
   const clearSelection = useEditorStore((s) => s.clearSelection);
   const setElementsEditorHidden = useEditorStore((s) => s.setElementsEditorHidden);
   const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
+  const updateSelectionSetGeometry = useEditorStore((s) => s.updateSelectionSetGeometry);
   const selectEditorLayerGroup = useEditorStore((s) => s.selectEditorLayerGroup);
   const renameEditorLayerGroup = useEditorStore((s) => s.renameEditorLayerGroup);
   const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
@@ -248,6 +251,7 @@ export default function PropertyPanel() {
   const [okBtnPickerOpen, setOkBtnPickerOpen] = useState(false);
   const [videoSourceOpen, setVideoSourceOpen] = useState(false);
   const [inputFontPreviewOpen, setInputFontPreviewOpen] = useState(false);
+  const [selectionAspectLocked, setSelectionAspectLocked] = useState(false);
   const [propertyEditSession] = useState(() => createPropertyEditSession(
     () => JSON.stringify(useEditorStore.getState().currentCourse),
     () => useEditorStore.getState().saveHistory(),
@@ -292,6 +296,23 @@ export default function PropertyPanel() {
     ? resolvedLayerGroups.findIndex((group) => group.id === selectedEditorLayerGroup.id)
     : -1;
   const selectedElements = elements.filter((e) => selectedElementIds.includes(e.id));
+  const selectionSetBounds = selectedElements.length > 1
+    ? getSelectionSetBounds(elements, selectedElementIds, currentPage?.editorLayerGroups?.map((group) => group.id))
+    : null;
+  const primarySelectedElement = selectedElements.find((element) => element.id === primarySelectedElementId)
+    ?? selectedElements.at(-1)
+    ?? null;
+  const editableSelectionElements = selectedElements.filter((element) => !getElementLayerState(element, elementMap).effectiveLocked);
+  const lockedSelectionCount = selectedElements.length - editableSelectionElements.length;
+  const allSelectionMembersHidden = selectedElements.length > 0
+    && selectedElements.every((element) => getElementLayerState(element, elementMap).effectiveHidden);
+  const allSelectionMembersLocked = selectedElements.length > 0
+    && selectedElements.every((element) => element.locked === true);
+  const selectionOpacityValues = selectedElements.map((element) => element.opacity);
+  const selectionOpacity = selectionOpacityValues.length > 0
+    && selectionOpacityValues.every((value) => value === selectionOpacityValues[0])
+    ? selectionOpacityValues[0]
+    : null;
   const selectedEditorLayerGroupMemberIds = (() => {
     if (!selectedEditorLayerGroup) return [];
     const ids = new Set<string>();
@@ -639,6 +660,17 @@ export default function PropertyPanel() {
     if (single && !singleLayerState?.effectiveLocked) updateElement(single.id, { actions });
   };
 
+  const handleSelectionGeometryChange = (key: SelectionGeometryKey, value: number) => {
+    updateSelectionSetGeometry({ key, value, lockAspectRatio: selectionAspectLocked });
+  };
+
+  const handleSelectionOpacityChange = (value: number) => {
+    selectedElements.forEach((element) => {
+      if (getElementLayerState(element, elementMap).effectiveLocked) return;
+      updateElement(element.id, { opacity: value });
+    });
+  };
+
   const handleDelete = () => {
     if (!window.confirm(t('deleteElementConfirm'))) return;
     selectedElements.forEach((el) => deleteElement(el.id));
@@ -738,6 +770,22 @@ export default function PropertyPanel() {
     : selectedEditorLayerGroup?.memberIds.length
       ? '页面顶层'
       : '首次拖入成员后确定';
+  const selectionGeometryFields: Array<{ key: SelectionGeometryKey; label: string }> = [
+    { key: 'x', label: 'X' },
+    { key: 'y', label: 'Y' },
+    { key: 'width', label: '宽' },
+    { key: 'height', label: '高' },
+  ];
+  const selectionControlsDisabled = Boolean(
+    workbenchReadonly
+      || (currentPage && 'frozen' in currentPage && currentPage.frozen)
+      || editableSelectionElements.length === 0
+      || !selectionSetBounds,
+  );
+  const selectionStatusDisabled = Boolean(
+    workbenchReadonly
+      || (currentPage && 'frozen' in currentPage && currentPage.frozen),
+  );
 
   return (
     <>
@@ -816,6 +864,133 @@ export default function PropertyPanel() {
           ) : (
             <div className="flex items-center justify-center h-full"><span className="text-xs text-slate-500">{t('noSelection')}</span></div>
           )
+        ) : selectedElements.length > 1 ? (
+          <div data-selection-set className="space-y-3" aria-label="选择集属性">
+            <div className="border-b border-slate-700 pb-2">
+              <div className="text-sm font-medium text-slate-100">选择集属性</div>
+              <div className="mt-1 text-[11px] text-slate-400">已选 {selectedElements.length} 个图层</div>
+              <div className="mt-1 truncate text-[11px] text-slate-500" title={primarySelectedElement ? getLayerDisplayName(primarySelectedElement, elementMeta[primarySelectedElement.type]?.label) : undefined}>
+                主选中项：<span className="text-slate-300">{primarySelectedElement ? getLayerDisplayName(primarySelectedElement, elementMeta[primarySelectedElement.type]?.label) : '无'}</span>
+              </div>
+            </div>
+
+            {lockedSelectionCount > 0 && (
+              <div className="border border-amber-500/40 bg-amber-950/30 p-2 text-[10px] leading-relaxed text-amber-200" role="status">
+                {lockedSelectionCount} 个锁定图层不会参与几何和透明度批量修改。
+              </div>
+            )}
+
+            <fieldset disabled={selectionControlsDisabled} className="space-y-3 disabled:cursor-not-allowed disabled:opacity-50">
+              <div>
+                <div className="mb-1.5 text-xs text-slate-500">整体几何（画布坐标）</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {selectionGeometryFields.map((field) => {
+                    const rawValue = selectionSetBounds?.[field.key];
+                    const editKey = `selection.${field.key}`;
+                    return (
+                      <label key={field.key} className="flex items-center gap-1">
+                        <span className="w-7 shrink-0 text-[10px] text-slate-500">{field.label}</span>
+                        <input
+                          type="number"
+                          value={editingValues[editKey] ?? (rawValue === undefined ? '' : String(Math.round(rawValue)))}
+                          onFocus={() => propertyEditSession.begin()}
+                          onChange={(event) => {
+                            const draft = event.target.value;
+                            setEditingValues((previous) => ({ ...previous, [editKey]: draft }));
+                            const parsed = parseFiniteNumberDraft(draft);
+                            if (parsed !== null) {
+                              propertyEditSession.change(() => handleSelectionGeometryChange(field.key, parsed));
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') event.currentTarget.blur();
+                          }}
+                          onBlur={() => {
+                            setEditingValues((previous) => {
+                              const next = { ...previous };
+                              delete next[editKey];
+                              return next;
+                            });
+                            propertyEditSession.commit();
+                          }}
+                          className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-700 px-1.5 py-1 text-xs text-white focus:border-blue-500 focus:outline-none"
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={selectionAspectLocked}
+                    onChange={(event) => setSelectionAspectLocked(event.target.checked)}
+                  />
+                  锁定宽高比
+                </label>
+                <div className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  {selectionSetBounds
+                    ? `包围框 ${Math.round(selectionSetBounds.width)} × ${Math.round(selectionSetBounds.height)}`
+                    : '没有可编辑的选择集几何'}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700 pt-2">
+                <div className="mb-1.5 text-xs text-slate-500">透明度</div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={Math.round((selectionOpacity ?? 1) * 100)}
+                    onFocus={() => propertyEditSession.begin()}
+                    onChange={(event) => {
+                      const value = Number(event.target.value) / 100;
+                      propertyEditSession.change(() => handleSelectionOpacityChange(value));
+                    }}
+                    onMouseUp={() => propertyEditSession.commit()}
+                    onTouchEnd={() => propertyEditSession.commit()}
+                    className="min-w-0 flex-1 accent-blue-500"
+                  />
+                  <span className="w-12 text-right text-[10px] text-slate-400">
+                    {selectionOpacity === null ? '混合' : `${Math.round(selectionOpacity * 100)}%`}
+                  </span>
+                </div>
+              </div>
+            </fieldset>
+
+            <div className="border-t border-slate-700 pt-2">
+              <div className="mb-1.5 text-xs text-slate-500">选择集状态</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  disabled={selectionStatusDisabled}
+                  onClick={() => {
+                    propertyEditSession.commit();
+                    setElementsEditorHidden(selectedElementIds, !allSelectionMembersHidden);
+                  }}
+                  className="flex items-center justify-center gap-1 rounded bg-slate-700 px-1.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={allSelectionMembersHidden ? '显示选择集' : '隐藏选择集'}
+                >
+                  {allSelectionMembersHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+                  {allSelectionMembersHidden ? '显示' : '隐藏'}
+                </button>
+                <button
+                  type="button"
+                  disabled={selectionStatusDisabled}
+                  onClick={() => {
+                    propertyEditSession.commit();
+                    setElementsLocked(selectedElementIds, !allSelectionMembersLocked);
+                  }}
+                  className="flex items-center justify-center gap-1 rounded bg-slate-700 px-1.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={allSelectionMembersLocked ? '解锁选择集' : '锁定选择集'}
+                >
+                  {allSelectionMembersLocked ? <Unlock size={12} /> : <Lock size={12} />}
+                  {allSelectionMembersLocked ? '解锁' : '锁定'}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : (
             <>
               {single && (
