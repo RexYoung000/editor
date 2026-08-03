@@ -47,8 +47,10 @@ import {
   setChoiceCorrectOptionIds as applyChoiceCorrectOptionIds,
 } from '../utils/choiceAnswerRules';
 import { assetExport } from '../elements/builtinAssets';
+import type { LayerSelectionMode } from '../utils/layerTree';
 
 type InternalPagePlacement = { pageGroupId?: string; afterPageId?: string };
+type SelectionOrigin = 'canvas' | 'layer' | 'other';
 
 export type { Element, SubPage, Stage, Course };
 // Backwards alias: many call sites still import `Page`
@@ -84,6 +86,10 @@ interface EditorState {
   focusSubPageId: string | null;
   selectedElementIds: string[];
   selectedEditorLayerGroupId: string | null;
+  primarySelectedElementId: string | null;
+  hoveredElementId: string | null;
+  layerSelectionMode: LayerSelectionMode;
+  selectionOrigin: SelectionOrigin;
   selectedStageTarget?: 'preview' | 'normal';
   clipboard: Element[];
   clipboardEditorLayerGroups: EditorLayerGroup[];
@@ -165,9 +171,11 @@ interface EditorState {
   reorderElement: (id: string, newIndex: number, saveToHistory?: boolean) => void;
   moveElementLayer: (id: string, direction: 'up' | 'down' | 'top' | 'bottom') => void;
   setElementParent: (id: string, newParentId: string | undefined, saveToHistory?: boolean) => void;
-  selectElement: (id: string, multi?: boolean) => void;
-  selectElements: (ids: string[]) => void;
-  selectEditorLayerGroup: (groupId: string | null) => void;
+  selectElement: (id: string, multi?: boolean, origin?: SelectionOrigin) => void;
+  selectElements: (ids: string[], origin?: SelectionOrigin, primaryId?: string) => void;
+  selectEditorLayerGroup: (groupId: string | null, multi?: boolean, origin?: SelectionOrigin) => void;
+  setLayerSelectionMode: (mode: LayerSelectionMode) => void;
+  setHoveredElementId: (id: string | null) => void;
   selectAll: () => void;
   clearSelection: () => void;
   copyElements: () => void;
@@ -429,6 +437,10 @@ export const useEditorStore = create<EditorState>()(
     focusSubPageId: null,
     selectedElementIds: [],
     selectedEditorLayerGroupId: null,
+    primarySelectedElementId: null,
+    hoveredElementId: null,
+    layerSelectionMode: 'component',
+    selectionOrigin: 'other',
     selectedStageTarget: undefined,
     clipboard: [],
     clipboardEditorLayerGroups: [],
@@ -499,6 +511,9 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = firstSub?.id ?? null;
         state.currentInternalPageId = isInternalPagesSubPage(firstSub) ? firstSub.id : null;
         state.focusSubPageId = null;
+        state.primarySelectedElementId = null;
+        state.hoveredElementId = null;
+        state.selectionOrigin = 'other';
         state.selectedEditorLayerGroupId = null;
         state.history = [JSON.parse(JSON.stringify(course))];
         state.historyIndex = 0;
@@ -527,6 +542,8 @@ export const useEditorStore = create<EditorState>()(
           state.selectedElementIds = [];
         }
         state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = state.selectedElementIds.at(-1) ?? null;
+        state.selectionOrigin = 'other';
         state.selectedStageTarget = state.currentCourse?.previewStages?.some(s => s.id === stageId) ? 'preview' : 'normal';
       }),
 
@@ -540,6 +557,8 @@ export const useEditorStore = create<EditorState>()(
         state.focusSubPageId = subPage.id;
         state.selectedElementIds = [];
         state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = null;
+        state.selectionOrigin = 'other';
         state.selectedStageTarget = state.currentCourse?.previewStages?.some((stage) => stage.id === stageId) ? 'preview' : 'normal';
       }),
 
@@ -549,6 +568,8 @@ export const useEditorStore = create<EditorState>()(
         state.currentInternalPageId = null;
         state.selectedElementIds = [];
         state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = null;
+        state.selectionOrigin = 'other';
       }),
 
     setCurrentInternalPage: (pageId) =>
@@ -559,6 +580,8 @@ export const useEditorStore = create<EditorState>()(
         state.currentInternalPageId = page.id;
         state.selectedElementIds = [];
         state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = null;
+        state.selectionOrigin = 'other';
       }),
 
     addInternalPage: (kind, name, placement) => {
@@ -2067,11 +2090,12 @@ export const useEditorStore = create<EditorState>()(
       }
     },
 
-    selectElement: (id, multi = false) =>
+    selectElement: (id, multi = false, origin = 'other') =>
       set((state) => {
         const page = findCurrentSubPage(state);
         const el = page?.elements.find((e) => e.id === id);
         state.selectedEditorLayerGroupId = null;
+        state.selectionOrigin = origin;
 
         const explicitGroupIds = new Set(page?.editorLayerGroups?.map((group) => group.id) ?? []);
         const targetIds = el?.groupId && page && !explicitGroupIds.has(el.groupId)
@@ -2086,37 +2110,68 @@ export const useEditorStore = create<EditorState>()(
           const targetSet = new Set(targetIds);
           if (targetIds.every((targetId) => state.selectedElementIds.includes(targetId))) {
             state.selectedElementIds = state.selectedElementIds.filter((eid) => !targetSet.has(eid));
+            state.primarySelectedElementId = state.selectedElementIds.at(-1) ?? null;
           } else {
             state.selectedElementIds = [...new Set([...state.selectedElementIds, ...targetIds])];
+            state.primarySelectedElementId = id;
           }
         } else {
           state.selectedElementIds = targetIds;
+          state.primarySelectedElementId = targetIds.includes(id) ? id : (targetIds.at(-1) ?? null);
         }
       }),
 
-    selectElements: (ids) =>
+    selectElements: (ids, origin = 'other', primaryId) =>
       set((state) => {
         const page = findCurrentSubPage(state);
         if (page && 'frozen' in page && page.frozen) return;
         state.selectedEditorLayerGroupId = null;
         state.selectedElementIds = ids;
+        state.primarySelectedElementId = primaryId && ids.includes(primaryId) ? primaryId : (ids.at(-1) ?? null);
+        state.selectionOrigin = origin;
       }),
 
-    selectEditorLayerGroup: (groupId) =>
+    selectEditorLayerGroup: (groupId, multi = false, origin = 'other') =>
       set((state) => {
         const page = findCurrentSubPage(state);
         if (page && 'frozen' in page && page.frozen) return;
+        state.selectionOrigin = origin;
         if (!groupId) {
           state.selectedEditorLayerGroupId = null;
           state.selectedElementIds = [];
+          state.primarySelectedElementId = null;
           return;
         }
         const group = page
           ? resolveEditorLayerGroups(page).find((item) => item.id === groupId)
           : undefined;
         if (!group) return;
-        state.selectedEditorLayerGroupId = groupId;
-        state.selectedElementIds = group.memberIds;
+        if (!multi) {
+          state.selectedEditorLayerGroupId = groupId;
+          state.selectedElementIds = group.memberIds;
+          state.primarySelectedElementId = null;
+          return;
+        }
+        const groupMemberIds = new Set(group.memberIds);
+        const remove = group.memberIds.length > 0 && group.memberIds.every((id) => state.selectedElementIds.includes(id));
+        state.selectedElementIds = remove
+          ? state.selectedElementIds.filter((id) => !groupMemberIds.has(id))
+          : [...new Set([...state.selectedElementIds, ...group.memberIds])];
+        state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = remove
+          ? (state.selectedElementIds.at(-1) ?? null)
+          : (group.memberIds.at(-1) ?? state.selectedElementIds.at(-1) ?? null);
+      }),
+
+    setLayerSelectionMode: (mode) =>
+      set((state) => {
+        state.layerSelectionMode = mode;
+      }),
+
+    setHoveredElementId: (id) =>
+      set((state) => {
+        if (state.hoveredElementId === id) return;
+        state.hoveredElementId = id;
       }),
 
     clearSelection: () =>
@@ -2126,6 +2181,8 @@ export const useEditorStore = create<EditorState>()(
         if (page && 'frozen' in page && page.frozen) return;
         state.selectedEditorLayerGroupId = null;
         state.selectedElementIds = [];
+        state.primarySelectedElementId = null;
+        state.selectionOrigin = 'other';
       }),
 
     selectAll: () =>
@@ -2134,6 +2191,8 @@ export const useEditorStore = create<EditorState>()(
         if (page) {
           state.selectedEditorLayerGroupId = null;
           state.selectedElementIds = page.elements.map((e) => e.id);
+          state.primarySelectedElementId = state.selectedElementIds.at(-1) ?? null;
+          state.selectionOrigin = 'other';
         }
       }),
 

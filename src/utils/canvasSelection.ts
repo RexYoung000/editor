@@ -9,6 +9,8 @@ import {
 import { isContainerElementType } from './elementContainers';
 import { isEditorCanvasHitThrough } from './canvasComposite';
 import { isElementHidden, isElementLocked } from './layerState';
+import type { LayerSelectionMode } from './layerTree';
+import type { ResolvedEditorLayerGroup } from './layerGroups';
 
 export { isElementHidden, isElementLocked } from './layerState';
 
@@ -131,6 +133,37 @@ export function resolvePointerSelection(
     ? currentIds.filter((id) => !hitGroup.includes(id))
     : [...currentIds, ...hitGroup];
   return normalizeSelection(elements, next, remove ? undefined : hitId, editorLayerGroupIds);
+}
+
+export interface ModePointerSelection {
+  ids: string[];
+  editorLayerGroupId?: string;
+}
+
+/** 根据画布工具栏的“组件 / 组”模式确定选择粒度。 */
+export function resolvePointerSelectionByMode(
+  elements: Element[],
+  currentIds: string[],
+  hitId: string | null,
+  toggle: boolean,
+  mode: LayerSelectionMode,
+  groups: ResolvedEditorLayerGroup[] = [],
+): ModePointerSelection {
+  if (!hitId) return { ids: [] };
+  if (mode === 'group') {
+    const group = groups.find((candidate) => !candidate.legacy && candidate.memberIds.includes(hitId));
+    if (group) return { ids: group.memberIds, editorLayerGroupId: group.id };
+    // 组模式只认编辑器图层组；旧 groupId 继续在组件模式中保持兼容整组选择，
+    // 但在“组”模式下没有对应的编辑器组时回退到实际组件。
+    const allGroupIds = new Set(groups.map((groupItem) => groupItem.id));
+    return {
+      ids: resolvePointerSelection(elements, currentIds, hitId, toggle, allGroupIds),
+    };
+  }
+  const editorLayerGroupIds = new Set(groups.filter((group) => !group.legacy).map((group) => group.id));
+  return {
+    ids: resolvePointerSelection(elements, currentIds, hitId, toggle, editorLayerGroupIds),
+  };
 }
 
 export function resolveMarqueeSelection(

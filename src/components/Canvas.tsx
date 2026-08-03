@@ -103,6 +103,8 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
   const clearSelection = useEditorStore((s) => s.clearSelection);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement    = useEditorStore((s) => s.selectElement);
+  const layerSelectionMode = useEditorStore((s) => s.layerSelectionMode);
+  const setLayerSelectionMode = useEditorStore((s) => s.setLayerSelectionMode);
   const addElement       = useEditorStore((s) => s.addElement);
   const updateElement    = useEditorStore((s) => s.updateElement);
   const deleteElement    = useEditorStore((s) => s.deleteElement);
@@ -1165,6 +1167,32 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
             }} />
           </div>
         )}
+        <div
+          className="absolute top-3 left-3 z-40 flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-950/85 p-1 text-[11px] text-slate-300 shadow-lg backdrop-blur"
+          data-canvas-interactive
+          role="toolbar"
+          aria-label="画布选择模式"
+        >
+          <span className="px-1 text-slate-500">选择</span>
+          {([
+            ['component', '组件'],
+            ['group', '组'],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setLayerSelectionMode(mode)}
+              aria-pressed={layerSelectionMode === mode}
+              className={`rounded px-2 py-1 transition-colors ${
+                layerSelectionMode === mode
+                  ? 'bg-cyan-600 text-white'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div
           ref={assistPanelRef}
           className="absolute top-3 right-3 z-40"
