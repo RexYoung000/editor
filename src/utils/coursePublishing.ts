@@ -8,15 +8,18 @@ export type PublishStep = 'preview' | 'target' | 'generate' | 'notify' | 'result
 export type PublishStepState = 'pending' | 'active' | 'complete' | 'failed';
 export type PublishKnownResult = 'submitted' | 'success' | 'packaging-failed' | 'notification-pending';
 
-export interface PreviewConfirmation {
+export interface PreviewRecord {
   scope: PublishScope;
   projectName: PublishProjectName;
   directoryDigest: string;
   courseDigest: string;
   previewedAt: string;
-  confirmedAt: string;
   editorVersion: string;
   environmentVersion: string;
+}
+
+export interface PreviewConfirmation extends PreviewRecord {
+  confirmedAt: string;
 }
 
 export interface PublishTargetRecord {
@@ -51,6 +54,8 @@ export interface PendingPackagingNotification {
 
 export interface CoursePublishState {
   confirmations: Partial<Record<PublishScope, PreviewConfirmation>>;
+  latestPreviews?: Partial<Record<PublishScope, PreviewRecord>>;
+  lastLocalSvnFolderPath?: string;
   target?: PublishTargetRecord;
   lastPublish?: PublishResultRecord;
   pendingNotification?: PendingPackagingNotification;
@@ -176,6 +181,21 @@ export function getConfirmedScopes(
     }
   }
   return { valid, invalid };
+}
+
+export function previewRecordInvalidReason(
+  record: PreviewRecord | undefined,
+  scope: PublishScope,
+  courseDigest: string | undefined,
+  editorVersion: string,
+  environmentVersion: string | undefined,
+): string | null {
+  if (!record) return '需要先完成预览';
+  if (record.projectName !== projectNameForScope(scope)) return '课件类型已变化，需要重新预览';
+  if (record.courseDigest !== courseDigest) return '课件内容已变化，需要重新预览';
+  if (record.editorVersion !== editorVersion) return '编辑器导出版本已变化，需要重新预览';
+  if (record.environmentVersion !== environmentVersion) return '模板或运行资源已更新，需要重新预览';
+  return null;
 }
 
 export function orderProjectUrls(

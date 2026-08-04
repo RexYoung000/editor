@@ -5,6 +5,7 @@ const { execFile } = require('child_process');
 
 const MANIFEST_FILE = 'forge-publish.json';
 const PROJECT_NAMES = new Set(['Game1_LT', 'Game1_PREVIEW', 'Game1_HW', 'Game1_REVIEW']);
+let svnRuntime = { command: process.env.FORGE_SVN_BINARY || 'svn', bundled: false };
 
 class CoursePublishError extends Error {
   constructor(code, message, details) {
@@ -30,7 +31,9 @@ function runFile(command, args, options = {}) {
         let message = commandOutput;
         if (error.code === 'ENOENT') {
           code = 'SVN_NOT_FOUND';
-          message = '未找到 SVN 命令，请先安装或修复公司 SVN 客户端';
+          message = svnRuntime.bundled
+            ? '客户端内置的 SVN 发布组件缺失或损坏，请重新安装当前版本或联系维护人员'
+            : '开发环境未找到 SVN 命令行工具，请安装 SVN CLI 或通过 FORGE_SVN_BINARY 指定路径';
         } else if (/(?:E175013|access.*forbidden|permission denied|没有权限|权限不足)/i.test(commandOutput)) {
           code = 'SVN_PERMISSION_DENIED';
           message = '当前账号没有该 SVN 目录的访问或提交权限';
@@ -57,7 +60,27 @@ function runFile(command, args, options = {}) {
 }
 
 async function runSvn(args, options = {}) {
-  return runFile('svn', ['--non-interactive', ...args], options);
+  return runFile(svnRuntime.command, ['--non-interactive', ...args], options);
+}
+
+function configureSvnRuntime({ isPackaged, platform, resourcesPath }) {
+  if (isPackaged && platform === 'win32') {
+    svnRuntime = { command: path.join(resourcesPath, 'svn-cli', 'bin', 'svn.exe'), bundled: true };
+  } else if (process.env.FORGE_SVN_BINARY) {
+    svnRuntime = { command: process.env.FORGE_SVN_BINARY, bundled: false };
+  } else {
+    svnRuntime = { command: 'svn', bundled: false };
+  }
+  return { ...svnRuntime };
+}
+
+async function inspectSvnCapability(runner = runSvn) {
+  const { stdout } = await runner(['--version', '--quiet']);
+  return {
+    binaryPath: svnRuntime.command,
+    bundled: svnRuntime.bundled,
+    version: stdout.trim(),
+  };
 }
 
 function normalizeSvnUrl(value) {
@@ -161,6 +184,11 @@ async function findNearestExistingUrl(baseUrl, parentPath, runner = runSvn) {
 
 async function inspectPublishTarget(params, runner = runSvn) {
   const target = buildTarget(params.baseUrl, params.parentPath, params.courseFolderName);
+  const localFolder = await inspectLocalSvnFolder({
+    localPath: params.workspacePath,
+    baseUrl: target.baseUrl,
+    finalUrl: target.finalUrl,
+  }, runner);
   const targetExists = await svnItemExists(target.finalUrl, runner);
   const parentExists = await svnItemExists(target.parentUrl, runner);
   const nearest = parentExists
@@ -191,6 +219,7 @@ async function inspectPublishTarget(params, runner = runSvn) {
     manifest,
     existingProjects,
     revision,
+    localFolder,
   };
 }
 
@@ -286,45 +315,94 @@ function relativeUrlSegments(ancestorUrl, targetUrl) {
   const ancestor = normalizeSvnUrl(ancestorUrl);
   const target = normalizeSvnUrl(targetUrl);
   if (target !== ancestor && !target.startsWith(`${ancestor}/`)) {
-    throw new CoursePublishError('WORKSPACE_URL_MISMATCH', '所选工作副本与当前 SVN 目标不对应');
+    throw new CoursePublishError('LOCAL_SVN_FOLDER_MISMATCH', '所选本地 SVN 文件夹不覆盖最终课件地址，请选择其上级目录或对应目录');
   }
-  return target.slice(ancestor.length).replace(/^\//, '').split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+  return target.slice(ancestor.length).replace(/^\//, '').split('/').filter(Boolean).map((segment) => {
+    const decoded = decodeURIComponent(segment);
+    if (!decoded || decoded === '.' || decoded === '..' || /[\\/\0]/.test(decoded)) {
+      throw new CoursePublishError('INVALID_SVN_PATH_SEGMENT', 'SVN 目标地址包含无法安全映射到本地的目录名称');
+    }
+    return decoded;
+  });
 }
 
 async function workspaceUrl(workspacePath, runner = runSvn) {
-  const { stdout } = await runner(['info', '--show-item', 'url', workspacePath]);
-  return normalizeSvnUrl(stdout.trim());
+  try {
+    const { stdout } = await runner(['info', '--show-item', 'url', workspacePath]);
+    return normalizeSvnUrl(stdout.trim());
+  } catch (error) {
+    if (error instanceof CoursePublishError && error.code === 'SVN_COMMAND_FAILED') {
+      throw new CoursePublishError('LOCAL_SVN_FOLDER_INVALID', '所选目录不是已拉取的本地 SVN 文件夹，请重新选择');
+    }
+    throw error;
+  }
+}
+
+function mapLocalSvnTarget(params) {
+  const localUrl = normalizeSvnUrl(params.localUrl);
+  const repositoryRootUrl = normalizeSvnUrl(params.repositoryRootUrl);
+  const baseUrl = normalizeSvnUrl(params.baseUrl);
+  const finalUrl = normalizeSvnUrl(params.finalUrl);
+  if (baseUrl !== repositoryRootUrl && !baseUrl.startsWith(`${repositoryRootUrl}/`)) {
+    throw new CoursePublishError(
+      'LOCAL_SVN_REPOSITORY_MISMATCH',
+      `所选目录属于 ${repositoryRootUrl}，与当前课型基础地址 ${baseUrl} 不是同一个 SVN 仓库`,
+    );
+  }
+  if (finalUrl !== localUrl && !finalUrl.startsWith(`${localUrl}/`)) {
+    throw new CoursePublishError(
+      'LOCAL_SVN_FOLDER_MISMATCH',
+      `所选目录对应 ${localUrl}，不能覆盖最终地址 ${finalUrl}；请选择最终地址的上级目录或对应目录`,
+    );
+  }
+  const remainingSegments = relativeUrlSegments(localUrl, finalUrl);
+  return {
+    localUrl,
+    repositoryRootUrl,
+    remainingSegments,
+    localTargetPath: path.join(params.localPath, ...remainingSegments),
+  };
+}
+
+async function inspectLocalSvnFolder(params, runner = runSvn) {
+  const localPath = path.resolve(String(params.localPath ?? ''));
+  if (!params.localPath || !fs.existsSync(localPath) || !fs.statSync(localPath).isDirectory()) {
+    throw new CoursePublishError('LOCAL_SVN_FOLDER_MISSING', '请选择一个已经拉取到电脑上的本地 SVN 文件夹');
+  }
+  const localUrl = await workspaceUrl(localPath, runner);
+  const { stdout: repositoryRoot } = await runner(['info', '--show-item', 'repos-root-url', localPath]);
+  return {
+    localPath,
+    ...mapLocalSvnTarget({
+      localPath,
+      localUrl,
+      repositoryRootUrl: repositoryRoot.trim(),
+      baseUrl: params.baseUrl,
+      finalUrl: params.finalUrl,
+    }),
+  };
 }
 
 async function ensureWorkspace(params, inspection, runner = runSvn) {
   const workspacePath = params.workspacePath;
-  const workspaceKind = params.workspaceKind ?? 'managed';
-  let rootUrl;
-  if (fs.existsSync(path.join(workspacePath, '.svn'))) {
-    rootUrl = await workspaceUrl(workspacePath, runner);
-    const initialSegments = relativeUrlSegments(rootUrl, inspection.finalUrl);
-    if (workspaceKind === 'existing') {
-      const status = await runner(['status', '--depth', initialSegments.length === 0 ? 'infinity' : 'empty', workspacePath]);
-      if (status.stdout.trim()) {
-        throw new CoursePublishError('WORKSPACE_HAS_CHANGES', '当前课件目标有尚未提交的修改，请先通过 SVN 客户端处理后重试');
-      }
-    }
-    if (workspaceKind !== 'existing') {
-      await runner(['revert', '--recursive', workspacePath]);
-    }
-    await runner(['cleanup', workspacePath]);
-    await runner(['update', '--depth', 'empty', workspacePath]);
-  } else {
-    if (workspaceKind === 'existing') {
-      throw new CoursePublishError('WORKSPACE_NOT_SVN', '所选目录不是 SVN 工作副本，请重新选择');
-    }
-    fs.rmSync(workspacePath, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(workspacePath), { recursive: true });
-    await runner(['checkout', '--depth', 'empty', inspection.nearestExistingUrl, workspacePath]);
-    rootUrl = inspection.nearestExistingUrl;
+  if (!workspacePath) {
+    throw new CoursePublishError('LOCAL_SVN_FOLDER_MISSING', '请选择一个已经拉取到电脑上的本地 SVN 文件夹');
   }
+  const mapping = await inspectLocalSvnFolder({
+    localPath: workspacePath,
+    baseUrl: inspection.baseUrl,
+    finalUrl: inspection.finalUrl,
+  }, runner);
+  const rootUrl = mapping.localUrl;
+  const initialSegments = mapping.remainingSegments;
+  const status = await runner(['status', '--depth', initialSegments.length === 0 ? 'infinity' : 'empty', workspacePath]);
+  if (status.stdout.trim()) {
+    throw new CoursePublishError('LOCAL_SVN_FOLDER_HAS_CHANGES', '当前课件目标有尚未提交的本地修改，请先通过公司 SVN 客户端处理后重试');
+  }
+  await runner(['cleanup', workspacePath]);
+  await runner(['update', '--depth', 'empty', workspacePath]);
 
-  const segments = relativeUrlSegments(rootUrl, inspection.finalUrl);
+  const segments = initialSegments;
   let currentPath = workspacePath;
   let currentUrl = rootUrl;
   let createdRootPath = null;
@@ -332,14 +410,14 @@ async function ensureWorkspace(params, inspection, runner = runSvn) {
     for (const segment of segments) {
       currentPath = path.join(currentPath, segment);
       currentUrl = `${currentUrl}/${encodeURIComponent(segment)}`;
-      if (workspaceKind === 'existing' && fs.existsSync(currentPath)) {
+      if (fs.existsSync(currentPath)) {
         const status = await runner(['status', '--depth', currentUrl === inspection.finalUrl ? 'infinity' : 'empty', currentPath]);
         if (status.stdout.trim()) {
-          throw new CoursePublishError('WORKSPACE_HAS_CHANGES', '当前课件目标有尚未提交的修改，请先通过 SVN 客户端处理后重试');
+          throw new CoursePublishError('LOCAL_SVN_FOLDER_HAS_CHANGES', '当前课件目标有尚未提交的本地修改，请先通过公司 SVN 客户端处理后重试');
         }
       }
       if (await svnItemExists(currentUrl, runner)) {
-        await runner(['update', '--depth', currentUrl === inspection.finalUrl ? 'infinity' : 'empty', currentPath]);
+        await runner(['update', '--parents', '--depth', currentUrl === inspection.finalUrl ? 'infinity' : 'empty', currentPath]);
       } else {
         if (!createdRootPath) createdRootPath = currentPath;
         fs.mkdirSync(currentPath, { recursive: true });
@@ -429,7 +507,8 @@ async function preparePublish(params, dependencies = {}) {
       inspection,
       workspacePath: workspace.workspacePath,
       targetPath: workspace.targetPath,
-      workspaceKind: params.workspaceKind ?? 'managed',
+      workspaceKind: 'existing',
+      createdRootPath: workspace.createdRootPath,
       manifest,
       changes,
       projectDigests,
@@ -449,9 +528,10 @@ function parseCommittedRevision(xml) {
 }
 
 async function commitPreparedPublish(prepared, message, runner = runSvn) {
-  const { stdout } = await runner(['commit', '--xml', '-m', message, prepared.targetPath], { timeout: 10 * 60 * 1000 });
+  const commitPath = prepared.createdRootPath ?? prepared.targetPath;
+  const { stdout } = await runner(['commit', '--xml', '-m', message, commitPath], { timeout: 10 * 60 * 1000 });
   const revision = parseCommittedRevision(stdout);
-  const status = await runner(['status', prepared.targetPath]);
+  const status = await runner(['status', commitPath]);
   if (status.stdout.trim()) {
     throw new CoursePublishError('WORKSPACE_NOT_CLEAN', 'SVN 已提交，但本地工作区仍有未同步内容');
   }
@@ -512,10 +592,14 @@ module.exports = {
   buildTarget,
   cancelPreparedPublish,
   commitPreparedPublish,
+  configureSvnRuntime,
   getCoursePublishState,
   hashDirectory,
+  inspectLocalSvnFolder,
   inspectPublishTarget,
+  inspectSvnCapability,
   ensureWorkspace,
+  mapLocalSvnTarget,
   normalizeRelativePath,
   parseCommittedRevision,
   parseSvnStatus,

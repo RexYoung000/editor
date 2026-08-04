@@ -8,6 +8,7 @@ import {
   movePublishProgress,
   normalizePublishParentPath,
   orderProjectUrls,
+  previewRecordInvalidReason,
   projectNamesForCourse,
   requiredPublishScopes,
   stableStringify,
@@ -52,16 +53,33 @@ test('预习与正课确认按各自工程指纹独立失效', () => {
   assert.deepEqual(result.invalid, ['preview']);
 });
 
+test('工具栏和发布窗口共享的最新预览记录能给出准确失效原因', () => {
+  const latest = {
+    scope: 'lesson' as const,
+    projectName: 'Game1_LT' as const,
+    directoryDigest: 'tree-1',
+    courseDigest: 'course-1',
+    previewedAt: '2026-08-04T00:00:00.000Z',
+    editorVersion: '1.4.0',
+    environmentVersion: 'env-1',
+  };
+  assert.equal(previewRecordInvalidReason(latest, 'lesson', 'course-1', '1.4.0', 'env-1'), null);
+  assert.equal(previewRecordInvalidReason(undefined, 'lesson', 'course-1', '1.4.0', 'env-1'), '需要先完成预览');
+  assert.equal(previewRecordInvalidReason(latest, 'lesson', 'course-2', '1.4.0', 'env-1'), '课件内容已变化，需要重新预览');
+  assert.equal(previewRecordInvalidReason(latest, 'lesson', 'course-1', '1.4.1', 'env-1'), '编辑器导出版本已变化，需要重新预览');
+  assert.equal(previewRecordInvalidReason(latest, 'lesson', 'course-1', '1.4.0', 'env-2'), '模板或运行资源已更新，需要重新预览');
+});
+
 test('SVN 父目录只接受相对业务路径并只追加一次课件名', () => {
   const result = normalizePublishParentPath(
-    ' V9\\三年级//S8/第一讲/ ',
+    ' V9\\S6/ ',
     'svn://192.168.74.9/product/trunk/course/Math/',
     's4_v9_02_YY',
   );
   assert.deepEqual(result, {
     ok: true,
-    normalizedParentPath: 'V9/三年级/S8/第一讲',
-    finalUrl: 'svn://192.168.74.9/product/trunk/course/Math/V9/三年级/S8/第一讲/s4_v9_02_YY',
+    normalizedParentPath: 'V9/S6',
+    finalUrl: 'svn://192.168.74.9/product/trunk/course/Math/V9/S6/s4_v9_02_YY',
   });
   assert.equal(normalizePublishParentPath('../S8', 'svn://server/base', 'lesson').ok, false);
   assert.equal(normalizePublishParentPath('svn://server/base/S8', 'svn://server/base', 'lesson').ok, false);

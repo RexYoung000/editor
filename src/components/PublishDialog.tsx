@@ -27,12 +27,13 @@ import {
   normalizePublishParentPath,
   orderProjectUrls,
   PUBLISH_STEPS,
+  previewRecordInvalidReason,
   projectNameForScope,
   projectNamesForCourse,
   requiredPublishScopes,
   scopeLabel,
   type CoursePublishState,
-  type PreviewConfirmation,
+  type PreviewRecord,
   type PublishProgressStep,
   type PublishProjectName,
   type PublishResultRecord,
@@ -42,20 +43,15 @@ import { loadPublishConfig, type PublishConfig } from '../utils/publishConfig';
 import { loadWsConfig, startCoursePackaging } from '../utils/websocket';
 import { showToast } from '../utils/toast';
 
-interface PreviewResult {
-  projectName: PublishProjectName;
-  directoryDigest: string;
-  previewedAt: string;
-}
-
 interface Props {
   course: Course;
-  onPreview: (scope: PublishScope) => Promise<PreviewResult>;
+  onPreview: (scope: PublishScope) => Promise<PreviewRecord>;
   onClose: () => void;
   onStatusChange: (result: PublishResultRecord) => void;
 }
 
 type PreparedSummary = Extract<Awaited<ReturnType<typeof window.electronAPI.publishPrepareSvn>>, { ok: true }>['summary'];
+type SvnCapabilityResult = Awaited<ReturnType<typeof window.electronAPI.publishCheckSvn>>;
 
 function courseFolderName(courseId: string): string {
   const courseDir = getCourseDirPath(courseId) ?? '';
@@ -87,7 +83,6 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
   const [publishState, setPublishState] = useState<CoursePublishState>({ confirmations: {} });
   const stateRef = useRef(publishState);
   const [courseDigests, setCourseDigests] = useState<Partial<Record<PublishScope, string>>>({});
-  const [previewCandidates, setPreviewCandidates] = useState<Partial<Record<PublishScope, PreviewConfirmation>>>({});
   const [activeStep, setActiveStep] = useState<'preview' | 'target' | 'generate' | 'notify' | 'result'>('preview');
   const [progress, setProgress] = useState<PublishProgressStep[]>(initialPublishProgress());
   const [parentPath, setParentPath] = useState('');
@@ -95,6 +90,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
   const [adoptHistorical, setAdoptHistorical] = useState(false);
   const [targetConfirmed, setTargetConfirmed] = useState(false);
   const [workspaceSelection, setWorkspaceSelection] = useState<{ path: string; kind: 'managed' | 'existing' } | null>(null);
+  const [svnCapability, setSvnCapability] = useState<SvnCapabilityResult | null>(null);
   const [preparedToken, setPreparedToken] = useState<string | null>(null);
   const [preparedSummary, setPreparedSummary] = useState<PreparedSummary | null>(null);
   const [messages, setMessages] = useState<string[]>([]);
@@ -118,9 +114,13 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
       setCourseDigests(digests);
       if (loadedState.target?.baseUrl === loadedConfig.svn[normalizeCourseKind(course.kind)]) {
         setParentPath(loadedState.target.parentPath);
-        if (loadedState.target.workspacePath) {
-          setWorkspaceSelection({ path: loadedState.target.workspacePath, kind: loadedState.target.workspaceKind ?? 'managed' });
+        if (loadedState.target.workspacePath && loadedState.target.workspaceKind === 'existing') {
+          setWorkspaceSelection({ path: loadedState.target.workspacePath, kind: 'existing' });
+        } else if (loadedState.lastLocalSvnFolderPath) {
+          setWorkspaceSelection({ path: loadedState.lastLocalSvnFolderPath, kind: 'existing' });
         }
+      } else if (loadedState.lastLocalSvnFolderPath) {
+        setWorkspaceSelection({ path: loadedState.lastLocalSvnFolderPath, kind: 'existing' });
       }
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : String(reason)));
     return () => {
@@ -128,6 +128,14 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
       closedRef.current = true;
     };
   }, [course]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.electronAPI.publishCheckSvn().then((result) => {
+      if (!cancelled) setSvnCapability(result);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const persistState = async (next: CoursePublishState) => {
     stateRef.current = next;
@@ -140,11 +148,24 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
     const record = publishState.confirmations[scope];
     return Boolean(
       record
+      && record.projectName === projectNameForScope(scope)
       && record.courseDigest === courseDigests[scope]
       && record.editorVersion === __APP_VERSION__
       && record.environmentVersion === config?.environmentVersion,
     );
   };
+
+  const latestPreview = (scope: PublishScope): PreviewRecord | undefined => (
+    publishState.latestPreviews?.[scope] ?? publishState.confirmations[scope]
+  );
+
+  const previewInvalidReason = (scope: PublishScope): string | null => previewRecordInvalidReason(
+    latestPreview(scope),
+    scope,
+    courseDigests[scope],
+    __APP_VERSION__,
+    config?.environmentVersion,
+  );
 
   const allConfirmed = scopes.every(isConfirmationValid);
   const baseUrl = config?.svn[normalizeCourseKind(course.kind)] ?? '';
@@ -169,17 +190,12 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
     setBusyLabel(`正在生成${scopeLabel(scope)}预览`);
     try {
       const result = await onPreview(scope);
-      const candidate: PreviewConfirmation = {
-        scope,
-        projectName: result.projectName,
-        directoryDigest: result.directoryDigest,
-        courseDigest: courseDigests[scope] ?? await contentDigestForCourse(course),
-        previewedAt: result.previewedAt,
-        confirmedAt: result.previewedAt,
-        editorVersion: __APP_VERSION__,
-        environmentVersion: config?.environmentVersion ?? '',
+      const next = {
+        ...stateRef.current,
+        latestPreviews: { ...stateRef.current.latestPreviews, [scope]: result },
       };
-      setPreviewCandidates((current) => ({ ...current, [scope]: candidate }));
+      stateRef.current = next;
+      setPublishState(next);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -192,8 +208,8 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
     if (!checked) {
       delete confirmations[scope];
     } else {
-      const record = previewCandidates[scope] ?? publishState.confirmations[scope];
-      if (!record || record.courseDigest !== courseDigests[scope] || record.environmentVersion !== config?.environmentVersion) return;
+      const record = latestPreview(scope);
+      if (!record || previewInvalidReason(scope)) return;
       confirmations[scope] = { ...record, confirmedAt: new Date().toISOString() };
     }
     await persistState({ ...publishState, confirmations });
@@ -202,6 +218,16 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
   const handleInspectTarget = async () => {
     if (!normalizedTarget.ok) {
       setError(normalizedTarget.error);
+      return;
+    }
+    if (!workspaceSelection?.path) {
+      setError('请先选择一个已经通过公司 SVN 客户端拉取的本地 SVN 文件夹');
+      return;
+    }
+    const capability = svnCapability ?? await window.electronAPI.publishCheckSvn();
+    setSvnCapability(capability);
+    if (!capability.ok) {
+      setError(capability.error);
       return;
     }
     setBusyLabel('正在检查 SVN 目标');
@@ -214,8 +240,10 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
         baseUrl,
         parentPath: normalizedTarget.normalizedParentPath,
         projectNames,
+        workspacePath: workspaceSelection.path,
       });
       if (!result.ok) throw new Error(publishErrorMessage(result));
+      await persistState({ ...stateRef.current, lastLocalSvnFolderPath: workspaceSelection.path });
       setInspection(result.inspection);
       setTargetConfirmed(false);
     } catch (reason) {
@@ -253,7 +281,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
         }
       }
       const contentDigest = await contentDigestForCourse(course);
-      setBusyLabel('正在准备课件级 SVN 工作区');
+      setBusyLabel('正在同步到本地 SVN 文件夹');
       const savedTarget = publishState.target;
       const reusableWorkspace = workspaceSelection
         ?? (savedTarget?.finalUrl === inspection.finalUrl && savedTarget.workspacePath
@@ -270,7 +298,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
         contentDigest,
         adoptHistorical,
         workspacePath: reusableWorkspace?.path,
-        workspaceKind: reusableWorkspace?.kind,
+        workspaceKind: 'existing',
       });
       if (!result.ok) throw new Error(publishErrorMessage(result));
       if (closedRef.current) {
@@ -364,7 +392,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
         finalUrl: commitResult.result.finalUrl,
         courseFolderName: folderName,
         workspacePath: commitResult.result.workspacePath,
-        workspaceKind: workspaceSelection?.kind ?? publishState.target?.workspaceKind ?? 'managed',
+        workspaceKind: 'existing' as const,
         svnRevision: commitResult.result.revision,
       };
       const waiting: PublishResultRecord = {
@@ -487,9 +515,10 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                 <div className="divide-y divide-slate-700">
                   {scopes.map((scope) => {
                     const record = publishState.confirmations[scope];
-                    const candidate = previewCandidates[scope];
+                    const candidate = latestPreview(scope);
                     const valid = isConfirmationValid(scope);
-                    const canConfirm = Boolean(candidate || valid);
+                    const invalidReason = previewInvalidReason(scope);
+                    const canConfirm = !invalidReason;
                     return (
                       <section key={scope} className="grid grid-cols-1 items-center gap-3 py-5 sm:grid-cols-[1fr_auto] sm:gap-5">
                         <div className="min-w-0">
@@ -498,7 +527,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                             <code className="text-[11px] text-slate-500">{projectNameForScope(scope)}</code>
                           </div>
                           <div className="mt-1 text-xs text-slate-500">
-                            {valid ? `确认于 ${formatTime(record?.confirmedAt)}` : candidate ? `预览已生成于 ${formatTime(candidate.previewedAt)}` : '需要重新预览'}
+                            {valid ? `确认于 ${formatTime(record?.confirmedAt)}` : invalidReason ?? `预览已生成于 ${formatTime(candidate?.previewedAt)}`}
                           </div>
                           <label className={`mt-3 flex w-fit items-center gap-2 text-sm ${canConfirm ? 'cursor-pointer text-slate-300' : 'cursor-not-allowed text-slate-600'}`}>
                             <input type="checkbox" checked={valid} disabled={!canConfirm} onChange={(event) => void toggleConfirmation(scope, event.target.checked)} className="h-4 w-4 accent-emerald-500" />
@@ -524,7 +553,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                 </div>
                 <div>
                   <label htmlFor="publish-parent" className="text-xs text-slate-400">业务父目录</label>
-                  <input id="publish-parent" value={parentPath} onChange={(event) => { setParentPath(event.target.value); setInspection(null); setTargetConfirmed(false); }} placeholder="V9/三年级/S8/第一讲" className="mt-1.5 w-full rounded border border-slate-600 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500" />
+                  <input id="publish-parent" value={parentPath} onChange={(event) => { setParentPath(event.target.value); setInspection(null); setTargetConfirmed(false); }} placeholder="V9/S6" className="mt-1.5 w-full rounded border border-slate-600 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-500" />
                 </div>
                 <div className="border-y border-slate-700 py-4">
                   <div className="grid grid-cols-[96px_minmax(0,1fr)] gap-y-2 text-sm sm:grid-cols-[120px_minmax(0,1fr)]">
@@ -535,10 +564,15 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                 </div>
                 <div className="flex flex-col items-stretch gap-3 border-b border-slate-700 pb-5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                   <div className="min-w-0 flex-1">
-                    <div className="text-xs text-slate-400">SVN 工作副本</div>
-                    <div className="mt-1 truncate text-sm text-slate-300" title={workspaceSelection?.path}>{workspaceSelection?.kind === 'existing' ? workspaceSelection.path : '由编辑器自动管理当前课件工作区'}</div>
+                    <div className="text-xs text-slate-400">本地 SVN 文件夹</div>
+                    <div className="mt-1 truncate text-sm text-slate-300" title={workspaceSelection?.path}>{workspaceSelection?.path ?? '请选择公司 SVN 已拉取到电脑上的目录'}</div>
+                    <div className="mt-1 text-xs text-slate-500">课件源文件可以保留在原位置，不需要移动到这个目录。</div>
                   </div>
-                  <button onClick={async () => { const selected = await selectDirectory(); if (selected) setWorkspaceSelection({ path: selected, kind: 'existing' }); }} className="shrink-0 self-end rounded bg-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-600">选择已有工作副本</button>
+                  <button onClick={async () => { const selected = await selectDirectory(); if (selected) { setWorkspaceSelection({ path: selected, kind: 'existing' }); setInspection(null); setTargetConfirmed(false); setError(null); } }} className="shrink-0 self-end rounded bg-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-600">选择本地 SVN 文件夹</button>
+                </div>
+                <div className={`flex items-center justify-between gap-3 border-l-2 px-4 py-3 text-xs ${svnCapability?.ok ? 'border-emerald-500 bg-emerald-950/15 text-emerald-200' : svnCapability && !svnCapability.ok ? 'border-red-500 bg-red-950/20 text-red-200' : 'border-slate-600 bg-slate-950 text-slate-400'}`}>
+                  <span>{svnCapability?.ok ? `SVN 发布组件已就绪（${svnCapability.capability.version}）` : svnCapability && !svnCapability.ok ? svnCapability.error : '正在检查 SVN 发布组件'}</span>
+                  {svnCapability && !svnCapability.ok && <button onClick={async () => { setSvnCapability(null); setSvnCapability(await window.electronAPI.publishCheckSvn()); }} className="shrink-0 rounded border border-current/30 px-2 py-1 hover:bg-white/5">重新检测</button>}
                 </div>
                 {inspection && (
                   <div className={`border-l-2 px-4 py-3 ${inspection.identity === 'conflict' ? 'border-red-500 bg-red-950/20' : 'border-emerald-500 bg-emerald-950/15'}`}>
@@ -548,6 +582,8 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                       {inspection.identity === 'historical' && <p>该目录没有 forge 身份记录，现有工程：{inspection.existingProjects.join('、')}。</p>}
                       {inspection.identity === 'conflict' && <p className="text-red-300">同名目录身份或工程结构不一致，不能覆盖。</p>}
                       {inspection.missingParentSegments.length > 0 && <p className="text-amber-300">将创建目录：{inspection.missingParentSegments.join(' / ')}</p>}
+                      <p>所选目录对应：<span className="break-all text-slate-300">{inspection.localFolder.localUrl}</span></p>
+                      <p>本地发布位置：<span className="break-all text-slate-300">{inspection.localFolder.localTargetPath}</span></p>
                     </div>
                     {inspection.identity === 'historical' && (
                       <label className="mt-3 flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={adoptHistorical} onChange={(event) => setAdoptHistorical(event.target.checked)} className="h-4 w-4 accent-amber-500" />我确认这是同一课件</label>
@@ -563,14 +599,14 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
             {activeStep === 'generate' && (
               <div>
                 {!preparedSummary ? (
-                  <div className="flex min-h-64 flex-col items-center justify-center text-center"><LoaderCircle size={28} className="animate-spin text-sky-400" /><p className="mt-4 text-sm text-slate-300">正在生成完整工程并准备本地 SVN 工作区</p></div>
+                  <div className="flex min-h-64 flex-col items-center justify-center text-center"><LoaderCircle size={28} className="animate-spin text-sky-400" /><p className="mt-4 text-sm text-slate-300">正在生成完整工程并同步到本地 SVN 文件夹</p></div>
                 ) : (
                   <div>
                     <div className="flex items-start gap-3 border-l-2 border-emerald-500 bg-emerald-950/15 px-4 py-3"><CheckCircle2 size={18} className="mt-0.5 text-emerald-400" /><div><div className="text-sm font-medium text-white">待提交内容已准备</div><div className="mt-1 text-xs text-slate-400">远端尚未修改，确认后才会 commit。</div></div></div>
                     <div className="mt-6 grid grid-cols-[96px_minmax(0,1fr)] gap-y-3 border-y border-slate-700 py-5 text-sm sm:grid-cols-[130px_minmax(0,1fr)]">
                       <span className="text-slate-500">发布方式</span><span>{preparedSummary.targetExists ? '更新发布' : '首次发布'}</span>
                       <span className="text-slate-500">最终地址</span><span className="break-all text-sky-300">{preparedSummary.finalUrl}</span>
-                      <span className="text-slate-500">本地工作区</span><span className="break-all text-slate-300">{preparedSummary.workspacePath}</span>
+                      <span className="text-slate-500">本地 SVN 位置</span><span className="break-all text-slate-300">{preparedSummary.workspacePath}</span>
                       <span className="text-slate-500">变更数量</span><span>{preparedSummary.changes.length} 项</span>
                     </div>
                     <div className="mt-5 max-h-48 overflow-y-auto font-mono text-xs text-slate-400">
@@ -605,7 +641,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
               {activeStep === 'preview' && <button onClick={onClose} className="rounded bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700">取消</button>}
               {activeStep === 'preview' && <button disabled={!allConfirmed} onClick={() => { setActiveStep('target'); setProgress(movePublishProgress(progress, 'target')); }} className="flex items-center gap-1 rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-35">下一步<ChevronRight size={15} /></button>}
               {activeStep === 'target' && <button onClick={() => { setActiveStep('preview'); setProgress(movePublishProgress(progress, 'preview')); }} className="rounded bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700">上一步</button>}
-              {activeStep === 'target' && !inspection && <button onClick={handleInspectTarget} disabled={!normalizedTarget.ok || Boolean(busyLabel)} className="rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-35">检查目标</button>}
+              {activeStep === 'target' && !inspection && <button onClick={handleInspectTarget} disabled={!normalizedTarget.ok || !workspaceSelection?.path || svnCapability?.ok !== true || Boolean(busyLabel)} className="rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-35">检查地址匹配</button>}
               {activeStep === 'target' && inspection && <button onClick={handlePrepare} disabled={!targetConfirmed || inspection.identity === 'conflict' || (inspection.identity === 'historical' && !adoptHistorical) || Boolean(busyLabel)} className="rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-35">准备发布</button>}
               {activeStep === 'generate' && preparedSummary && <button onClick={handleCancelPrepared} disabled={Boolean(busyLabel)} className="rounded bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 disabled:opacity-35">取消准备</button>}
               {activeStep === 'generate' && preparedSummary && <button onClick={handleCommit} disabled={Boolean(busyLabel)} className="rounded bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-500 disabled:opacity-35">确认提交 SVN</button>}

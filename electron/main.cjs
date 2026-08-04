@@ -13,16 +13,23 @@ const {
   serializeSaveAsError,
 } = require('./courseSaveAs.cjs');
 const {
-  buildTarget: buildPublishTarget,
   cancelPreparedPublish,
   commitPreparedPublish,
+  configureSvnRuntime,
   getCoursePublishState,
   hashDirectory,
   inspectPublishTarget,
+  inspectSvnCapability,
   preparePublish,
   serializePublishError,
   setCoursePublishState,
 } = require('./coursePublish.cjs');
+
+configureSvnRuntime({
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  resourcesPath: process.resourcesPath,
+});
 
 // 本地定义工具函数（避免引入跨模块依赖）
 function lessonSuffix(kind) {
@@ -650,6 +657,14 @@ ipcMain.handle('publish-set-state', (_event, courseId, state) => {
   }
 });
 
+ipcMain.handle('publish-check-svn', async () => {
+  try {
+    return { ok: true, capability: await inspectSvnCapability() };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
 ipcMain.handle('publish-inspect-target', async (_event, params) => {
   try {
     const courseDir = courseDirMap.get(String(params.courseId));
@@ -659,6 +674,7 @@ ipcMain.handle('publish-inspect-target', async (_event, params) => {
       inspection: await inspectPublishTarget({
         ...params,
         courseFolderName: path.basename(courseDir),
+        workspacePath: params.workspacePath,
       }),
     };
   } catch (error) {
@@ -672,23 +688,15 @@ ipcMain.handle('publish-prepare-svn', async (_event, params) => {
     const courseDir = courseDirMap.get(courseId);
     if (!courseDir) throw new Error('未找到当前课件目录，请重新打开课件');
     const courseFolderName = path.basename(courseDir);
-    const target = buildPublishTarget(params.baseUrl, params.parentPath, courseFolderName);
-    const workspaceKind = params.workspaceKind === 'existing' ? 'existing' : 'managed';
-    const workspacePath = workspaceKind === 'existing'
-      ? params.workspacePath
-      : path.join(
-        app.getPath('userData'),
-        'publish-workspaces',
-        crypto.createHash('sha256').update(target.finalUrl).digest('hex').slice(0, 24),
-      );
-    if (!workspacePath) throw new Error('请选择需要复用的 SVN 工作副本');
+    const workspacePath = params.workspacePath;
+    if (!workspacePath) throw new Error('请选择一个已经拉取到电脑上的本地 SVN 文件夹');
     const prepared = await preparePublish({
       ...params,
       courseId,
       courseFolderName,
       sourceRoot: path.join(courseDir, 'project', courseId),
       workspacePath,
-      workspaceKind,
+      workspaceKind: 'existing',
     });
     const token = crypto.randomUUID();
     preparedPublishes.set(token, prepared);

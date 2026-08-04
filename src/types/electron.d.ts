@@ -26,6 +26,13 @@ export interface PublishTargetInspection {
   identity: 'new' | 'matching' | 'historical' | 'conflict';
   existingProjects: PublishProjectName[];
   revision: number;
+  localFolder: {
+    localPath: string;
+    localUrl: string;
+    repositoryRootUrl: string;
+    remainingSegments: string[];
+    localTargetPath: string;
+  };
 }
 
 export type PublishIpcError = {
@@ -117,12 +124,17 @@ export interface ElectronAPI {
   publishHashDirectory: (dirPath: string) => Promise<{ ok: true; digest: string } | PublishIpcError>;
   publishGetState: (courseId: string) => Promise<CoursePublishState>;
   publishSetState: (courseId: string, state: CoursePublishState) => Promise<{ ok: true; state: CoursePublishState } | PublishIpcError>;
+  publishCheckSvn: () => Promise<{
+    ok: true;
+    capability: { binaryPath: string; bundled: boolean; version: string };
+  } | PublishIpcError>;
   publishInspectTarget: (params: {
     courseId: string;
     courseKind: 'normal' | 'homework' | 'sEvaluation' | 'review';
     baseUrl: string;
     parentPath: string;
     projectNames: PublishProjectName[];
+    workspacePath: string;
   }) => Promise<{ ok: true; inspection: PublishTargetInspection } | PublishIpcError>;
   publishPrepareSvn: (params: {
     courseId: string;

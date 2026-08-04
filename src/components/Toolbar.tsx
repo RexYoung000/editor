@@ -20,7 +20,15 @@ import { requestPageThumbnailFlush } from '../utils/pageThumbnailSync';
 import { commitPendingPropertyEdits } from '../utils/propertyEditSession';
 import { formatCoursePathTail } from '../utils/coursePathDisplay';
 import PublishDialog from './PublishDialog';
-import { projectNameForScope, requiredPublishScopes, type PublishResultRecord, type PublishScope } from '../utils/coursePublishing';
+import {
+  contentDigestForScope,
+  projectNameForScope,
+  requiredPublishScopes,
+  type PreviewRecord,
+  type PublishResultRecord,
+  type PublishScope,
+} from '../utils/coursePublishing';
+import { loadPublishConfig } from '../utils/publishConfig';
 
 export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack?: () => void }) {
   const { language, setLanguage, t } = useI18n();
@@ -229,7 +237,27 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     if (!courseDir) throw new Error('未找到课件目录，请重新打开课件');
     const digestResult = await window.electronAPI.publishHashDirectory(`${courseDir}/project/${currentCourse.id}/${projectName}`);
     if (!digestResult.ok) throw new Error(digestResult.error);
-    return { projectName, directoryDigest: digestResult.digest, previewedAt: new Date().toISOString() };
+    const [publishConfig, publishState, courseDigest] = await Promise.all([
+      loadPublishConfig(),
+      window.electronAPI.publishGetState(currentCourse.id),
+      contentDigestForScope(currentCourse, scope),
+    ]);
+    const previewRecord: PreviewRecord = {
+      scope,
+      projectName,
+      directoryDigest: digestResult.digest,
+      courseDigest,
+      previewedAt: new Date().toISOString(),
+      editorVersion: __APP_VERSION__,
+      environmentVersion: publishConfig.environmentVersion,
+    };
+    const nextState = {
+      ...publishState,
+      latestPreviews: { ...publishState.latestPreviews, [scope]: previewRecord },
+    };
+    const saved = await window.electronAPI.publishSetState(currentCourse.id, nextState);
+    if (!saved.ok) throw new Error(saved.error);
+    return previewRecord;
   };
 
   // 预览核心流程（不含资源检查），previewMode 区分预习/正课
