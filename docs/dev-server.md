@@ -37,6 +37,7 @@ forge 没有独立的 Node 服务，所有"后端"能力都由 [vite.config.ts](
 | 接口 | 用途 |
 |---|---|
 | `GET /api/ws-config` | 返回打包机 WebSocket 配置 `{ wsServer, wsHost }`，由跑 vite 的机器通过 `WS_SERVER` / `WS_HOST` 环境变量设定。`src/utils/websocket.ts` 在用 |
+| `GET /api/publish-config` | 返回正课、作业、专题测评和复习课的只读 SVN 基础地址及当前模板/运行资源版本；通过 `SVN_BASE_NORMAL`、`SVN_BASE_HOMEWORK`、`SVN_BASE_EVALUATION`、`SVN_BASE_REVIEW` 覆盖部署默认值。 |
 | `POST /api/upload-compiled-zip` | 接收 Electron 的编译产物 zip（`compileBuild` + `zipDirectory`），**300MB 上限**，**内存解压**到 `preview-server/lessons/<projName>/`；先验证课件目录和全部文件条目，再替换旧目录，zip 不落盘，最后把 `regKey → lessonDir` 写进 `courseOutputDirs` |
 | `POST /api/upload-resource` | multipart 上传，**100MB 上限**，让远程 Electron 把视频等大文件直接写进对应 lesson 目录的 `destPath`，要求 lesson 目录已存在（即先发布过） |
 | `POST /api/save-preset-thumbnail` | 把 canvas 截图（`{ name, dataUrl }`）写到 `public/builtin/editor/<name>.png`，预设缩略图用 |

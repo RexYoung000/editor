@@ -12,6 +12,17 @@ const {
   saveCourseAsTransaction,
   serializeSaveAsError,
 } = require('./courseSaveAs.cjs');
+const {
+  buildTarget: buildPublishTarget,
+  cancelPreparedPublish,
+  commitPreparedPublish,
+  getCoursePublishState,
+  hashDirectory,
+  inspectPublishTarget,
+  preparePublish,
+  serializePublishError,
+  setCoursePublishState,
+} = require('./coursePublish.cjs');
 
 // 本地定义工具函数（避免引入跨模块依赖）
 function lessonSuffix(kind) {
@@ -42,6 +53,7 @@ let mainWindow;
 let inputWindowRef = null; // 服务器输入窗口引用，用于延迟销毁
 let currentServerUrl = ''; // 供 IPC get-server-url 读取
 const courseDirMap = new Map(); // courseId → courseDir，供 forge-local:// 协议查询
+const preparedPublishes = new Map();
 
 // ─── 服务器连接配置 ───
 
@@ -614,6 +626,113 @@ ipcMain.handle('is-svn-directory', (_event, dirPath) => {
     current = parent;
   }
   return false;
+});
+
+ipcMain.handle('publish-hash-directory', (_event, dirPath) => {
+  try {
+    return { ok: true, digest: hashDirectory(dirPath) };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-get-state', (_event, courseId) => {
+  return getCoursePublishState(app.getPath('userData'), String(courseId));
+});
+
+ipcMain.handle('publish-set-state', (_event, courseId, state) => {
+  try {
+    const serialized = JSON.stringify(state);
+    if (serialized.length > 1024 * 1024) throw new Error('发布状态数据过大');
+    return { ok: true, state: setCoursePublishState(app.getPath('userData'), String(courseId), JSON.parse(serialized)) };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-inspect-target', async (_event, params) => {
+  try {
+    const courseDir = courseDirMap.get(String(params.courseId));
+    if (!courseDir) throw new Error('未找到当前课件目录，请重新打开课件');
+    return {
+      ok: true,
+      inspection: await inspectPublishTarget({
+        ...params,
+        courseFolderName: path.basename(courseDir),
+      }),
+    };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-prepare-svn', async (_event, params) => {
+  try {
+    const courseId = String(params.courseId);
+    const courseDir = courseDirMap.get(courseId);
+    if (!courseDir) throw new Error('未找到当前课件目录，请重新打开课件');
+    const courseFolderName = path.basename(courseDir);
+    const target = buildPublishTarget(params.baseUrl, params.parentPath, courseFolderName);
+    const workspaceKind = params.workspaceKind === 'existing' ? 'existing' : 'managed';
+    const workspacePath = workspaceKind === 'existing'
+      ? params.workspacePath
+      : path.join(
+        app.getPath('userData'),
+        'publish-workspaces',
+        crypto.createHash('sha256').update(target.finalUrl).digest('hex').slice(0, 24),
+      );
+    if (!workspacePath) throw new Error('请选择需要复用的 SVN 工作副本');
+    const prepared = await preparePublish({
+      ...params,
+      courseId,
+      courseFolderName,
+      sourceRoot: path.join(courseDir, 'project', courseId),
+      workspacePath,
+      workspaceKind,
+    });
+    const token = crypto.randomUUID();
+    preparedPublishes.set(token, prepared);
+    return {
+      ok: true,
+      token,
+      summary: {
+        finalUrl: prepared.inspection.finalUrl,
+        identity: prepared.inspection.identity,
+        targetExists: prepared.inspection.targetExists,
+        missingParentSegments: prepared.inspection.missingParentSegments,
+        workspacePath: prepared.workspacePath,
+        projectDigests: prepared.projectDigests,
+        projectTreeDigest: prepared.sourceTreeDigest,
+        changes: prepared.changes.map((entry) => ({ code: entry.code, path: entry.path })),
+      },
+    };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-commit-svn', async (_event, token, message) => {
+  const prepared = preparedPublishes.get(String(token));
+  if (!prepared) return { ok: false, code: 'PREPARED_PUBLISH_MISSING', error: '待提交任务已失效，请重新准备发布' };
+  try {
+    const result = await commitPreparedPublish(prepared, String(message));
+    preparedPublishes.delete(String(token));
+    return { ok: true, result };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-cancel-prepared', async (_event, token) => {
+  const prepared = preparedPublishes.get(String(token));
+  if (!prepared) return { ok: true };
+  try {
+    await cancelPreparedPublish(prepared);
+    preparedPublishes.delete(String(token));
+    return { ok: true };
+  } catch (error) {
+    return serializePublishError(error);
+  }
 });
 
 // ─── forge-local:// 自定义协议 ───

@@ -8,6 +8,33 @@ type ElectronEventListener<K extends ElectronEventChannel> = (
   payload: ElectronEventPayloads[K],
 ) => void;
 
+import type {
+  CoursePublishState,
+  PublishProjectName,
+} from '../utils/coursePublishing';
+
+export interface PublishTargetInspection {
+  baseUrl: string;
+  parentPath: string;
+  parentUrl: string;
+  finalUrl: string;
+  courseFolderName: string;
+  targetExists: boolean;
+  parentExists: boolean;
+  nearestExistingUrl: string;
+  missingParentSegments: string[];
+  identity: 'new' | 'matching' | 'historical' | 'conflict';
+  existingProjects: PublishProjectName[];
+  revision: number;
+}
+
+export type PublishIpcError = {
+  ok: false;
+  code: string;
+  error: string;
+  details?: unknown;
+};
+
 export type CourseSaveAsErrorCode =
   | 'INVALID_COURSE_ID'
   | 'INVALID_PATH'
@@ -87,6 +114,54 @@ export interface ElectronAPI {
   svnGetUrl: (dirPath: string) => Promise<string | null>;
   svnHasUnversioned: (dirPath: string) => Promise<boolean>;
   getSubdirs: (dirPath: string) => Promise<string[]>;
+  publishHashDirectory: (dirPath: string) => Promise<{ ok: true; digest: string } | PublishIpcError>;
+  publishGetState: (courseId: string) => Promise<CoursePublishState>;
+  publishSetState: (courseId: string, state: CoursePublishState) => Promise<{ ok: true; state: CoursePublishState } | PublishIpcError>;
+  publishInspectTarget: (params: {
+    courseId: string;
+    courseKind: 'normal' | 'homework' | 'sEvaluation' | 'review';
+    baseUrl: string;
+    parentPath: string;
+    projectNames: PublishProjectName[];
+  }) => Promise<{ ok: true; inspection: PublishTargetInspection } | PublishIpcError>;
+  publishPrepareSvn: (params: {
+    courseId: string;
+    courseKind: 'normal' | 'homework' | 'sEvaluation' | 'review';
+    baseUrl: string;
+    parentPath: string;
+    projectNames: PublishProjectName[];
+    editorVersion: string;
+    environmentVersion: string;
+    contentDigest: string;
+    adoptHistorical: boolean;
+    workspacePath?: string;
+    workspaceKind?: 'managed' | 'existing';
+  }) => Promise<{
+    ok: true;
+    token: string;
+    summary: {
+      finalUrl: string;
+      identity: PublishTargetInspection['identity'];
+      targetExists: boolean;
+      missingParentSegments: string[];
+      workspacePath: string;
+      projectDigests: Partial<Record<PublishProjectName, string>>;
+      projectTreeDigest: string;
+      changes: Array<{ code: string; path: string }>;
+    };
+  } | PublishIpcError>;
+  publishCommitSvn: (token: string, message: string) => Promise<{
+    ok: true;
+    result: {
+      revision: number;
+      finalUrl: string;
+      projectUrls: Partial<Record<PublishProjectName, string>>;
+      workspacePath: string;
+      contentDigest: string;
+      committedAt: string;
+    };
+  } | PublishIpcError>;
+  publishCancelPrepared: (token: string) => Promise<{ ok: true } | PublishIpcError>;
   getServerUrl: () => Promise<string>;
   registerCourseDir: (courseId: string, dirPath: string) => Promise<boolean>;
   copyLocalFile: (srcAbsPath: string, destAbsPath: string) => Promise<boolean>;
