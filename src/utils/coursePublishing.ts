@@ -272,9 +272,13 @@ export function stableStringify(value: unknown): string {
 }
 
 export async function sha256Text(value: string): Promise<string> {
-  const data = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  const hashText = window.electronAPI?.publishHashText;
+  if (typeof hashText !== 'function') {
+    throw new Error('当前客户端版本不支持课件发布，请安装最新版后重试');
+  }
+  const result = await hashText(value);
+  if (!result.ok) throw new Error(result.error);
+  return result.digest;
 }
 
 export async function contentDigestForCourse(course: Course): Promise<string> {

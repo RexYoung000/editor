@@ -18,6 +18,7 @@ const {
   configureSvnRuntime,
   getCoursePublishState,
   hashDirectory,
+  hashText,
   inspectPublishTarget,
   inspectSvnCapability,
   preparePublish,
@@ -614,6 +615,14 @@ ipcMain.handle('is-svn-directory', (_event, dirPath) => {
 ipcMain.handle('publish-hash-directory', (_event, dirPath) => {
   try {
     return { ok: true, digest: hashDirectory(dirPath) };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-hash-text', (_event, value) => {
+  try {
+    return { ok: true, digest: hashText(value) };
   } catch (error) {
     return serializePublishError(error);
   }

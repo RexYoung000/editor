@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isSvnDirectory: (dirPath) => ipcRenderer.invoke('is-svn-directory', dirPath),
   getSubdirs: (dirPath) => ipcRenderer.invoke('get-subdirs', dirPath),
   publishHashDirectory: (dirPath) => ipcRenderer.invoke('publish-hash-directory', dirPath),
+  publishHashText: (value) => ipcRenderer.invoke('publish-hash-text', value),
   publishGetState: (courseId) => ipcRenderer.invoke('publish-get-state', courseId),
   publishSetState: (courseId, state) => ipcRenderer.invoke('publish-set-state', courseId, state),
   publishCheckSvn: () => ipcRenderer.invoke('publish-check-svn'),

@@ -122,6 +122,7 @@ export interface ElectronAPI {
   isSvnDirectory: (dirPath: string) => Promise<boolean>;
   getSubdirs: (dirPath: string) => Promise<string[]>;
   publishHashDirectory: (dirPath: string) => Promise<{ ok: true; digest: string } | PublishIpcError>;
+  publishHashText: (value: string) => Promise<{ ok: true; digest: string } | PublishIpcError>;
   publishGetState: (courseId: string) => Promise<CoursePublishState>;
   publishSetState: (courseId: string, state: CoursePublishState) => Promise<{ ok: true; state: CoursePublishState } | PublishIpcError>;
   publishCheckSvn: () => Promise<{

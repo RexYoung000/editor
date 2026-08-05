@@ -40,6 +40,7 @@ const publish = require(join(process.cwd(), 'electron/coursePublish.cjs')) as {
     bundled: boolean;
   };
   hashDirectory: (root: string, options?: { excludedNames?: string[] }) => string;
+  hashText: (value: string) => string;
   inspectPublishTarget: (params: Record<string, unknown>, runner: SvnRunner) => Promise<InspectionResult>;
   inspectSvnCapability: (
     runner: SvnRunner,
@@ -93,6 +94,33 @@ test('目录指纹覆盖相对路径、空目录和文件内容，并忽略 SVN 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('课件文本摘要由 Electron 本地服务稳定计算 SHA-256', () => {
+  assert.equal(
+    publish.hashText('abc'),
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+  );
+  assert.equal(
+    publish.hashText(''),
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  );
+  assert.throws(
+    () => publish.hashText(undefined as unknown as string),
+    (error: unknown) => (error as { code?: string }).code === 'INVALID_HASH_TEXT',
+  );
+});
+
+test('课件文本摘要 IPC 在 main、preload 和渲染端保持同一契约', async () => {
+  const [mainSource, preloadSource, rendererSource] = await Promise.all([
+    readFile(join(process.cwd(), 'electron/main.cjs'), 'utf8'),
+    readFile(join(process.cwd(), 'electron/preload.cjs'), 'utf8'),
+    readFile(join(process.cwd(), 'src/utils/coursePublishing.ts'), 'utf8'),
+  ]);
+  assert.match(mainSource, /ipcMain\.handle\('publish-hash-text'/);
+  assert.match(preloadSource, /publishHashText: \(value\) => ipcRenderer\.invoke\('publish-hash-text', value\)/);
+  assert.match(rendererSource, /electronAPI\?\.publishHashText/);
+  assert.doesNotMatch(rendererSource, /crypto\.subtle/);
 });
 
 test('SVN 状态和旧开发提交 revision 使用机器稳定格式解析', () => {
