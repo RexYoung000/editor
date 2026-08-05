@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Play, Plus, Trash2 } from 'lucide-react';
 import type { Element } from '../types';
 import type { PropertyDef } from '../elements/elementMeta';
 import {
@@ -22,6 +22,7 @@ import { loadLocalFont } from '../utils/fontLoader';
 import LibraryBrowser, { LibraryErrorDialog, type SelectResult } from './LibraryBrowser';
 import { parseFiniteNumberDraft } from '../utils/propertyEditSession';
 import ThemeSwatches from './ThemeSwatches';
+import { pauseSpineAtFirstFrame, playSpineOnce } from '../utils/spinePreview';
 
 function getVal(elements: Element[], key: string): unknown {
   if (elements.length === 0) return '';
@@ -270,7 +271,6 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
     elements.forEach((el) => updateElement(el.id, {
       props: { url, _animationList: target.animations, currAniName: defaultName },
     }));
-    setPaused(false);
   };
 
   const onChangeAnim = (name: string) => {
@@ -282,33 +282,19 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
       if (obj) {
         const idx = animationList.indexOf(name);
         try {
-          obj.play(idx >= 0 ? idx : 0, true);
-          obj.paused();
-          obj._spinePaused = true;
+          pauseSpineAtFirstFrame(obj, idx >= 0 ? idx : 0);
         } catch { /* ignore */ }
       }
     }
-    setPaused(true);
   };
 
-  const [paused, setPaused] = useState(false);
-  const onTogglePlay = () => {
+  const onPreviewPlay = () => {
     const el = elements[0];
     if (!el) return;
     const obj = getObject(el.id);
     if (!obj) return;
-    if (paused) {
-      try { obj.resume(); obj._spinePaused = false; } catch { /* ignore */ }
-      setPaused(false);
-    } else {
-      const idx = animationList.indexOf(animationName);
-      try {
-        obj.play(idx >= 0 ? idx : 0, true);
-        obj.paused();
-        obj._spinePaused = true;
-      } catch { /* ignore */ }
-      setPaused(true);
-    }
+    const idx = animationList.indexOf(animationName);
+    try { playSpineOnce(obj, idx >= 0 ? idx : 0); } catch { /* ignore */ }
   };
 
   const skLabel = (url: string) => url.split('/').pop()?.replace(/\.sk$/i, '') ?? url;
@@ -354,7 +340,7 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
       )}
       {animationList.length > 0 && !isMulti && (
         <div className="mt-1">
-          <div className="text-xs text-slate-400 mb-1">播放动画</div>
+          <div className="text-xs text-slate-400 mb-1">动画</div>
           <div className="flex gap-1">
             <select className={`${inputCls} flex-1`} value={animationName}
               onChange={(e) => onChangeAnim(e.target.value)}>
@@ -362,9 +348,9 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
                 <option key={n} value={n}>{n}</option>
               ))}
             </select>
-            <button onClick={onTogglePlay}
-              className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-slate-300 cursor-pointer shrink-0">
-              {paused ? '▶' : '⏸'}
+            <button onClick={onPreviewPlay} title="播放一次" aria-label="播放当前 Spine 动画一次"
+              className="flex h-7 w-8 items-center justify-center rounded border border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white cursor-pointer shrink-0">
+              <Play size={14} />
             </button>
           </div>
         </div>

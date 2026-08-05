@@ -123,6 +123,14 @@ Issue #131 的木纹卷轴快照位于
 标题框和声音按钮皮肤。修改该目录后必须执行 `pnpm pack-game`，并检查
 `public/builtin/runtime/game.zip` 中三项资源完整存在。
 
+Issue #157 的数学键盘百分号位于
+`public/builtin/runtime/game/mathKeyboard/<theme>/percent.png`，其中 `theme` 为
+`yellow`、`blue`、`green`；手指点击 Spine 位于
+`public/builtin/runtime/game/animation/hand-click/`。两类资源都由
+`src/elements/builtinAssets.ts` 注册，业务代码只保存稳定的发布路径。手指预设缩略图位于
+`public/builtin/editor/`，只用于选择器，不进入课件包。修改上述运行资源后同样必须执行
+`pnpm pack-game`，并核对 ZIP 中三张百分号图片及手指 `.sk/.png`。
+
 ```
 编辑器 public/uploads/          → 用户上传的资源暂存
     ↓ 导出时

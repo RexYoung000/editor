@@ -200,10 +200,24 @@ export function collectResources(
       map.set(value, `${viewDir}/image/img/skin_${skinCounter++}${ext}`);
     } else if (isBuiltinResourcePath(value)) {
       if (!map.has(value)) map.set(value, builtinExportToProjectPath(value as string, viewDir));
+      if (/\.sk$/i.test(value as string)) {
+        const pngPath = (value as string).replace(/\.sk$/i, '.png');
+        if (lookupBuiltinByExportPath(pngPath) && !map.has(pngPath)) {
+          map.set(pngPath, builtinExportToProjectPath(pngPath, viewDir));
+        }
+      }
     } else if (typeof value === 'string' && value.startsWith('/builtin/')) {
       if (map.has(value)) return;
       const asset = lookupBuiltinBySrcPath(value);
-      if (asset?.exportPath) map.set(value, builtinExportToProjectPath(asset.exportPath, viewDir));
+      if (asset?.exportPath) {
+        map.set(value, builtinExportToProjectPath(asset.exportPath, viewDir));
+        if (/\.sk$/i.test(asset.exportPath)) {
+          const pngExportPath = asset.exportPath.replace(/\.sk$/i, '.png');
+          if (lookupBuiltinByExportPath(pngExportPath) && !map.has(pngExportPath)) {
+            map.set(pngExportPath, builtinExportToProjectPath(pngExportPath, viewDir));
+          }
+        }
+      }
     }
   };
 

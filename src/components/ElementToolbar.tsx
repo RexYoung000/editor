@@ -12,7 +12,9 @@ import { isFlatLesson } from '../utils/courseKind';
 import { downloadLibraryFile, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './QuickPresetDialog';
+import SpinePresetDialog from './SpinePresetDialog';
 import type { Action, Element } from '../types';
+import { applySpinePreset, type SpinePreset } from '../elements/spinePresets';
 import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
 import {
   applyKeyboardBindingProps,
@@ -145,6 +147,7 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
   const [quickPresetOpen, setQuickPresetOpen] = useState(false);
   const [quickPresetKind, setQuickPresetKind] = useState<QuickPresetKind>('confirm');
   const [quickPresetBusy, setQuickPresetBusy] = useState(false);
+  const [spinePresetOpen, setSpinePresetOpen] = useState(false);
 
   const findExistingKeyboardCamp = (presetId: string, inputType: string): string | undefined => {
     const state = useEditorStore.getState();
@@ -206,6 +209,10 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
       setPendingKeyboardInputId(null);
       setPendingKeyboardInputType(null);
       setKeyboardDialogOpen(true);
+      return;
+    }
+    if (type === 'Spine') {
+      setSpinePresetOpen(true);
       return;
     }
     if (type === 'NewBrushSprite') {
@@ -270,6 +277,16 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
       setPendingKeyboardInputType(null);
     }
     setKeyboardDialogOpen(false);
+  };
+
+  const handleSpinePresetSelected = (preset: SpinePreset) => {
+    const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
+    const element = applySpinePreset(createDefaultElement('Spine', subPageId), preset);
+    const obj = createLayaComponent(element);
+    if (obj) registerObject(element.id, obj);
+    addElement(element);
+    selectElement(element.id, false);
+    setSpinePresetOpen(false);
   };
 
   /** 翻页组件:一次创建 PageTurnBox + 第一页 ContainerBox + 左/右箭头 + 第一页标签按钮 */
@@ -979,6 +996,12 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
           busy={quickPresetBusy}
           onClose={() => setQuickPresetOpen(false)}
           onSelect={handleQuickPresetSelected}
+        />
+      )}
+      {spinePresetOpen && (
+        <SpinePresetDialog
+          onClose={() => setSpinePresetOpen(false)}
+          onSelect={handleSpinePresetSelected}
         />
       )}
     </div>
