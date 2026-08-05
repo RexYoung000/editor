@@ -128,7 +128,8 @@ Issue #157 的数学键盘百分号位于
 `yellow`、`blue`、`green`；手指点击 Spine 位于
 `public/builtin/runtime/game/animation/hand-click/`。两类资源都由
 `src/elements/builtinAssets.ts` 注册，业务代码只保存稳定的发布路径。手指预设缩略图位于
-`public/builtin/editor/`，只用于选择器，不进入课件包。修改上述运行资源后同样必须执行
+`public/builtin/editor/`，分别对应 `game_an1` 与 `game_an2`，只用于选择器，不进入课件包。
+绿色百分号必须与绿色主题字形保持同色，不能直接沿用黄色主体的验收前原图。修改上述运行资源后同样必须执行
 `pnpm pack-game`，并核对 ZIP 中三张百分号图片及手指 `.sk/.png`。
 
 ```

@@ -20,7 +20,7 @@ import { renderTextToImage, type RenderTextProps } from '../textToImage';
 import { getEditorCanvasFillColor, isEditorCanvasHitThrough } from '../canvasComposite';
 import { isElementHidden } from '../layerState';
 import { renderCustomAnswerTextSkin } from '../customAnswerKeyboardText';
-import { pauseSpineAtFirstFrame } from '../spinePreview';
+import { pauseSpineAtFirstFrame, resolveSpineAnimationIndex } from '../spinePreview';
 
 function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string | null, stroke?: string, sw?: number) {
   if (stroke && sw && sw > 0) g.drawRect(x, y, w, h, fill, stroke, sw);
@@ -338,7 +338,6 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
     if (isUrlSk && urlStr) {
       const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
       const animName = (props.currAniName as string) ?? '';
-      const animList = Array.isArray(props._animationList) ? (props._animationList as string[]) : [];
       if (courseId && comp.load) {
         const builtin = lookupBuiltinByExportPath(urlStr);
         const loadUrl = builtin ? `/builtin/${builtin.src}` : getCourseResourceUrl(courseId, urlStr);
@@ -347,14 +346,12 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
           comp._lastAnimName = animName;
           const L = laya();
           const handler = L.Handler.create(null, () => {
-            const idx = animList.indexOf(animName);
-            try { pauseSpineAtFirstFrame(comp, idx >= 0 ? idx : 0); } catch { /* ignore */ }
+            try { pauseSpineAtFirstFrame(comp, resolveSpineAnimationIndex(props, animName)); } catch { /* ignore */ }
           });
           comp.load(loadUrl, handler, 0);
-        } else if (comp._lastAnimName !== animName && animList.length > 0) {
+        } else if (comp._lastAnimName !== animName && animName) {
           comp._lastAnimName = animName;
-          const idx = animList.indexOf(animName);
-          try { pauseSpineAtFirstFrame(comp, idx >= 0 ? idx : 0); } catch { /* ignore */ }
+          try { pauseSpineAtFirstFrame(comp, resolveSpineAnimationIndex(props, animName)); } catch { /* ignore */ }
         }
       }
     }

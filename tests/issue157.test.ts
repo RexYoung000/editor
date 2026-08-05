@@ -15,7 +15,7 @@ import {
 import { applySpinePreset, SPINE_PRESETS } from '../src/elements/spinePresets';
 import type { Element } from '../src/types';
 import { buildExportRegressionArtifacts, collectGameZipFiles, collectResources } from '../src/utils/exportProject';
-import { playSpineOnce } from '../src/utils/spinePreview';
+import { playSpineOnce, resolveSpineAnimationIndex } from '../src/utils/spinePreview';
 import { normalCourseFixture } from './fixtures/export-courses';
 
 const percentPresetIds: MathKeyboardPresetId[] = [
@@ -78,7 +78,7 @@ test('三色百分号与手指 Spine 使用已确认源文件并完成内置注�
   const expected = new Map([
     ['keyboard.math.yellow.percent', 'd48a8d16a58b647f73b24a7df941ffac4e160a661cab1d45f9afe4da60104b71'],
     ['keyboard.math.blue.percent', '61b59c41cacb8bfaf055412b80d6caedf9a4e4320ee419a464ed51acb3d9f29d'],
-    ['keyboard.math.green.percent', '33d00eac8ac26573d668e300963f40b36dd1d3e2dcbe898ffc5856b86cf67002'],
+    ['keyboard.math.green.percent', '362a0cf0d9250b7e288ea72fe2339340034e341de66e583f787608481449850f'],
     ['spine.handClick.sk', '1b66b6287df0fb0aa09b3a91f6c37a143df33f975ec83f73423d1cd3b056e514'],
     ['spine.handClick.png', '43fd6233d8d62c2ddc896d1f0bd7b784247c8afdd9f27517b6f197b7f5401cce'],
   ]);
@@ -90,29 +90,44 @@ test('三色百分号与手指 Spine 使用已确认源文件并完成内置注�
     assert.ok(existsSync(path), path);
     assert.equal(sha256(path), hash, id);
   }
-  const thumbnail = BUILTIN_ASSETS.find((asset) => asset.id === 'spine.handClick.thumbnail');
-  assert.ok(thumbnail && existsSync(join(process.cwd(), 'public/builtin', thumbnail.src)));
-  assert.equal(thumbnail.exportPath, undefined);
+  for (const id of ['spine.handClick.thumbnail', 'spine.handMove.thumbnail']) {
+    const thumbnail = BUILTIN_ASSETS.find((asset) => asset.id === id);
+    assert.ok(thumbnail && existsSync(join(process.cwd(), 'public/builtin', thumbnail.src)));
+    assert.equal(thumbnail.exportPath, undefined);
+  }
 });
 
-test('Spine 预设保留空白入口并按已确认默认值创建手指组件', () => {
-  assert.deepEqual(SPINE_PRESETS.map((preset) => preset.id), ['blank', 'hand-click']);
+test('Spine 预设保留空白入口并把两条手指动画创建为独立组件', () => {
+  assert.deepEqual(SPINE_PRESETS.map((preset) => preset.id), ['blank', 'hand-click', 'hand-move']);
 
   const blank = applySpinePreset(createDefaultElement('Spine', 'page-157'), SPINE_PRESETS[0]);
   assert.deepEqual([blank.x, blank.y, blank.width, blank.height], [100, 100, 400, 400]);
   assert.equal(blank.props.url, '');
 
-  const hand = applySpinePreset(createDefaultElement('Spine', 'page-157'), SPINE_PRESETS[1]);
-  assert.deepEqual([hand.x, hand.y, hand.width, hand.height], [100, 100, 225, 428]);
-  assert.equal(hand.props.url, 'game/animation/hand-click/game.sk');
-  assert.equal(hand.props.currAniName, 'game_an1');
-  assert.equal(hand.props.isLoop, 'false');
-  assert.deepEqual(hand.props._animationList, ['game_an1', 'game_an2']);
-  assert.deepEqual(hand.props._skFiles, [{
-    url: 'game/animation/hand-click/game.sk',
-    animations: ['game_an1', 'game_an2'],
-  }]);
-  assert.deepEqual(hand.props._spinePreset, { id: 'hand-click' });
+  for (const [index, id, animation] of [
+    [1, 'hand-click', 'game_an1'],
+    [2, 'hand-move', 'game_an2'],
+  ] as const) {
+    const hand = applySpinePreset(createDefaultElement('Spine', 'page-157'), SPINE_PRESETS[index]);
+    assert.deepEqual([hand.x, hand.y, hand.width, hand.height], [100, 100, 225, 428]);
+    assert.equal(hand.props.url, 'game/animation/hand-click/game.sk');
+    assert.equal(hand.props.currAniName, animation);
+    assert.equal(hand.props.isLoop, 'false');
+    assert.deepEqual(hand.props._animationList, [animation]);
+    assert.deepEqual(hand.props._skFiles, [{
+      url: 'game/animation/hand-click/game.sk',
+      animations: ['game_an1', 'game_an2'],
+    }]);
+    assert.deepEqual(hand.props._spinePreset, { id });
+    assert.equal(resolveSpineAnimationIndex(hand.props, animation), index - 1);
+  }
+});
+
+test('独立手指预设按 Spine 文件真实序号定位各自动画', () => {
+  const click = applySpinePreset(createDefaultElement('Spine', 'page-157'), SPINE_PRESETS[1]);
+  const move = applySpinePreset(createDefaultElement('Spine', 'page-157'), SPINE_PRESETS[2]);
+  assert.equal(resolveSpineAnimationIndex(click.props, 'game_an1'), 0);
+  assert.equal(resolveSpineAnimationIndex(move.props, 'game_an2'), 1);
 });
 
 test('右侧 Spine 试听只播放一次并在结束后回到第一帧', () => {
@@ -147,6 +162,7 @@ test('手指内置 Spine 在正式与预览共用资源映射中成对收集', (
   const course = normalCourseFixture();
   const page = course.stages[0].subPages[0];
   page.elements.push(applySpinePreset(createDefaultElement('Spine', page.id), SPINE_PRESETS[1]));
+  page.elements.push(applySpinePreset(createDefaultElement('Spine', page.id), SPINE_PRESETS[2]));
 
   const resourceMap = collectResources(course);
   assert.equal(

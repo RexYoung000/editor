@@ -2,7 +2,7 @@ import type { Element } from '../types';
 import { assetExport, assetSrc } from './builtinAssets';
 
 export interface SpinePreset {
-  id: 'blank' | 'hand-click';
+  id: 'blank' | 'hand-click' | 'hand-move';
   label: string;
   description: string;
   thumbnail: string;
@@ -12,7 +12,33 @@ export interface SpinePreset {
 }
 
 const handClickUrl = assetExport('spine.handClick.sk');
-const handClickAnimations = ['game_an1', 'game_an2'];
+const handAnimations = ['game_an1', 'game_an2'];
+
+function handPreset(
+  id: 'hand-click' | 'hand-move',
+  label: string,
+  description: string,
+  thumbnailId: 'spine.handClick.thumbnail' | 'spine.handMove.thumbnail',
+  animation: 'game_an1' | 'game_an2',
+): SpinePreset {
+  return {
+    id,
+    label,
+    description,
+    thumbnail: assetSrc(thumbnailId),
+    size: { width: 225, height: 428 },
+    position: { x: 100, y: 100 },
+    props: {
+      url: handClickUrl,
+      currAniName: animation,
+      stopAt: 0,
+      isLoop: 'false',
+      _animationList: [animation],
+      _skFiles: [{ url: handClickUrl, animations: handAnimations }],
+      _spinePreset: { id },
+    },
+  };
+}
 
 export const SPINE_PRESETS: SpinePreset[] = [
   {
@@ -23,23 +49,20 @@ export const SPINE_PRESETS: SpinePreset[] = [
     size: { width: 400, height: 400 },
     props: {},
   },
-  {
-    id: 'hand-click',
-    label: '手指点击',
-    description: '包含点击与移动引导动画',
-    thumbnail: assetSrc('spine.handClick.thumbnail'),
-    size: { width: 225, height: 428 },
-    position: { x: 100, y: 100 },
-    props: {
-      url: handClickUrl,
-      currAniName: handClickAnimations[0],
-      stopAt: 0,
-      isLoop: 'false',
-      _animationList: handClickAnimations,
-      _skFiles: [{ url: handClickUrl, animations: handClickAnimations }],
-      _spinePreset: { id: 'hand-click' },
-    },
-  },
+  handPreset(
+    'hand-click',
+    '手指点击',
+    '点击波纹引导动画',
+    'spine.handClick.thumbnail',
+    'game_an1',
+  ),
+  handPreset(
+    'hand-move',
+    '手指移动',
+    '方向移动引导动画',
+    'spine.handMove.thumbnail',
+    'game_an2',
+  ),
 ];
 
 export function applySpinePreset(element: Element, preset: SpinePreset): Element {

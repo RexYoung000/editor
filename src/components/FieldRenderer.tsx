@@ -22,7 +22,7 @@ import { loadLocalFont } from '../utils/fontLoader';
 import LibraryBrowser, { LibraryErrorDialog, type SelectResult } from './LibraryBrowser';
 import { parseFiniteNumberDraft } from '../utils/propertyEditSession';
 import ThemeSwatches from './ThemeSwatches';
-import { pauseSpineAtFirstFrame, playSpineOnce } from '../utils/spinePreview';
+import { pauseSpineAtFirstFrame, playSpineOnce, resolveSpineAnimationIndex } from '../utils/spinePreview';
 
 function getVal(elements: Element[], key: string): unknown {
   if (elements.length === 0) return '';
@@ -280,9 +280,8 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
     if (el) {
       const obj = getObject(el.id);
       if (obj) {
-        const idx = animationList.indexOf(name);
         try {
-          pauseSpineAtFirstFrame(obj, idx >= 0 ? idx : 0);
+          pauseSpineAtFirstFrame(obj, resolveSpineAnimationIndex(props, name));
         } catch { /* ignore */ }
       }
     }
@@ -293,8 +292,7 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
     if (!el) return;
     const obj = getObject(el.id);
     if (!obj) return;
-    const idx = animationList.indexOf(animationName);
-    try { playSpineOnce(obj, idx >= 0 ? idx : 0); } catch { /* ignore */ }
+    try { playSpineOnce(obj, resolveSpineAnimationIndex(props, animationName)); } catch { /* ignore */ }
   };
 
   const skLabel = (url: string) => url.split('/').pop()?.replace(/\.sk$/i, '') ?? url;

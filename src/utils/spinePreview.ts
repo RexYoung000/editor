@@ -6,6 +6,28 @@ export interface SpinePreviewObject {
   _spinePaused?: boolean;
 }
 
+export function resolveSpineAnimationIndex(
+  props: Record<string, unknown>,
+  animationName: string,
+): number {
+  const url = typeof props.url === 'string' ? props.url : '';
+  const skFiles = Array.isArray(props._skFiles)
+    ? props._skFiles as Array<{ url?: unknown; animations?: unknown }>
+    : [];
+  const source = skFiles.find((file) => file.url === url);
+  const sourceAnimations = Array.isArray(source?.animations)
+    ? source.animations.filter((name): name is string => typeof name === 'string')
+    : [];
+  const sourceIndex = sourceAnimations.indexOf(animationName);
+  if (sourceIndex >= 0) return sourceIndex;
+
+  const visibleAnimations = Array.isArray(props._animationList)
+    ? props._animationList.filter((name): name is string => typeof name === 'string')
+    : [];
+  const visibleIndex = visibleAnimations.indexOf(animationName);
+  return visibleIndex >= 0 ? visibleIndex : 0;
+}
+
 export function pauseSpineAtFirstFrame(obj: SpinePreviewObject, animationIndex: number): void {
   obj.play(animationIndex, true, true);
   obj.paused();

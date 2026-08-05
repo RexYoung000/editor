@@ -328,6 +328,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'spine.handClick.sk', src: 'runtime/game/animation/hand-click/game.sk', exportPath: 'game/animation/hand-click/game.sk' },
   { id: 'spine.handClick.png', src: 'runtime/game/animation/hand-click/game.png', exportPath: 'game/animation/hand-click/game.png' },
   { id: 'spine.handClick.thumbnail', src: 'editor/spine-hand-click-thumb.png' },
+  { id: 'spine.handMove.thumbnail', src: 'editor/spine-hand-move-thumb.png' },
 
   // ─── 画笔组件资源 ───
   { id: 'newBrushSprite.drawBtn',   src: 'runtime/game/image/img/img_draw.png',     exportPath: 'game/image/img/img_draw.png' },
