@@ -1,10 +1,10 @@
-import { Undo, Redo, Languages, Download, FolderOpen, X } from 'lucide-react';
+import { Undo, Redo, Languages, UploadCloud, FolderOpen, X } from 'lucide-react';
 import { useEditorStore } from '../store/editorStore';
 import { exportProject } from '../utils/exportProject';
 import { compileBuild } from '../utils/compileBuild';
 import { showToast } from '../utils/toast';
 import { createProjectInDirectory, openProjectFromDirectory, writeBackToLocalFile, getCourseFilePath, getCourseDirPath, selectDirectory, openFolder, cleanupUnreferencedImages, collectImageReferences, saveProjectAs, ProjectSaveAsError } from '../utils/electronFs';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import FileMenu from './FileMenu';
 import CreateProjectDialog from './CreateProjectDialog';
 import SaveAsDialog from './SaveAsDialog';
@@ -19,6 +19,16 @@ import { collectInternalPageIssues, isInternalPagesWorkbenchReadonly } from '../
 import { requestPageThumbnailFlush } from '../utils/pageThumbnailSync';
 import { commitPendingPropertyEdits } from '../utils/propertyEditSession';
 import { formatCoursePathTail } from '../utils/coursePathDisplay';
+import PublishDialog from './PublishDialog';
+import {
+  contentDigestForScope,
+  projectNameForScope,
+  requiredPublishScopes,
+  type PreviewRecord,
+  type PublishResultRecord,
+  type PublishScope,
+} from '../utils/coursePublishing';
+import { loadPublishConfig } from '../utils/publishConfig';
 
 export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack?: () => void }) {
   const { language, setLanguage, t } = useI18n();
@@ -45,6 +55,17 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   const [syncConfig, setSyncConfig] = useState<SyncConfig>({ ip: '127.0.0.1', port: '9001', roomId: '10001' });
   const [resourceMissingItems, setResourceMissingItems] = useState<ResourceMissingItem[]>([]);
   const [resourceMissingContinue, setResourceMissingContinue] = useState<{ label: string; action: () => void } | null>(null);
+  const [showPublishDialog, setShowPublishDialog] = useState(false);
+  const [latestPublish, setLatestPublish] = useState<PublishResultRecord | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentCourse) return;
+    window.electronAPI.publishGetState(currentCourse.id).then((state) => {
+      if (!cancelled) setLatestPublish(state.lastPublish);
+    });
+    return () => { cancelled = true; };
+  }, [currentCourse]);
 
   const canUndo = !workbenchReadonly && historyIndex > 0;
   const canRedo = !workbenchReadonly && historyIndex < history.length - 1;
@@ -176,12 +197,12 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
   // previewMode: false=正课, true=预习关卡
   const runCompileBuildAndOpen = async (previewMode: boolean) => {
     commitPendingPropertyEdits();
-    if (!currentCourse) return;
+    if (!currentCourse) throw new Error('请先打开课件');
     assertInternalPagesReady('preview');
     requestPageThumbnailFlush();
     await writeBackToLocalFile(currentCourse.id, currentCourse);
     await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
-    await exportProject(currentCourse, { skipSvn: true });
+    await exportProject(currentCourse);
     showToast(t('compiling'), 'success');
     const result = await compileBuild(currentCourse);
     if (!result.ok || !result.outputDir) {
@@ -208,29 +229,35 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     const cnBase = tid ? `test_${tid}_${cid}` : `test_${cid}`;
     const cn = previewMode ? `${cnBase}_preview` : cnBase;
     window.open(`${srv}/preview-server/?course=${cn}&type=1&ct=1&rl=dev&sdk=full`, '_blank');
-  };
-
-  // 发布工程核心流程（不含资源检查，便于"继续发布工程"按钮跳过资源检查后调用）
-  const runPublishFlow = async () => {
-    commitPendingPropertyEdits();
-    if (!currentCourse || busy) return;
-    setBusy(true);
-    try {
-      assertInternalPagesReady('publish');
-      requestPageThumbnailFlush();
-      await writeBackToLocalFile(currentCourse.id, currentCourse);
-      await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
-      const result = await exportProject(currentCourse);
-      if (result.svnSubmitted) {
-        showToast('工程导出并提交 SVN 成功', 'success');
-      } else {
-        setPublishError('工程导出成功，但当前目录不是 SVN 目录，所以没有提交 SVN。\n\n如需正式发布，请将课件目录放到 SVN 工作副本中再重新发布。');
-      }
-    } catch (e) {
-      setPublishError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    const scope = previewMode
+      ? 'preview'
+      : requiredPublishScopes(currentCourse).find((item) => item !== 'preview') ?? 'lesson';
+    const projectName = projectNameForScope(scope);
+    const courseDir = getCourseDirPath(currentCourse.id);
+    if (!courseDir) throw new Error('未找到课件目录，请重新打开课件');
+    const digestResult = await window.electronAPI.publishHashDirectory(`${courseDir}/project/${currentCourse.id}/${projectName}`);
+    if (!digestResult.ok) throw new Error(digestResult.error);
+    const [publishConfig, publishState, courseDigest] = await Promise.all([
+      loadPublishConfig(),
+      window.electronAPI.publishGetState(currentCourse.id),
+      contentDigestForScope(currentCourse, scope),
+    ]);
+    const previewRecord: PreviewRecord = {
+      scope,
+      projectName,
+      directoryDigest: digestResult.digest,
+      courseDigest,
+      previewedAt: new Date().toISOString(),
+      editorVersion: __APP_VERSION__,
+      environmentVersion: publishConfig.environmentVersion,
+    };
+    const nextState = {
+      ...publishState,
+      latestPreviews: { ...publishState.latestPreviews, [scope]: previewRecord },
+    };
+    const saved = await window.electronAPI.publishSetState(currentCourse.id, nextState);
+    if (!saved.ok) throw new Error(saved.error);
+    return previewRecord;
   };
 
   // 预览核心流程（不含资源检查），previewMode 区分预习/正课
@@ -241,6 +268,16 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
       await runCompileBuildAndOpen(previewMode);
     } catch (e) {
       setPublishError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runPublishPreview = async (scope: PublishScope) => {
+    if (!currentCourse || busy) throw new Error('编辑器正在处理其他任务');
+    setBusy(true);
+    try {
+      return await runCompileBuildAndOpen(scope === 'preview');
     } finally {
       setBusy(false);
     }
@@ -344,17 +381,27 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
           disabled={!canPublish}
           onClick={async () => {
             if (!currentCourse || busy) return;
+            setResourceMissingContinue(null);
             if (!checkResourcesUploaded()) {
-              setResourceMissingContinue({ label: '继续发布工程', action: () => runPublishFlow() });
               return;
             }
-            await runPublishFlow();
+            try {
+              commitPendingPropertyEdits();
+              assertInternalPagesReady('publish');
+              requestPageThumbnailFlush();
+              await writeBackToLocalFile(currentCourse.id, currentCourse);
+              await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
+              setShowPublishDialog(true);
+            } catch (error) {
+              setPublishError((error as Error).message);
+            }
           }}
           className={`px-3 py-1.5 rounded flex items-center gap-2 text-sm ${canPublish ? 'bg-indigo-700 hover:bg-indigo-600 text-white' : 'bg-indigo-700/50 text-white/40 cursor-not-allowed'}`}
           title={t('publishProject')}
         >
-          <Download size={16} />
+          <UploadCloud size={16} />
           {t('publishProject')}
+          {latestPublish && <span className={`rounded px-1.5 py-0.5 text-[10px] ${latestPublish.status === 'success' ? 'bg-emerald-500/20 text-emerald-200' : latestPublish.status === 'notification-pending' || latestPublish.status === 'packaging-failed' ? 'bg-amber-500/20 text-amber-200' : 'bg-sky-500/20 text-sky-200'}`}>{latestPublish.status === 'success' ? '成功' : latestPublish.status === 'submitted' ? '已提交' : '待处理'}</span>}
         </button>
 
         <div className="flex items-center gap-1 ml-1 border-l border-slate-600 pl-2">
@@ -435,6 +482,14 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     )}
     {showSyncSettings && (
       <SyncSettings config={syncConfig} onSave={setSyncConfig} onClose={() => setShowSyncSettings(false)} />
+    )}
+    {showPublishDialog && currentCourse && (
+      <PublishDialog
+        course={currentCourse}
+        onPreview={runPublishPreview}
+        onClose={() => setShowPublishDialog(false)}
+        onStatusChange={setLatestPublish}
+      />
     )}
     {publishError && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setPublishError(null)}>

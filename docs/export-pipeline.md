@@ -1,6 +1,6 @@
 # 导出流程
 
-forge 编辑器的导出流程由 Toolbar 上两个按钮触发，**前段共用** `exportProject`，**尾段在 SVN/编译两条岔路上分开**。本文档先按按钮拉两条主线讲尾段差异，再展开共用核心。
+forge 编辑器的导出流程由 Toolbar 上发布与预览入口触发，**工程生成共用** `exportProject`，之后分别进入发布窗口或本地编译预览。本文档先按入口说明两条主线，再展开共用核心。
 
 ---
 
@@ -8,8 +8,8 @@ forge 编辑器的导出流程由 Toolbar 上两个按钮触发，**前段共用
 
 | 触发 | 调用 | 关键差异 |
 |---|---|---|
-| **发布工程** ([Toolbar.tsx:222-242](../src/components/Toolbar.tsx#L222-L242)) | `exportProject(course)` | 走完整 SVN 提交 + WebSocket 通知打包机 |
-| **预览** ([Toolbar.tsx:251-274](../src/components/Toolbar.tsx#L251-L274)) | `exportProject(course, { skipSvn: true })` → `compileBuild` → `zipDirectory` → `POST /api/upload-compiled-zip` → `window.open` | 跳过 SVN，本地 Electron 编译后上传 Vite，浏览器开 GameLoader |
+| **发布工程** ([Toolbar.tsx](../src/components/Toolbar.tsx)) | 打开统一发布窗口；确认预览后由窗口调用 `exportProject(course, { cleanBuildOutput: true })` | 生成、校验、SVN 提交，再通知打包机 |
+| **预览** ([Toolbar.tsx](../src/components/Toolbar.tsx)) | `exportProject(course)` → `compileBuild` → `zipDirectory` → `POST /api/upload-compiled-zip` → `window.open` | 本地 Electron 编译后上传 Vite，浏览器开 GameLoader，不接触 SVN |
 
 两条流程都先跑**前置检查（资源就绪检查）**，再跑导出共用部分（`writeBackToLocalFile` 写回课件 JSON → `cleanupUnreferencedImages` 清未引用图 → 实际导出）。
 
@@ -44,16 +44,12 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 ## 二、发布工程
 
-`runPublishFlow` 直接调 `exportProject(currentCourse)`，跑完整流水线：
+老师发布不再要求当前可编辑课件本身位于 SVN 工作副本。工具栏先打开统一发布窗口，由窗口完成最新预览确认、SVN 目标确认、工程生成、课件级工作副本同步、commit 和现有打包机通知。完整产品规则、身份保护和失败恢复见 [老师课件发布流程](course-publishing.md)。
 
-1. **共用核心**：清理 `project/<courseId>/` + `esBuild/` → `bakeTextElements` → `collectResources` → `enrichAnimAudioResources` → `collectImageSizes` → 按 `course.kind` 走 normal 或 homework 分支（详见三、四）→ 有预习关卡则调 `exportPreviewProject`
-2. **SVN 提交**（`options.skipSvn` 为 false 才走，[exportProject.ts:1431-1464](../src/utils/exportProject.ts#L1431-L1464)）：
-   - `eApi.isSvnDirectory(dirPath)` 判断课件目录是否在 SVN 仓库下，不是直接 return
-   - `eApi.svnCommit(dirPath)` 弹 SVN 提交对话框，用户取消即抛错中止发布
-   - `eApi.svnHasUnversioned(dirPath)` 检查是否还有未加入版本控制的文件，有就要求重新发布
-   - `eApi.getSubdirs(${dirPath}/project/${course.id})` 拿到所有子工程目录（`Game1_LT` / `Game1_HW` / `Game1_PREVIEW`），对每个走 `eApi.svnGetUrl()` 拿 SVN URL
-   - 有预习时把 `Game1_PREVIEW` 的 URL **unshift 到首位**（打包机约定首位是项目根路径）
-   - `loadWsConfig()` + `sendCourseToServer(course.id, svnPaths, ...)` 通过 WebSocket 通知后端打包机
+1. **共用核心**：`exportProject(course)` 清理 `project/<courseId>/`，烘焙编辑内容，收集资源并生成当前课型需要的完整 `Game1_*` 工程；正式发布额外传入 `{ cleanBuildOutput: true }` 清理旧编译产物，复习课也进入同一工程生成入口。
+2. **预览一致性**：预览后按范围记录完整工程目录指纹；正式发布重新生成并逐项比对，避免确认后发布了不同内容。
+3. **SVN 发布**：Electron 发布服务只把身份文件和完整 `Game1_*` 同步到老师确认的最终课件目录，取得 revision 后返回工程 SVN URL；普通课件存在预习时 `Game1_PREVIEW` 仍位于 `devSVNPaths` 首位。
+4. **打包通知**：渲染进程通过现有 `integrationRequest` 发送工程 URL。请求成功发送即显示“发布已提交”，后续可获得的文本反馈继续更新为成功或明确失败。
 
 ---
 
@@ -61,7 +57,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 入口 [Toolbar.tsx:124-157](../src/components/Toolbar.tsx#L124-L157) 的 `runCompileBuildAndOpen(previewMode)`：
 
-1. **`exportProject(course, { skipSvn: true })`** ← 跑核心导出但跳过 SVN（导出完直接 return，不动 SVN/WebSocket）
+1. **`exportProject(course)`** ← 只生成完整工程，不动 SVN 或 WebSocket
 2. **`compileBuild(course)`** Electron IPC：调 `layaair2-cmd` + `esbuild` 把 sdk_baiya 工程编译成 `bin/`，产出包含 `index.html` 的可运行目录
    - 实现细节参见 [docs/electron-packaging.md](electron-packaging.md)（pnpm 符号链接 / `ELECTRON_RUN_AS_NODE` / 轮询 `fileconfig.json` 等坑）
 3. **`window.electronAPI.zipDirectory(outputDir)`** Electron 把编译产物打成 zip Buffer（dev 服务器约定 300MB 上限）
@@ -271,7 +267,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
    - 普通 page 的 `res` 与正式工程保持固定子节点资源边界一致：同时收集 `elementMeta.exportChildren` 和键盘预设 children，保证输入框底图与键盘皮肤对应图集都进入预加载清单
    - 内置音效中 wrong 文件名是 **`wrong.mp3`** 而非主流程的 `wowo.mp3`
    - 也有 `onClickSound → btn_click.wav` / `playRightSound → right.mp3` / `playWrongSound → wrong.mp3` 的条件加入
-7. **不做 SVN/WebSocket**：发布尾段统一在 `exportProject` 中处理
+7. **不做 SVN/WebSocket**：`exportProject` 只生成工程；发布窗口统一处理 SVN 与打包机通知
 8. **模板 zip**：从 `${serverUrl}/builtin/layaProjectModel/Game1_PREVIEW.zip` 单独拉
 
 内部页面编译、页面动作生成、关系校验和页面资源遍历由正式工程与预习工程共享，不能再各自维护一份规则。正课、作业、专题测评和预习区均支持 `internal-pages-v1`；复习课和视频关卡继续走原流程。

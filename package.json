@@ -95,6 +95,10 @@
       {
         "from": "node_modules/.pnpm/iconv-lite@0.5.2/node_modules/safer-buffer",
         "to": "node_modules/safer-buffer"
+      },
+      {
+        "from": "electron/vendor/svn-cli/windows-x64",
+        "to": "svn-cli"
       }
     ],
     "afterPack": "./electron/afterPack.cjs"

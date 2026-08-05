@@ -4,7 +4,6 @@ import { getKeyboardChildren } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath, lookupBuiltinBySrcPath, assetSrc, assetExport } from '../elements/builtinAssets';
 import { renderTextToImage, type RenderTextProps } from './textToImage';
 import { getCourseDirPath } from './electronFs';
-import { sendCourseToServer, loadWsConfig } from './websocket';
 import JSZip from 'jszip';
 import { getApiBaseUrl } from './apiConfig';
 import { collectImageSizes, isLargeImage } from './imageSize';
@@ -2755,7 +2754,7 @@ export async function extractZipFromServer(
 
 // ─── 主入口 ───
 
-export async function exportProject(course: Course, options: { skipSvn?: boolean } = {}): Promise<{ svnSubmitted: boolean }> {
+export async function exportProject(course: Course, options: { cleanBuildOutput?: boolean } = {}): Promise<void> {
   const dirPath = getCourseDirPath(course.id);
   if (!dirPath) throw new Error('未找到课件目录，请先保存课件');
 
@@ -2789,7 +2788,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
     throw new Error(`自定义答案键盘配置尚未完成，不能预览或发布：\n\n${details}${more}`);
   }
 
-  if (!options.skipSvn) {
+  if (options.cleanBuildOutput) {
     const blockingIssues = collectInternalPageIssues(course).filter((issue) => issue.severity === 'blocking');
     if (blockingIssues.length > 0) {
       const details = blockingIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
@@ -2817,7 +2816,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
   await eApi.removeDir(projectParent);
 
   // 发布工程时同步清理 esBuild/ 目录（编译产物），避免与新工程不一致
-  if (!options.skipSvn) {
+  if (options.cleanBuildOutput) {
     await eApi.removeDir(`${dirPath}/esBuild`);
   }
 
@@ -2868,7 +2867,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
       }
     }
 
-    return { svnSubmitted: false };
+    return;
   } else if (isFlat) {
     // ─── 作业/专题测评编辑器工程 ───
     const scenes = artifacts.scenes;
@@ -3054,40 +3053,4 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
   }
   } // end of else (normal mode)
 
-  if (options.skipSvn) return { svnSubmitted: false };
-
-  // ─── SVN 提交流程 ───
-  const isSvn = await eApi.isSvnDirectory(dirPath);
-  if (!isSvn) return { svnSubmitted: false };
-
-  const commitResult = await eApi.svnCommit(dirPath);
-  if (!commitResult.ok) throw new Error('已取消提交，发布中止');
-
-  const hasUnversioned = await eApi.svnHasUnversioned(dirPath);
-  if (hasUnversioned) throw new Error('检测到有还未提交的文件，请重新发布');
-
-  // 获取 project/<courseId>/ 下所有子目录的 SVN URL（对应 Game1_LT 等）
-  // 有预习关卡时，Game1_PREVIEW 排在第一位（打包机首位是项目根路径）
-  const projectDir = `${dirPath}/project/${course.id}`;
-  const subdirs = await eApi.getSubdirs(projectDir);
-  const svnPaths: string[] = [];
-  const hasPreview = (course.previewStages?.length ?? 0) > 0;
-  for (const subdir of subdirs) {
-    const url = await eApi.svnGetUrl(subdir);
-    if (url) {
-      // 预习路径优先插入首位
-      if (hasPreview && url.includes('Game1_PREVIEW')) {
-        svnPaths.unshift(url);
-      } else {
-        svnPaths.push(url);
-      }
-    }
-  }
-
-  if (svnPaths.length === 0) throw new Error('未找到 SVN 路径，请确保工程已提交到 SVN');
-
-  await loadWsConfig();
-  await sendCourseToServer(course.id, svnPaths, (msg) => console.log('[发布进度]', msg));
-
-  return { svnSubmitted: true };
 }

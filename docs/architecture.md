@@ -122,6 +122,8 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 
 详细过程见 [export-pipeline.md](./export-pipeline.md)。
 
+老师正式发布使用独立的课件级 SVN 工作区，不要求可编辑课件目录本身位于 SVN。预览确认、发布身份、冲突保护、失败恢复和打包反馈语义见 [老师课件发布流程](./course-publishing.md)。
+
 ## 模板与资源
 
 项目存在两类模板：
@@ -155,6 +157,7 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 - [测试与验收](./testing.md)
 - [开发服务器](./dev-server.md)
 - [导出流程](./export-pipeline.md)
+- [老师课件发布流程](./course-publishing.md)
 - [Electron 打包](./electron-packaging.md)
 - [自定义模板](./custom-templates.md)
 - [版本管理](./versioning.md)

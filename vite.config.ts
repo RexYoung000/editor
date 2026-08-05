@@ -27,6 +27,23 @@ const requireFromConfig = createRequire(path.resolve(process.cwd(), 'vite.config
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024; // 100MB
 const MAX_COMPILED_ZIP_SIZE = 300 * 1024 * 1024; // 300MB
 
+function publishEnvironmentVersion(): string {
+  const files = [
+    'public/builtin/layaProjectModel/Game1_LT.zip',
+    'public/builtin/layaProjectModel/Game1_PREVIEW.zip',
+    'public/builtin/layaProjectModel/Game1_HW.zip',
+    'public/builtin/layaProjectModel/Game1_REVIEW.zip',
+    'public/builtin/runtime/game.zip',
+  ];
+  const hash = crypto.createHash('sha256');
+  for (const relativePath of files) {
+    const absolutePath = path.resolve(process.cwd(), relativePath);
+    hash.update(relativePath);
+    hash.update(fs.readFileSync(absolutePath));
+  }
+  return hash.digest('hex');
+}
+
 // 资源库根目录（绝对路径，dev server 启动时一次性算出）
 const LIBRARY_ROOT = path.resolve(process.cwd(), 'public/builtin/library');
 const QUICK_PRESET_ROOT = path.join(LIBRARY_ROOT, '通用素材', '控件');
@@ -509,6 +526,20 @@ function forgePlugin(): Plugin {
         res.end(JSON.stringify({
           wsServer: process.env.WS_SERVER || 'ws://10.200.15.62:8187', // 打包机 WebSocket 接口地址
           wsHost: process.env.WS_HOST || '10.200.15.41:7800',          // 打包机拉取课件的目标服务器地址
+        }));
+      });
+      // GET /api/publish-config — 返回按课型维护的只读 SVN 基础地址
+      server.middlewares.use('/api/publish-config', (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+          environmentVersion: publishEnvironmentVersion(),
+          svn: {
+            normal: process.env.SVN_BASE_NORMAL || 'svn://192.168.74.9/product/trunk/course/Math',
+            homework: process.env.SVN_BASE_HOMEWORK || process.env.SVN_BASE_NORMAL || 'svn://192.168.74.9/product/trunk/course/Math',
+            sEvaluation: process.env.SVN_BASE_EVALUATION || 'svn://192.168.74.9/product/trunk/course/Math/SPECIAL_EVALUATION/YZ',
+            review: process.env.SVN_BASE_REVIEW || 'svn://192.168.74.9/product/trunk/course/Math/REVIEW/YZ',
+          },
         }));
       });
       // POST /api/upload-compiled-zip — Electron 编译发布产物 zip 上传

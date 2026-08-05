@@ -12,6 +12,24 @@ const {
   saveCourseAsTransaction,
   serializeSaveAsError,
 } = require('./courseSaveAs.cjs');
+const {
+  cancelPreparedPublish,
+  commitPreparedPublish,
+  configureSvnRuntime,
+  getCoursePublishState,
+  hashDirectory,
+  inspectPublishTarget,
+  inspectSvnCapability,
+  preparePublish,
+  serializePublishError,
+  setCoursePublishState,
+} = require('./coursePublish.cjs');
+
+configureSvnRuntime({
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  resourcesPath: process.resourcesPath,
+});
 
 // 本地定义工具函数（避免引入跨模块依赖）
 function lessonSuffix(kind) {
@@ -42,6 +60,7 @@ let mainWindow;
 let inputWindowRef = null; // 服务器输入窗口引用，用于延迟销毁
 let currentServerUrl = ''; // 供 IPC get-server-url 读取
 const courseDirMap = new Map(); // courseId → courseDir，供 forge-local:// 协议查询
+const preparedPublishes = new Map();
 
 // ─── 服务器连接配置 ───
 
@@ -581,30 +600,6 @@ ipcMain.handle('get-subdirs', (_event, dirPath) => {
   }
 });
 
-ipcMain.handle('svn-commit', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('TortoiseProc.exe', ['/command:commit', `/path:${dirPath}`, '/closeonend:2'], (err) => {
-      resolve({ ok: !err || err.code === 0 });
-    });
-  });
-});
-
-ipcMain.handle('svn-get-url', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('svn', ['info', '--show-item', 'url', dirPath], (err, stdout) => {
-      resolve(err ? null : stdout.trim());
-    });
-  });
-});
-
-ipcMain.handle('svn-has-unversioned', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('svn', ['status', dirPath], (err, stdout) => {
-      resolve(!err && stdout.trim().length > 0);
-    });
-  });
-});
-
 ipcMain.handle('is-svn-directory', (_event, dirPath) => {
   let current = dirPath;
   while (current) {
@@ -614,6 +609,118 @@ ipcMain.handle('is-svn-directory', (_event, dirPath) => {
     current = parent;
   }
   return false;
+});
+
+ipcMain.handle('publish-hash-directory', (_event, dirPath) => {
+  try {
+    return { ok: true, digest: hashDirectory(dirPath) };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-get-state', (_event, courseId) => {
+  return getCoursePublishState(app.getPath('userData'), String(courseId));
+});
+
+ipcMain.handle('publish-set-state', (_event, courseId, state) => {
+  try {
+    const serialized = JSON.stringify(state);
+    if (serialized.length > 1024 * 1024) throw new Error('发布状态数据过大');
+    return { ok: true, state: setCoursePublishState(app.getPath('userData'), String(courseId), JSON.parse(serialized)) };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-check-svn', async () => {
+  try {
+    return { ok: true, capability: await inspectSvnCapability() };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-inspect-target', async (_event, params) => {
+  try {
+    const courseDir = courseDirMap.get(String(params.courseId));
+    if (!courseDir) throw new Error('未找到当前课件目录，请重新打开课件');
+    return {
+      ok: true,
+      inspection: await inspectPublishTarget({
+        ...params,
+        courseFolderName: path.basename(courseDir),
+        sourceCourseDir: courseDir,
+        workspacePath: params.workspacePath,
+      }),
+    };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-prepare-svn', async (_event, params) => {
+  try {
+    const courseId = String(params.courseId);
+    const courseDir = courseDirMap.get(courseId);
+    if (!courseDir) throw new Error('未找到当前课件目录，请重新打开课件');
+    const courseFolderName = path.basename(courseDir);
+    const workspacePath = params.workspacePath;
+    if (!workspacePath) throw new Error('请选择一个已经拉取到电脑上的本地 SVN 文件夹');
+    const prepared = await preparePublish({
+      ...params,
+      courseId,
+      courseFolderName,
+      sourceRoot: path.join(courseDir, 'project', courseId),
+      sourceCourseDir: courseDir,
+      workspacePath,
+      workspaceKind: 'existing',
+    });
+    const token = crypto.randomUUID();
+    preparedPublishes.set(token, prepared);
+    return {
+      ok: true,
+      token,
+      summary: {
+        finalUrl: prepared.inspection.finalUrl,
+        identity: prepared.inspection.identity,
+        targetExists: prepared.inspection.targetExists,
+        publishExists: prepared.inspection.publishExists,
+        transferMode: prepared.inspection.transferMode,
+        missingParentSegments: prepared.inspection.missingParentSegments,
+        workspacePath: prepared.workspacePath,
+        projectDigests: prepared.projectDigests,
+        projectTreeDigest: prepared.sourceTreeDigest,
+        changes: prepared.changes.map((entry) => ({ code: entry.code, path: entry.path })),
+      },
+    };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-commit-svn', async (_event, token, message) => {
+  const prepared = preparedPublishes.get(String(token));
+  if (!prepared) return { ok: false, code: 'PREPARED_PUBLISH_MISSING', error: '待提交任务已失效，请重新准备发布' };
+  try {
+    const result = await commitPreparedPublish(prepared, String(message));
+    preparedPublishes.delete(String(token));
+    return { ok: true, result };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-cancel-prepared', async (_event, token) => {
+  const prepared = preparedPublishes.get(String(token));
+  if (!prepared) return { ok: true };
+  try {
+    await cancelPreparedPublish(prepared);
+    preparedPublishes.delete(String(token));
+    return { ok: true };
+  } catch (error) {
+    return serializePublishError(error);
+  }
 });
 
 // ─── forge-local:// 自定义协议 ───
