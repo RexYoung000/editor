@@ -118,6 +118,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'keyboard.math.yellow.delActive',      src: 'runtime/game/textKeyboard/yellow/clear-active.png',   exportPath: 'game/textKeyboard/yellow/clear-active.png' },
   { id: 'keyboard.math.yellow.fractionNormal', src: 'runtime/game/mathKeyboard/yellow/fraction-normal.png', exportPath: 'game/mathKeyboard/yellow/fraction-normal.png' },
   { id: 'keyboard.math.yellow.fractionActive', src: 'runtime/game/mathKeyboard/yellow/fraction-active.png', exportPath: 'game/mathKeyboard/yellow/fraction-active.png' },
+  { id: 'keyboard.math.yellow.percent',        src: 'runtime/game/mathKeyboard/yellow/percent.png',         exportPath: 'game/mathKeyboard/yellow/percent.png' },
   { id: 'keyboard.math.yellow.arrow',          src: 'runtime/game/textKeyboard/yellow/arrow.png',          exportPath: 'game/textKeyboard/yellow/arrow.png' },
   { id: 'keyboard.math.blue.bg',             src: 'runtime/game/textKeyboard/blue/bg.png',             exportPath: 'game/textKeyboard/blue/bg.png' },
   { id: 'keyboard.math.blue.keyNormal',      src: 'runtime/game/textKeyboard/blue/key-normal.png',     exportPath: 'game/textKeyboard/blue/key-normal.png' },
@@ -130,6 +131,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'keyboard.math.blue.delActive',      src: 'runtime/game/textKeyboard/blue/clear-active.png',   exportPath: 'game/textKeyboard/blue/clear-active.png' },
   { id: 'keyboard.math.blue.fractionNormal', src: 'runtime/game/mathKeyboard/blue/fraction-normal.png', exportPath: 'game/mathKeyboard/blue/fraction-normal.png' },
   { id: 'keyboard.math.blue.fractionActive', src: 'runtime/game/mathKeyboard/blue/fraction-active.png', exportPath: 'game/mathKeyboard/blue/fraction-active.png' },
+  { id: 'keyboard.math.blue.percent',        src: 'runtime/game/mathKeyboard/blue/percent.png',         exportPath: 'game/mathKeyboard/blue/percent.png' },
   { id: 'keyboard.math.blue.arrow',          src: 'runtime/game/textKeyboard/blue/arrow.png',          exportPath: 'game/textKeyboard/blue/arrow.png' },
   { id: 'keyboard.math.green.bg',             src: 'runtime/game/textKeyboard/green/bg.png',             exportPath: 'game/textKeyboard/green/bg.png' },
   { id: 'keyboard.math.green.keyNormal',      src: 'runtime/game/textKeyboard/green/key-normal.png',     exportPath: 'game/textKeyboard/green/key-normal.png' },
@@ -142,6 +144,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'keyboard.math.green.delActive',      src: 'runtime/game/textKeyboard/green/clear-active.png',   exportPath: 'game/textKeyboard/green/clear-active.png' },
   { id: 'keyboard.math.green.fractionNormal', src: 'runtime/game/mathKeyboard/green/fraction-normal.png', exportPath: 'game/mathKeyboard/green/fraction-normal.png' },
   { id: 'keyboard.math.green.fractionActive', src: 'runtime/game/mathKeyboard/green/fraction-active.png', exportPath: 'game/mathKeyboard/green/fraction-active.png' },
+  { id: 'keyboard.math.green.percent',        src: 'runtime/game/mathKeyboard/green/percent.png',         exportPath: 'game/mathKeyboard/green/percent.png' },
   { id: 'keyboard.math.green.arrow',          src: 'runtime/game/textKeyboard/green/arrow.png',          exportPath: 'game/textKeyboard/green/arrow.png' },
 
   // 自定义答案键盘：三套同结构主题；文字在编辑器内烘焙为 PNG
@@ -320,6 +323,12 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'feedback.CH.yes.png', src: 'runtime/game/animation/zx_yes/zx_yes.png', exportPath: 'game/animation/zx_yes/zx_yes.png' },
   { id: 'feedback.CH.no.sk', src: 'runtime/game/animation/zx_no/zx_no.sk', exportPath: 'game/animation/zx_no/zx_no.sk' },
   { id: 'feedback.CH.no.png', src: 'runtime/game/animation/zx_no/zx_no.png', exportPath: 'game/animation/zx_no/zx_no.png' },
+
+  // ─── Spine 预设 ───
+  { id: 'spine.handClick.sk', src: 'runtime/game/animation/hand-click/game.sk', exportPath: 'game/animation/hand-click/game.sk' },
+  { id: 'spine.handClick.png', src: 'runtime/game/animation/hand-click/game.png', exportPath: 'game/animation/hand-click/game.png' },
+  { id: 'spine.handClick.thumbnail', src: 'editor/spine-hand-click-thumb.png' },
+  { id: 'spine.handMove.thumbnail', src: 'editor/spine-hand-move-thumb.png' },
 
   // ─── 画笔组件资源 ───
   { id: 'newBrushSprite.drawBtn',   src: 'runtime/game/image/img/img_draw.png',     exportPath: 'game/image/img/img_draw.png' },

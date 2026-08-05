@@ -954,6 +954,7 @@ export function getMathKeyboardThemeAssets(theme: MathKeyboardTheme, editor = fa
     delActive: resolve(`${prefix}.delActive`),
     fractionNormal: resolve(`${prefix}.fractionNormal`),
     fractionActive: resolve(`${prefix}.fractionActive`),
+    percent: resolve(`${prefix}.percent`),
     arrow: resolve(`${prefix}.arrow`),
   };
 }
@@ -1010,14 +1011,17 @@ const mathKey = (
   const assets = getMathKeyboardThemeAssets(theme, editor);
   const isFraction = key.output === '<_>';
   const isDelete = key.output === 'del';
+  const isPercent = key.output === '%';
   const childForState = (active: boolean): ExportChild[] => {
-    if (isDelete || isFraction) {
+    if (isDelete || isFraction || isPercent) {
       return [{
         type: 'Image',
         props: {
-          skin: isDelete
-            ? (active ? assets.delActive : assets.delNormal)
-            : (active ? assets.fractionActive : assets.fractionNormal),
+          skin: isPercent
+            ? assets.percent
+            : isDelete
+              ? (active ? assets.delActive : assets.delNormal)
+              : (active ? assets.fractionActive : assets.fractionNormal),
           centerX: 0,
           centerY: active ? 2 : 0,
         },
