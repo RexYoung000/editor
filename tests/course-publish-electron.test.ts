@@ -49,6 +49,7 @@ const publish = require(join(process.cwd(), 'electron/coursePublish.cjs')) as {
     remainingSegments: string[];
     localTargetPath: string;
   };
+  localPathRelation: (sourcePath: string, targetPath: string, platform?: string) => string;
   parseCommittedRevision: (xml: string) => number;
   parseSvnStatus: (value: string) => Array<{ code: string; path: string }>;
   preparePublish: (params: Record<string, unknown>, dependencies: { runner: SvnRunner }) => Promise<PreparedPublish>;
@@ -206,6 +207,64 @@ test('目标检查只读取本地工作副本并识别现有课件身份和 revi
   }
 });
 
+test('课件目录等于最终 SVN 目录时识别为原地首次发布', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-publish-in-place-inspect-'));
+  const courseDir = join(root, 'V9', 'S6', 'course');
+  try {
+    await mkdir(join(root, '.svn'));
+    await mkdir(join(courseDir, 'images'), { recursive: true });
+    await mkdir(join(courseDir, 'project', 'course', 'Game1_LT'), { recursive: true });
+    await writeFile(join(courseDir, 'course.json'), '{"id":"course","stages":[]}');
+    const runner: SvnRunner = async (args) => {
+      const item = args[2];
+      const localPath = args[3];
+      if (args[0] === 'info' && item === 'url' && localPath === root) return { stdout: 'svn://server/base\n', stderr: '' };
+      if (args[0] === 'info' && item === 'repos-root-url' && localPath === root) return { stdout: 'svn://server\n', stderr: '' };
+      if (args[0] === 'info' && item === 'kind' && localPath === courseDir) return { stdout: 'dir\n', stderr: '' };
+      if (args[0] === 'info' && item === 'url' && localPath === courseDir) return { stdout: 'svn://server/base/V9/S6/course\n', stderr: '' };
+      if (args[0] === 'info' && item === 'last-changed-revision') return { stdout: '12\n', stderr: '' };
+      throw svnError('SVN_COMMAND_FAILED', `unexpected: ${args.join(' ')}`);
+    };
+    const inspection = await publish.inspectPublishTarget({
+      courseId: 'course', courseKind: 'normal', courseFolderName: 'course',
+      baseUrl: 'svn://server/base', parentPath: 'V9/S6', projectNames: ['Game1_LT'],
+      workspacePath: root, sourceCourseDir: courseDir,
+    }, runner);
+    assert.equal(inspection.transferMode, 'in-place');
+    assert.equal(inspection.identity, 'new');
+    assert.equal(inspection.publishExists, false);
+    assert.equal(inspection.localFolder.localTargetPath, courseDir);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('课件目录与最终 SVN 目录互相嵌套时拒绝发布', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-publish-overlap-'));
+  const courseDir = join(root, 'V9', 'S6', 'course', 'source');
+  try {
+    await mkdir(courseDir, { recursive: true });
+    await mkdir(join(root, '.svn'));
+    const runner: SvnRunner = async (args) => {
+      const item = args[2];
+      const localPath = args[3];
+      if (args[0] === 'info' && item === 'url' && localPath === root) return { stdout: 'svn://server/base\n', stderr: '' };
+      if (args[0] === 'info' && item === 'repos-root-url' && localPath === root) return { stdout: 'svn://server\n', stderr: '' };
+      throw svnError('SVN_COMMAND_FAILED', `unexpected: ${args.join(' ')}`);
+    };
+    await assert.rejects(
+      publish.inspectPublishTarget({
+        courseId: 'course', courseKind: 'normal', courseFolderName: 'course',
+        baseUrl: 'svn://server/base', parentPath: 'V9/S6', projectNames: ['Game1_LT'],
+        workspacePath: root, sourceCourseDir: courseDir,
+      }, runner),
+      (error: unknown) => (error as { code?: string }).code === 'SOURCE_TARGET_OVERLAP',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('准备首次发布只创建本地待提交内容，取消后恢复且全程不访问远程 SVN', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forge-prepare-local-'));
   const workspace = join(root, 'workspace');
@@ -235,6 +294,69 @@ test('准备首次发布只创建本地待提交内容，取消后恢复且全�
     assert.equal(await readFile(join(workspace, 'unrelated.txt'), 'utf8'), 'keep');
     await assert.rejects(access(join(workspace, 'V9')));
     assertNoRemoteSvnCalls(calls);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('原地发布只同步发布文件并保留课件源文件', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-prepare-in-place-'));
+  const courseDir = join(root, 'V9', 'S6', 'course');
+  const sourceRoot = join(courseDir, 'project', 'course');
+  const calls: string[][] = [];
+  let statusCount = 0;
+  let cancelled = false;
+  try {
+    await mkdir(join(root, '.svn'), { recursive: true });
+    await mkdir(join(courseDir, 'images'), { recursive: true });
+    await mkdir(join(sourceRoot, 'Game1_LT'), { recursive: true });
+    await writeFile(join(courseDir, 'course.json'), '{"id":"course","stages":[]}');
+    await writeFile(join(courseDir, 'images', 'source.png'), 'source');
+    await writeFile(join(sourceRoot, 'Game1_LT', 'config.json'), '{"lesson":1}');
+    const runner: SvnRunner = async (args) => {
+      calls.push(args);
+      const item = args[2];
+      const localPath = args[3];
+      if (args[0] === 'info' && item === 'url' && localPath === root) return { stdout: 'svn://server/base\n', stderr: '' };
+      if (args[0] === 'info' && item === 'repos-root-url' && localPath === root) return { stdout: 'svn://server\n', stderr: '' };
+      if (args[0] === 'info' && item === 'kind' && localPath === courseDir) return { stdout: 'dir\n', stderr: '' };
+      if (args[0] === 'info' && item === 'url' && localPath === courseDir) return { stdout: 'svn://server/base/V9/S6/course\n', stderr: '' };
+      if (args[0] === 'info' && item === 'last-changed-revision') return { stdout: '12\n', stderr: '' };
+      if (args[0] === 'revert') {
+        cancelled = true;
+        await rm(args[2], { recursive: true, force: true });
+        return { stdout: '', stderr: '' };
+      }
+      if (args[0] === 'status') {
+        statusCount += 1;
+        const sourceChanges = `M       ${join(courseDir, 'course.json')}\n?       ${join(courseDir, 'images', 'source.png')}\n`;
+        if (cancelled) return { stdout: sourceChanges, stderr: '' };
+        if (statusCount === 1) return { stdout: sourceChanges, stderr: '' };
+        return { stdout: `${sourceChanges}A       ${join(courseDir, 'forge-publish.json')}\nA       ${join(courseDir, 'Game1_LT')}\n`, stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    };
+    const prepared = await publish.preparePublish({
+      courseId: 'course', courseKind: 'normal', courseFolderName: 'course',
+      baseUrl: 'svn://server/base', parentPath: 'V9/S6', projectNames: ['Game1_LT'],
+      sourceRoot, sourceCourseDir: courseDir, workspacePath: root, workspaceKind: 'existing',
+      editorVersion: '1.4.1', environmentVersion: 'env-1', contentDigest: 'content',
+    }, { runner });
+    assert.equal(prepared.inspection.transferMode, 'in-place');
+    assert.equal(prepared.inspection.publishExists, false);
+    assert.deepEqual(prepared.changes.map((entry) => entry.path), [
+      join(courseDir, 'forge-publish.json'),
+      join(courseDir, 'Game1_LT'),
+    ]);
+    assert.equal(await readFile(join(courseDir, 'course.json'), 'utf8'), '{"id":"course","stages":[]}');
+    assert.equal(await readFile(join(courseDir, 'images', 'source.png'), 'utf8'), 'source');
+    assert.equal(await readFile(join(courseDir, 'Game1_LT', 'config.json'), 'utf8'), '{"lesson":1}');
+    assertNoRemoteSvnCalls(calls);
+    await publish.cancelPreparedPublish(prepared, runner);
+    await assert.rejects(access(join(courseDir, 'Game1_LT')));
+    await assert.rejects(access(join(courseDir, 'forge-publish.json')));
+    assert.equal(await readFile(join(courseDir, 'course.json'), 'utf8'), '{"id":"course","stages":[]}');
+    assert.equal(await readFile(join(courseDir, 'images', 'source.png'), 'utf8'), 'source');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -310,6 +432,39 @@ test('提交成功后从本地身份文件和工程目录读取实际 revision �
     assert.equal(result.projectUrls.Game1_LT, 'svn://server/base/V9/S6/course/Game1_LT');
     assert.equal(result.contentDigest, 'content');
     assertNoRemoteSvnCalls(calls);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('原地提交后忽略课件源文件修改，只核验发布文件范围', async () => {
+  const { root, prepared } = await createPreparedCommitFixture();
+  const sourcePath = join(prepared.targetPath, 'course.json');
+  let receivedCommitPaths: string[] = [];
+  try {
+    await writeFile(sourcePath, '{"id":"course","stages":[]}');
+    const result = await publish.commitPreparedPublish({
+      ...prepared,
+      inspection: { ...prepared.inspection, transferMode: 'in-place' },
+      rootNeedsCommit: false,
+      commitPaths: [join(prepared.targetPath, 'forge-publish.json'), join(prepared.targetPath, 'Game1_LT')],
+    }, '发布课件', {
+      committer: async (params) => { receivedCommitPaths = params.commitPaths; },
+      runner: async (args) => {
+        if (args[0] === 'status') return { stdout: `M       ${sourcePath}\n`, stderr: '' };
+        const item = args[2];
+        const localPath = args[3];
+        if (item === 'url' && localPath === prepared.targetPath) return { stdout: 'svn://server/base/V9/S6/course\n', stderr: '' };
+        if (item === 'last-changed-revision') return { stdout: '4312\n', stderr: '' };
+        if (item === 'url' && localPath === join(prepared.targetPath, 'Game1_LT')) {
+          return { stdout: 'svn://server/base/V9/S6/course/Game1_LT\n', stderr: '' };
+        }
+        throw svnError('SVN_COMMAND_FAILED', `unexpected: ${args.join(' ')}`);
+      },
+    });
+    assert.deepEqual(receivedCommitPaths, [join(prepared.targetPath, 'forge-publish.json'), join(prepared.targetPath, 'Game1_LT')]);
+    assert.equal(result.revision, 4312);
+    assert.equal(result.projectUrls.Game1_LT, 'svn://server/base/V9/S6/course/Game1_LT');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

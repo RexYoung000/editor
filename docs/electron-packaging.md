@@ -132,6 +132,7 @@ electron-builder 的 `app-builder.exe` 默认会尝试从网络（GitHub release
 
 - 定位顺序为 `FORGE_TORTOISE_PROC`（开发与测试注入）、系统 `PATH`、TortoiseSVN 注册表安装目录和标准安装路径。
 - Windows 正式包找不到 `TortoiseProc.exe` 时阻止发布，不回退到内置 CLI commit。
-- TortoiseSVN 关闭后必须再次用内置 CLI 检查当前课件范围；仍有修改、取消或提交失败均不通知打包机。
+- 同步发布向 TortoiseSVN 传入课件目录范围；课件源目录与最终目录相同时，原地发布只传入 `forge-publish.json` 和受管 `Game1_*`，不得让源课件修改混入提交窗口。
+- TortoiseSVN 关闭后必须再次用内置 CLI 检查本次受管发布范围；仍有修改、取消或提交失败均不通知打包机。原地发布中的课件 JSON、`images/`、`project/` 等源文件状态不参与该判断。
 - 只有本地状态干净，并能从身份文件与各工程目录读取实际 revision、URL 时，才把这些真实结果交给现有 `integrationRequest`。
 - 自动测试可以注入假的提交执行器；真实 Windows 验收必须使用公司 TortoiseSVN、公司 SASL 账号和实际网络完成。

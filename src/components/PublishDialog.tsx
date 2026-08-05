@@ -374,7 +374,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
       const scopeNames = scopes.map(scopeLabel).join('、');
       const commitResult = await window.electronAPI.publishCommitSvn(
         preparedToken,
-        `${preparedSummary.targetExists ? '更新' : '发布'}课件 ${course.id}（${scopeNames}）`,
+        `${preparedSummary.publishExists ? '更新' : '发布'}课件 ${course.id}（${scopeNames}）`,
       );
       if (!commitResult.ok) throw new Error(publishErrorMessage(commitResult));
       const projectUrls = orderProjectUrls(projectNames, commitResult.result.projectUrls);
@@ -576,8 +576,10 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                 </div>
                 {inspection && (
                   <div className={`border-l-2 px-4 py-3 ${inspection.identity === 'conflict' ? 'border-red-500 bg-red-950/20' : 'border-emerald-500 bg-emerald-950/15'}`}>
-                    <div className="flex items-center gap-2 text-sm font-medium text-white"><ShieldCheck size={16} />{inspection.targetExists ? '更新已有课件' : '首次发布'}</div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-white"><ShieldCheck size={16} />{inspection.publishExists ? '更新已有课件' : '首次发布'}</div>
                     <div className="mt-2 space-y-1 text-xs text-slate-400">
+                      {inspection.transferMode === 'in-place' && <p className="text-emerald-300">已识别当前课件就在最终 SVN 目录，将原地发布，不创建第二份课件。</p>}
+                      {inspection.transferMode === 'copy' && <p>将从当前课件生成发布工程并同步到最终 SVN 目录。</p>}
                       {inspection.identity === 'matching' && <p>本地发布身份与当前课件一致，当前记录为 r{inspection.revision}。</p>}
                       {inspection.identity === 'historical' && <p>该目录没有 forge 身份记录，现有工程：{inspection.existingProjects.join('、')}。</p>}
                       {inspection.identity === 'conflict' && <p className="text-red-300">同名目录身份或工程结构不一致，不能覆盖。</p>}
@@ -604,7 +606,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                   <div>
                     <div className="flex items-start gap-3 border-l-2 border-emerald-500 bg-emerald-950/15 px-4 py-3"><CheckCircle2 size={18} className="mt-0.5 text-emerald-400" /><div><div className="text-sm font-medium text-white">待提交内容已准备</div><div className="mt-1 text-xs text-slate-400">服务器尚未修改；下一步会打开 TortoiseSVN，由你确认提交内容。</div></div></div>
                     <div className="mt-6 grid grid-cols-[96px_minmax(0,1fr)] gap-y-3 border-y border-slate-700 py-5 text-sm sm:grid-cols-[130px_minmax(0,1fr)]">
-                      <span className="text-slate-500">发布方式</span><span>{preparedSummary.targetExists ? '更新发布' : '首次发布'}</span>
+                      <span className="text-slate-500">发布方式</span><span>{preparedSummary.transferMode === 'in-place' ? '原地发布' : '同步发布'} · {preparedSummary.publishExists ? '更新发布' : '首次发布'}</span>
                       <span className="text-slate-500">最终地址</span><span className="break-all text-sky-300">{preparedSummary.finalUrl}</span>
                       <span className="text-slate-500">本地 SVN 位置</span><span className="break-all text-slate-300">{preparedSummary.workspacePath}</span>
                       <span className="text-slate-500">变更数量</span><span>{preparedSummary.changes.length} 项</span>

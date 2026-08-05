@@ -20,6 +20,9 @@ export interface PublishTargetInspection {
   finalUrl: string;
   courseFolderName: string;
   targetExists: boolean;
+  publishExists: boolean;
+  targetVersioned: boolean;
+  transferMode: 'in-place' | 'copy';
   parentExists: boolean;
   nearestExistingUrl: string;
   missingParentSegments: string[];
@@ -152,6 +155,8 @@ export interface ElectronAPI {
       finalUrl: string;
       identity: PublishTargetInspection['identity'];
       targetExists: boolean;
+      publishExists: boolean;
+      transferMode: PublishTargetInspection['transferMode'];
       missingParentSegments: string[];
       workspacePath: string;
       projectDigests: Partial<Record<PublishProjectName, string>>;

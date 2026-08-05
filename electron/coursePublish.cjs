@@ -5,6 +5,7 @@ const { execFile } = require('child_process');
 
 const MANIFEST_FILE = 'forge-publish.json';
 const PROJECT_NAMES = new Set(['Game1_LT', 'Game1_PREVIEW', 'Game1_HW', 'Game1_REVIEW']);
+const MANAGED_PUBLISH_NAMES = new Set([MANIFEST_FILE, ...PROJECT_NAMES]);
 let svnRuntime = {
   command: process.env.FORGE_SVN_BINARY || 'svn',
   bundled: false,
@@ -226,6 +227,28 @@ function listLocalProjects(targetPath) {
     .sort();
 }
 
+function comparableLocalPath(inputPath, platform = svnRuntime.platform) {
+  let resolved = path.resolve(String(inputPath ?? ''));
+  try {
+    resolved = fs.realpathSync.native?.(resolved) ?? fs.realpathSync(resolved);
+  } catch {
+    // 尚未创建的目标继续使用规范化绝对路径比较。
+  }
+  const normalized = path.normalize(resolved).replace(/[\\/]+$/, '');
+  return platform === 'win32' ? normalized.toLocaleLowerCase() : normalized;
+}
+
+function localPathRelation(sourcePath, targetPath, platform = svnRuntime.platform) {
+  const source = comparableLocalPath(sourcePath, platform);
+  const target = comparableLocalPath(targetPath, platform);
+  if (source === target) return 'same';
+  const targetFromSource = path.relative(source, target);
+  if (targetFromSource && !targetFromSource.startsWith('..') && !path.isAbsolute(targetFromSource)) return 'target-inside-source';
+  const sourceFromTarget = path.relative(target, source);
+  if (sourceFromTarget && !sourceFromTarget.startsWith('..') && !path.isAbsolute(sourceFromTarget)) return 'source-inside-target';
+  return 'separate';
+}
+
 async function localInfoItem(item, localPath, runner = runSvn, optional = false) {
   try {
     const { stdout } = await runner(['info', '--show-item', item, localPath]);
@@ -250,6 +273,17 @@ async function inspectPublishTarget(params, runner = runSvn) {
     finalUrl: target.finalUrl,
   }, runner);
   const parentSegments = localFolder.remainingSegments.slice(0, -1);
+  const sourceTargetRelation = params.sourceCourseDir
+    ? localPathRelation(params.sourceCourseDir, localFolder.localTargetPath)
+    : 'separate';
+  if (sourceTargetRelation !== 'same' && sourceTargetRelation !== 'separate') {
+    throw new CoursePublishError(
+      'SOURCE_TARGET_OVERLAP',
+      '当前课件目录与最终发布目录互相包含但不完全相同，请调整业务父目录或本地 SVN 文件夹',
+      { sourceCourseDir: params.sourceCourseDir, localTargetPath: localFolder.localTargetPath },
+    );
+  }
+  const transferMode = sourceTargetRelation === 'same' ? 'in-place' : 'copy';
   let existingParentCount = 0;
   let currentPath = localFolder.localPath;
   for (const segment of parentSegments) {
@@ -282,8 +316,11 @@ async function inspectPublishTarget(params, runner = runSvn) {
     ? await localInfoItem('last-changed-revision', path.join(localFolder.localTargetPath, manifest ? MANIFEST_FILE : ''), runner, true)
     : null;
   const revision = Number.parseInt(revisionText || '', 10) || 0;
+  const publishExists = Boolean(manifest || existingProjects.length > 0);
   let identity = 'new';
-  if (targetExists && !targetVersioned) {
+  if (transferMode === 'in-place' && targetExists && !publishExists) {
+    identity = 'new';
+  } else if (targetExists && !targetVersioned) {
     identity = 'conflict';
   } else if (targetExists && manifest) {
     identity = manifest.courseId === params.courseId
@@ -299,6 +336,9 @@ async function inspectPublishTarget(params, runner = runSvn) {
   return {
     ...target,
     targetExists,
+    publishExists,
+    targetVersioned,
+    transferMode,
     parentExists: existingParentCount === parentSegments.length,
     nearestExistingUrl: appendUrlSegments(localFolder.localUrl, parentSegments.slice(0, existingParentCount)),
     missingParentSegments: parentSegments.slice(existingParentCount),
@@ -346,6 +386,26 @@ function hashDirectory(rootPath, options = {}) {
   return hash.digest('hex');
 }
 
+function hashPublishProjects(rootPath, projectNames) {
+  const hash = crypto.createHash('sha256');
+  const entries = [];
+  for (const projectName of [...projectNames].sort()) {
+    const projectPath = path.join(rootPath, projectName);
+    if (!fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory()) continue;
+    entries.push({ kind: 'dir', relativePath: projectName });
+    walkFiles(projectPath, projectName, entries);
+  }
+  for (const entry of entries) {
+    hash.update(entry.kind);
+    hash.update('\0');
+    hash.update(entry.relativePath.replace(/\\/g, '/'));
+    hash.update('\0');
+    if (entry.kind === 'file') hash.update(fs.readFileSync(entry.filePath));
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
 function assertProjects(sourceRoot, projectNames) {
   const actual = fs.readdirSync(sourceRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && PROJECT_NAMES.has(entry.name))
@@ -376,12 +436,42 @@ function clearPublishTarget(targetPath) {
   }
 }
 
+function clearManagedPublishTarget(targetPath) {
+  for (const entryName of MANAGED_PUBLISH_NAMES) {
+    fs.rmSync(path.join(targetPath, entryName), { recursive: true, force: true });
+  }
+}
+
 function parseSvnStatus(stdout) {
   return String(stdout).split(/\r?\n/).filter(Boolean).map((line) => ({
     code: line[0],
     path: line.slice(8).trim(),
     line,
   }));
+}
+
+function managedStatusEntries(stdout, targetPath, includeRoot = false) {
+  const root = path.resolve(targetPath);
+  return parseSvnStatus(stdout).filter((entry) => {
+    const absolute = path.resolve(entry.path);
+    const relative = path.relative(root, absolute);
+    if (!relative) return includeRoot;
+    if (relative.startsWith('..') || path.isAbsolute(relative)) return false;
+    return MANAGED_PUBLISH_NAMES.has(relative.split(path.sep)[0]);
+  });
+}
+
+function managedCommitPaths(targetPath, changes, includeRoot = false) {
+  if (includeRoot) return [targetPath];
+  const paths = new Set();
+  const root = path.resolve(targetPath);
+  for (const entry of changes) {
+    const relative = path.relative(root, path.resolve(entry.path));
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+    const topLevel = relative.split(path.sep)[0];
+    if (MANAGED_PUBLISH_NAMES.has(topLevel)) paths.add(path.join(targetPath, topLevel));
+  }
+  return [...paths].sort();
 }
 
 async function markSvnChanges(targetPath, runner = runSvn) {
@@ -396,6 +486,24 @@ async function markSvnChanges(targetPath, runner = runSvn) {
     throw new CoursePublishError('UNVERSIONED_FILES', '待提交工程仍有未纳管文件，已停止发布', unversioned.map((entry) => entry.path));
   }
   return parseSvnStatus(finalStatus.stdout);
+}
+
+async function markManagedSvnChanges(targetPath, projectNames, runner = runSvn, rootNeedsCommit = false) {
+  if (rootNeedsCommit) await runner(['add', '--depth', 'empty', targetPath]);
+  for (const entryName of [MANIFEST_FILE, ...projectNames]) {
+    await runner(['add', '--parents', '--force', path.join(targetPath, entryName)]);
+  }
+  const status = await runner(['status', targetPath]);
+  for (const entry of managedStatusEntries(status.stdout, targetPath, rootNeedsCommit)) {
+    if (entry.code === '!' && entry.path) await runner(['delete', '--force', entry.path]);
+  }
+  const finalStatus = await runner(['status', targetPath]);
+  const changes = managedStatusEntries(finalStatus.stdout, targetPath, rootNeedsCommit);
+  const unversioned = changes.filter((entry) => entry.code === '?');
+  if (unversioned.length > 0) {
+    throw new CoursePublishError('UNVERSIONED_FILES', '待提交工程仍有未纳管文件，已停止发布', unversioned.map((entry) => entry.path));
+  }
+  return changes;
 }
 
 function relativeUrlSegments(ancestorUrl, targetUrl) {
@@ -480,6 +588,23 @@ async function ensureWorkspace(params, inspection, runner = runSvn) {
     baseUrl: inspection.baseUrl,
     finalUrl: inspection.finalUrl,
   }, runner);
+  if (inspection.transferMode === 'in-place') {
+    const status = await runner(['status', mapping.localTargetPath]);
+    const managedChanges = managedStatusEntries(status.stdout, mapping.localTargetPath);
+    if (managedChanges.length > 0) {
+      throw new CoursePublishError(
+        'LOCAL_SVN_FOLDER_HAS_CHANGES',
+        '当前课件的发布文件有尚未提交的本地修改，请先通过公司 SVN 客户端处理后重试',
+        managedChanges.map((entry) => entry.path),
+      );
+    }
+    return {
+      workspacePath,
+      targetPath: mapping.localTargetPath,
+      createdRootPath: null,
+      rootNeedsCommit: !inspection.targetVersioned,
+    };
+  }
   const initialSegments = mapping.remainingSegments;
   let deepestExistingPath = workspacePath;
   for (const segment of initialSegments) {
@@ -516,10 +641,42 @@ async function ensureWorkspace(params, inspection, runner = runSvn) {
     }
     throw error;
   }
-  return { workspacePath, targetPath: currentPath, createdRootPath };
+  return { workspacePath, targetPath: currentPath, createdRootPath, rootNeedsCommit: false };
 }
 
 async function restorePreparedTarget(prepared, runner = runSvn) {
+  if (prepared.inspection.transferMode === 'in-place') {
+    if (prepared.rootNeedsCommit) {
+      try {
+        await runner(['revert', '--recursive', prepared.targetPath]);
+      } catch {
+        // 新增课件目录尚未形成完整 SVN 节点时继续清理受管发布文件。
+      }
+      clearManagedPublishTarget(prepared.targetPath);
+      const remaining = await runner(['status', prepared.targetPath]);
+      if (managedStatusEntries(remaining.stdout, prepared.targetPath).length > 0) {
+        throw new CoursePublishError('LOCAL_RESTORE_INCOMPLETE', '取消准备后未能完整恢复本地发布文件，请先通过公司 SVN 客户端处理');
+      }
+      return;
+    } else {
+      for (const entryName of MANAGED_PUBLISH_NAMES) {
+        try {
+          await runner(['revert', '--recursive', path.join(prepared.targetPath, entryName)]);
+        } catch {
+          // 未纳管或本次未出现的发布文件不需要恢复。
+        }
+      }
+    }
+    const { stdout } = await runner(['status', prepared.targetPath]);
+    for (const entry of managedStatusEntries(stdout, prepared.targetPath)) {
+      if (entry.code === '?' && entry.path) fs.rmSync(entry.path, { recursive: true, force: true });
+    }
+    const remaining = await runner(['status', prepared.targetPath]);
+    if (managedStatusEntries(remaining.stdout, prepared.targetPath).length > 0) {
+      throw new CoursePublishError('LOCAL_RESTORE_INCOMPLETE', '取消准备后未能完整恢复本地发布文件，请先通过公司 SVN 客户端处理');
+    }
+    return;
+  }
   const restorePath = prepared.createdRootPath ?? prepared.targetPath;
   try {
     await runner(['revert', '--recursive', restorePath]);
@@ -561,13 +718,17 @@ async function preparePublish(params, dependencies = {}) {
   const preparedBase = { ...workspace, inspection };
   try {
     if (inspection.targetExists && inspection.manifest?.projectTreeDigest) {
-      const existingDigest = hashDirectory(workspace.targetPath, { excludedNames: [MANIFEST_FILE] });
+      const existingProjectNames = inspection.manifest.projects.map((project) => project.name);
+      const existingDigest = inspection.transferMode === 'in-place'
+        ? hashPublishProjects(workspace.targetPath, existingProjectNames)
+        : hashDirectory(workspace.targetPath, { excludedNames: [MANIFEST_FILE] });
       if (existingDigest !== inspection.manifest.projectTreeDigest) {
         throw new CoursePublishError('LOCAL_PUBLISH_MODIFIED', '本地 SVN 课件内容与上次发布记录不一致，请先通过公司 SVN 客户端处理');
       }
     }
 
-    clearPublishTarget(workspace.targetPath);
+    if (inspection.transferMode === 'in-place') clearManagedPublishTarget(workspace.targetPath);
+    else clearPublishTarget(workspace.targetPath);
     for (const projectName of params.projectNames) {
       copyTree(path.join(params.sourceRoot, projectName), path.join(workspace.targetPath, projectName));
     }
@@ -585,17 +746,26 @@ async function preparePublish(params, dependencies = {}) {
       projects: params.projectNames.map((name) => ({ name, digest: projectDigests[name] })),
     };
     fs.writeFileSync(path.join(workspace.targetPath, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-    const copiedDigest = hashDirectory(workspace.targetPath, { excludedNames: [MANIFEST_FILE] });
+    const copiedDigest = inspection.transferMode === 'in-place'
+      ? hashPublishProjects(workspace.targetPath, params.projectNames)
+      : hashDirectory(workspace.targetPath, { excludedNames: [MANIFEST_FILE] });
     if (copiedDigest !== sourceTreeDigest) {
       throw new CoursePublishError('SYNC_INCOMPLETE', '生成工程与待提交工程不完整一致，已停止发布');
     }
-    const changes = await markSvnChanges(workspace.targetPath, runner);
+    const changes = inspection.transferMode === 'in-place'
+      ? await markManagedSvnChanges(workspace.targetPath, params.projectNames, runner, workspace.rootNeedsCommit)
+      : await markSvnChanges(workspace.targetPath, runner);
+    const commitPaths = inspection.transferMode === 'in-place'
+      ? managedCommitPaths(workspace.targetPath, changes, workspace.rootNeedsCommit)
+      : [workspace.createdRootPath ?? workspace.targetPath];
     return {
       inspection,
       workspacePath: workspace.workspacePath,
       targetPath: workspace.targetPath,
       workspaceKind: 'existing',
       createdRootPath: workspace.createdRootPath,
+      rootNeedsCommit: workspace.rootNeedsCommit,
+      commitPaths,
       manifest,
       changes,
       projectDigests,
@@ -614,7 +784,7 @@ function parseCommittedRevision(xml) {
   return revision;
 }
 
-async function launchTortoiseCommit({ commitPath, message, tortoiseLocator = findTortoiseProc }) {
+async function launchTortoiseCommit({ commitPaths, message, tortoiseLocator = findTortoiseProc }) {
   const tortoisePath = await tortoiseLocator();
   if (!tortoisePath) {
     throw new CoursePublishError('TORTOISE_NOT_FOUND', '未找到公司 TortoiseSVN 客户端，请先安装或修复后再发布');
@@ -622,7 +792,7 @@ async function launchTortoiseCommit({ commitPath, message, tortoiseLocator = fin
   try {
     await runRawFile(tortoisePath, [
       '/command:commit',
-      `/path:${commitPath}`,
+      `/path:${commitPaths.join('*')}`,
       `/logmsg:${message}`,
       '/closeonend:0',
     ], { timeout: 10 * 60 * 1000 });
@@ -635,12 +805,12 @@ async function launchTortoiseCommit({ commitPath, message, tortoiseLocator = fin
   }
 }
 
-async function defaultCommitter({ commitPath, message, runner }) {
+async function defaultCommitter({ commitPath, commitPaths, message, runner }) {
   if (svnRuntime.platform === 'win32') {
-    await launchTortoiseCommit({ commitPath, message });
+    await launchTortoiseCommit({ commitPaths, message });
     return;
   }
-  await runner(['commit', '--xml', '-m', message, commitPath], { timeout: 10 * 60 * 1000 });
+  await runner(['commit', '--xml', '-m', message, ...commitPaths], { timeout: 10 * 60 * 1000 });
 }
 
 function assertCommittedManifest(actual, expected) {
@@ -658,13 +828,17 @@ async function commitPreparedPublish(prepared, message, dependencies = {}) {
   const runner = normalizedDependencies.runner ?? runSvn;
   const committer = normalizedDependencies.committer ?? defaultCommitter;
   const commitPath = prepared.createdRootPath ?? prepared.targetPath;
-  await committer({ commitPath, message, runner, prepared });
+  const commitPaths = prepared.commitPaths?.length ? prepared.commitPaths : [commitPath];
+  await committer({ commitPath, commitPaths, message, runner, prepared });
   const status = await runner(['status', commitPath]);
-  if (status.stdout.trim()) {
+  const remainingChanges = prepared.inspection.transferMode === 'in-place'
+    ? managedStatusEntries(status.stdout, prepared.targetPath, prepared.rootNeedsCommit)
+    : parseSvnStatus(status.stdout);
+  if (remainingChanges.length > 0) {
     throw new CoursePublishError(
       'TORTOISE_COMMIT_INCOMPLETE',
       'TortoiseSVN 提交已取消或未包含全部课件文件，未通知打包机',
-      parseSvnStatus(status.stdout).map((entry) => entry.path),
+      remainingChanges.map((entry) => entry.path),
     );
   }
 
@@ -757,6 +931,7 @@ module.exports = {
   configureSvnRuntime,
   getCoursePublishState,
   hashDirectory,
+  hashPublishProjects,
   inspectLocalSvnFolder,
   inspectPublishTarget,
   inspectSvnCapability,
@@ -764,6 +939,8 @@ module.exports = {
   findTortoiseProc,
   launchTortoiseCommit,
   mapLocalSvnTarget,
+  localPathRelation,
+  managedStatusEntries,
   normalizeRelativePath,
   parseCommittedRevision,
   parseSvnStatus,

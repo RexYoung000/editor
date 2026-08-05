@@ -650,6 +650,7 @@ ipcMain.handle('publish-inspect-target', async (_event, params) => {
       inspection: await inspectPublishTarget({
         ...params,
         courseFolderName: path.basename(courseDir),
+        sourceCourseDir: courseDir,
         workspacePath: params.workspacePath,
       }),
     };
@@ -671,6 +672,7 @@ ipcMain.handle('publish-prepare-svn', async (_event, params) => {
       courseId,
       courseFolderName,
       sourceRoot: path.join(courseDir, 'project', courseId),
+      sourceCourseDir: courseDir,
       workspacePath,
       workspaceKind: 'existing',
     });
@@ -683,6 +685,8 @@ ipcMain.handle('publish-prepare-svn', async (_event, params) => {
         finalUrl: prepared.inspection.finalUrl,
         identity: prepared.inspection.identity,
         targetExists: prepared.inspection.targetExists,
+        publishExists: prepared.inspection.publishExists,
+        transferMode: prepared.inspection.transferMode,
         missingParentSegments: prepared.inspection.missingParentSegments,
         workspacePath: prepared.workspacePath,
         projectDigests: prepared.projectDigests,
