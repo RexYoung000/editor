@@ -86,6 +86,13 @@ function configureSvnRuntime({ isPackaged, platform, resourcesPath }) {
   return { ...svnRuntime };
 }
 
+function hashText(value) {
+  if (typeof value !== 'string') {
+    throw new CoursePublishError('INVALID_HASH_TEXT', '课件内容摘要只能处理文本');
+  }
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
 function runRawFile(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     execFile(command, args, {
@@ -931,6 +938,7 @@ module.exports = {
   configureSvnRuntime,
   getCoursePublishState,
   hashDirectory,
+  hashText,
   hashPublishProjects,
   inspectLocalSvnFolder,
   inspectPublishTarget,

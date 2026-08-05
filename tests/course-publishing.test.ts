@@ -11,6 +11,7 @@ import {
   previewRecordInvalidReason,
   projectNamesForCourse,
   requiredPublishScopes,
+  sha256Text,
   stableStringify,
   type CoursePublishState,
 } from '../src/utils/coursePublishing';
@@ -30,6 +31,33 @@ test('不同课型只要求确认实际发布的完整工程', () => {
   assert.deepEqual(projectNamesForCourse(course('homework')), ['Game1_HW']);
   assert.deepEqual(projectNamesForCourse(course('sEvaluation')), ['Game1_HW']);
   assert.deepEqual(projectNamesForCourse(course('review')), ['Game1_REVIEW']);
+});
+
+test('课件文本摘要只通过 Electron 本地桥接计算', async () => {
+  const values: string[] = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      electronAPI: {
+        publishHashText: async (value: string) => {
+          values.push(value);
+          return { ok: true, digest: 'electron-sha256' };
+        },
+      },
+    },
+  });
+
+  assert.equal(await sha256Text('课件内容'), 'electron-sha256');
+  assert.deepEqual(values, ['课件内容']);
+});
+
+test('旧客户端缺少本地摘要能力时提示升级而不是暴露函数错误', async () => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { electronAPI: {} },
+  });
+
+  await assert.rejects(sha256Text('课件内容'), /请安装最新版/);
 });
 
 test('预习与正课确认按各自工程指纹独立失效', () => {
