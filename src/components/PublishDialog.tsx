@@ -230,7 +230,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
       setError(capability.error);
       return;
     }
-    setBusyLabel('正在检查 SVN 目标');
+    setBusyLabel('正在检查本地发布位置');
     setError(null);
     setInspection(null);
     try {
@@ -368,7 +368,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
   const handleCommit = async () => {
     if (!preparedToken || !preparedSummary) return;
     setCommitInFlight(true);
-    setBusyLabel('正在提交 SVN，暂时不能取消');
+    setBusyLabel('正在等待 TortoiseSVN 提交');
     setError(null);
     try {
       const scopeNames = scopes.map(scopeLabel).join('、');
@@ -493,7 +493,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
               <h2 className="text-base font-semibold text-white">{PUBLISH_STEPS[currentStepIndex]?.label}</h2>
               <p className="mt-0.5 truncate text-xs text-slate-500" title={folderName}>{folderName}</p>
             </div>
-            <button onClick={handleDialogClose} disabled={commitInFlight} className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white disabled:opacity-30" title={commitInFlight ? 'SVN 提交完成后才能关闭' : '关闭'}>
+            <button onClick={handleDialogClose} disabled={commitInFlight} className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white disabled:opacity-30" title={commitInFlight ? '请先在 TortoiseSVN 中完成或取消提交' : '关闭'}>
               <X size={18} />
             </button>
           </header>
@@ -518,7 +518,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                     const candidate = latestPreview(scope);
                     const valid = isConfirmationValid(scope);
                     const invalidReason = previewInvalidReason(scope);
-                    const canConfirm = !invalidReason;
+                    const canConfirm = valid || !invalidReason;
                     return (
                       <section key={scope} className="grid grid-cols-1 items-center gap-3 py-5 sm:grid-cols-[1fr_auto] sm:gap-5">
                         <div className="min-w-0">
@@ -571,14 +571,14 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                   <button onClick={async () => { const selected = await selectDirectory(); if (selected) { setWorkspaceSelection({ path: selected, kind: 'existing' }); setInspection(null); setTargetConfirmed(false); setError(null); } }} className="shrink-0 self-end rounded bg-slate-700 px-3 py-2 text-sm text-slate-200 hover:bg-slate-600">选择本地 SVN 文件夹</button>
                 </div>
                 <div className={`flex items-center justify-between gap-3 border-l-2 px-4 py-3 text-xs ${svnCapability?.ok ? 'border-emerald-500 bg-emerald-950/15 text-emerald-200' : svnCapability && !svnCapability.ok ? 'border-red-500 bg-red-950/20 text-red-200' : 'border-slate-600 bg-slate-950 text-slate-400'}`}>
-                  <span>{svnCapability?.ok ? `SVN 发布组件已就绪（${svnCapability.capability.version}）` : svnCapability && !svnCapability.ok ? svnCapability.error : '正在检查 SVN 发布组件'}</span>
+                  <span>{svnCapability?.ok ? `本地 SVN 工具已就绪；提交时将打开 TortoiseSVN（CLI ${svnCapability.capability.version}）` : svnCapability && !svnCapability.ok ? svnCapability.error : '正在检查 SVN 发布组件'}</span>
                   {svnCapability && !svnCapability.ok && <button onClick={async () => { setSvnCapability(null); setSvnCapability(await window.electronAPI.publishCheckSvn()); }} className="shrink-0 rounded border border-current/30 px-2 py-1 hover:bg-white/5">重新检测</button>}
                 </div>
                 {inspection && (
                   <div className={`border-l-2 px-4 py-3 ${inspection.identity === 'conflict' ? 'border-red-500 bg-red-950/20' : 'border-emerald-500 bg-emerald-950/15'}`}>
                     <div className="flex items-center gap-2 text-sm font-medium text-white"><ShieldCheck size={16} />{inspection.targetExists ? '更新已有课件' : '首次发布'}</div>
                     <div className="mt-2 space-y-1 text-xs text-slate-400">
-                      {inspection.identity === 'matching' && <p>发布身份与当前课件一致，远端 revision 为 r{inspection.revision}。</p>}
+                      {inspection.identity === 'matching' && <p>本地发布身份与当前课件一致，当前记录为 r{inspection.revision}。</p>}
                       {inspection.identity === 'historical' && <p>该目录没有 forge 身份记录，现有工程：{inspection.existingProjects.join('、')}。</p>}
                       {inspection.identity === 'conflict' && <p className="text-red-300">同名目录身份或工程结构不一致，不能覆盖。</p>}
                       {inspection.missingParentSegments.length > 0 && <p className="text-amber-300">将创建目录：{inspection.missingParentSegments.join(' / ')}</p>}
@@ -602,7 +602,7 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
                   <div className="flex min-h-64 flex-col items-center justify-center text-center"><LoaderCircle size={28} className="animate-spin text-sky-400" /><p className="mt-4 text-sm text-slate-300">正在生成完整工程并同步到本地 SVN 文件夹</p></div>
                 ) : (
                   <div>
-                    <div className="flex items-start gap-3 border-l-2 border-emerald-500 bg-emerald-950/15 px-4 py-3"><CheckCircle2 size={18} className="mt-0.5 text-emerald-400" /><div><div className="text-sm font-medium text-white">待提交内容已准备</div><div className="mt-1 text-xs text-slate-400">远端尚未修改，确认后才会 commit。</div></div></div>
+                    <div className="flex items-start gap-3 border-l-2 border-emerald-500 bg-emerald-950/15 px-4 py-3"><CheckCircle2 size={18} className="mt-0.5 text-emerald-400" /><div><div className="text-sm font-medium text-white">待提交内容已准备</div><div className="mt-1 text-xs text-slate-400">服务器尚未修改；下一步会打开 TortoiseSVN，由你确认提交内容。</div></div></div>
                     <div className="mt-6 grid grid-cols-[96px_minmax(0,1fr)] gap-y-3 border-y border-slate-700 py-5 text-sm sm:grid-cols-[130px_minmax(0,1fr)]">
                       <span className="text-slate-500">发布方式</span><span>{preparedSummary.targetExists ? '更新发布' : '首次发布'}</span>
                       <span className="text-slate-500">最终地址</span><span className="break-all text-sky-300">{preparedSummary.finalUrl}</span>
@@ -641,10 +641,10 @@ export default function PublishDialog({ course, onPreview, onClose, onStatusChan
               {activeStep === 'preview' && <button onClick={onClose} className="rounded bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700">取消</button>}
               {activeStep === 'preview' && <button disabled={!allConfirmed} onClick={() => { setActiveStep('target'); setProgress(movePublishProgress(progress, 'target')); }} className="flex items-center gap-1 rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-35">下一步<ChevronRight size={15} /></button>}
               {activeStep === 'target' && <button onClick={() => { setActiveStep('preview'); setProgress(movePublishProgress(progress, 'preview')); }} className="rounded bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700">上一步</button>}
-              {activeStep === 'target' && !inspection && <button onClick={handleInspectTarget} disabled={!normalizedTarget.ok || !workspaceSelection?.path || svnCapability?.ok !== true || Boolean(busyLabel)} className="rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-35">检查地址匹配</button>}
+              {activeStep === 'target' && !inspection && <button onClick={handleInspectTarget} disabled={!normalizedTarget.ok || !workspaceSelection?.path || svnCapability?.ok !== true || Boolean(busyLabel)} className="rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-35">检查本地发布位置</button>}
               {activeStep === 'target' && inspection && <button onClick={handlePrepare} disabled={!targetConfirmed || inspection.identity === 'conflict' || (inspection.identity === 'historical' && !adoptHistorical) || Boolean(busyLabel)} className="rounded bg-sky-600 px-4 py-2 text-sm text-white hover:bg-sky-500 disabled:opacity-35">准备发布</button>}
               {activeStep === 'generate' && preparedSummary && <button onClick={handleCancelPrepared} disabled={Boolean(busyLabel)} className="rounded bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 disabled:opacity-35">取消准备</button>}
-              {activeStep === 'generate' && preparedSummary && <button onClick={handleCommit} disabled={Boolean(busyLabel)} className="rounded bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-500 disabled:opacity-35">确认提交 SVN</button>}
+              {activeStep === 'generate' && preparedSummary && <button onClick={handleCommit} disabled={Boolean(busyLabel)} className="rounded bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-500 disabled:opacity-35">打开 TortoiseSVN 提交</button>}
               {activeStep === 'result' && publishState.pendingNotification && <button onClick={handleRetryNotification} disabled={Boolean(busyLabel)} className="flex items-center gap-2 rounded bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-500 disabled:opacity-35"><RotateCcw size={15} />仅重试通知</button>}
               {activeStep === 'result' && <button onClick={onClose} className="rounded bg-slate-700 px-4 py-2 text-sm text-white hover:bg-slate-600">关闭</button>}
             </div>

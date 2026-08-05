@@ -600,30 +600,6 @@ ipcMain.handle('get-subdirs', (_event, dirPath) => {
   }
 });
 
-ipcMain.handle('svn-commit', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('TortoiseProc.exe', ['/command:commit', `/path:${dirPath}`, '/closeonend:2'], (err) => {
-      resolve({ ok: !err || err.code === 0 });
-    });
-  });
-});
-
-ipcMain.handle('svn-get-url', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('svn', ['info', '--show-item', 'url', dirPath], (err, stdout) => {
-      resolve(err ? null : stdout.trim());
-    });
-  });
-});
-
-ipcMain.handle('svn-has-unversioned', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('svn', ['status', dirPath], (err, stdout) => {
-      resolve(!err && stdout.trim().length > 0);
-    });
-  });
-});
-
 ipcMain.handle('is-svn-directory', (_event, dirPath) => {
   let current = dirPath;
   while (current) {

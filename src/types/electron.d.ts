@@ -117,16 +117,13 @@ export interface ElectronAPI {
   removeDir: (dirPath: string) => Promise<boolean>;
   renameFile: (oldPath: string, newPath: string) => Promise<boolean>;
   isSvnDirectory: (dirPath: string) => Promise<boolean>;
-  svnCommit: (dirPath: string) => Promise<{ ok: boolean }>;
-  svnGetUrl: (dirPath: string) => Promise<string | null>;
-  svnHasUnversioned: (dirPath: string) => Promise<boolean>;
   getSubdirs: (dirPath: string) => Promise<string[]>;
   publishHashDirectory: (dirPath: string) => Promise<{ ok: true; digest: string } | PublishIpcError>;
   publishGetState: (courseId: string) => Promise<CoursePublishState>;
   publishSetState: (courseId: string, state: CoursePublishState) => Promise<{ ok: true; state: CoursePublishState } | PublishIpcError>;
   publishCheckSvn: () => Promise<{
     ok: true;
-    capability: { binaryPath: string; bundled: boolean; version: string };
+    capability: { binaryPath: string; bundled: boolean; version: string; tortoisePath: string | null };
   } | PublishIpcError>;
   publishInspectTarget: (params: {
     courseId: string;
