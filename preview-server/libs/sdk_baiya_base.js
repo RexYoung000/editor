@@ -71710,9 +71710,9 @@ var KlInputImage=(function(_super){
 		this._guangbiaoSkin=null;
 		this._isSelected=false;
 		this._canSelected=false;
-		this._filterColor="#ffff00";
+		this._filterColor="#fcd34d";
 		this._glowFilter=null;
-		this._filterBlur=5;
+		this._filterBlur=14;
 		this._bg=null;
 		this._contentColor=null;
 		this._colorBox=null;
@@ -72214,13 +72214,31 @@ var KlInputImage=(function(_super){
 		this._isSelected=value;
 		if (this._bg){
 			this._bg.visible=this._isSelected;
+			var bgFilters=(this._bg.filters || []).filter(function(filter){
+				return filter!==this._glowFilter;
+			},this);
+			if (this._isSelected){
+				if (!this._glowFilter)
+					this._glowFilter=new GlowFilter(this._filterColor,this._filterBlur,0,0);
+				this._bg.filters=bgFilters.concat([this._glowFilter]);
+			}
+			else{
+				this._bg.filters=bgFilters;
+			}
 		}
 		else{
 			if (this._isSelected){
-				this.filters=[this._glowFilter];
+				if (!this._glowFilter)
+					this._glowFilter=new GlowFilter(this._filterColor,this._filterBlur,0,0);
+				var filters=(this.filters || []).filter(function(filter){
+					return filter!==this._glowFilter;
+				},this);
+				this.filters=filters.concat([this._glowFilter]);
 			}
 			else{
-				this.filters=[];
+				this.filters=(this.filters || []).filter(function(filter){
+					return filter!==this._glowFilter;
+				},this);
 			}
 		}
 	});
