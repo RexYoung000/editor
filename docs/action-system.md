@@ -32,6 +32,8 @@
 
 “点击 + SDK 通用判断”允许任何能够配置点击事件的元素作为触发者，但目标选择器只显示当前页面中具备真实 SDK 判定能力的组件。
 
+“输入后立即 SDK 判断（可配置结果）”复用同一套判定关系，但在导出运行态监听判定目标的输入完成事件，而不是监听触发元素点击。事件仍保存在触发元素的 `actions` 中，通过 `judgeTargetId` 指向判定目标，并复用正确、错误、未完成三个结果分支；第一版只允许 `KlInputImage`、`FractionInput`、`KlInputBox` 和显式开启答题判定的 `ContainerBox` 作为目标。目标为容器时，运行态绑定其内部输入格的 `KlKeyboardEvent.INPUT_LATER`，再读取容器统一的 `isRight()` / `isNull()`。编辑器内本地预览使用项目共享的输入完成事件名常量，对应 SDK 运行态的 `KlKeyboardEvent.INPUT_LATER`。
+
 | 判定目标 | 答案或规则来源 | 运行时判定 | 结果能力 |
 | --- | --- | --- | --- |
 | `KlInputImage` | 目标组件编辑器属性 `_judgeAnswer` | `fontClipValue` 与答案比较 / `valueOrSkinIsNull` | 正确、错误、未完成 |

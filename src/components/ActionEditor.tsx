@@ -11,6 +11,8 @@ import { getLayerDisplayName } from '../utils/layerPresentation';
 import {
   getSdkJudgeCapability,
   getSdkJudgeConditionLabel,
+  INPUT_SDK_JUDGE_EVENT,
+  isInputSdkJudgeTarget,
   isSdkJudgeTarget,
   SDK_JUDGE_EVENT,
   type JudgeCondition,
@@ -77,11 +79,14 @@ export default function ActionEditor({
   const hideAddButton = element.type === 'DropObj' || element.type === 'DragObj';
   const elementMap = createElementMap(allElements);
   const sdkJudgeTargets = allElements.filter(isSdkJudgeTarget);
+  const inputSdkJudgeTargets = allElements.filter(isInputSdkJudgeTarget);
   const hasSdkJudgeEvent = actions.some((action) => action.event === SDK_JUDGE_EVENT);
+  const hasInputSdkJudgeEvent = actions.some((action) => action.event === INPUT_SDK_JUDGE_EVENT);
   const inboundJudgeSources = allElements.filter((source) =>
     source.id !== element.id
     && (source.actions ?? []).some((action) =>
-      action.event === SDK_JUDGE_EVENT && action.judgeTargetId === element.id,
+      (action.event === SDK_JUDGE_EVENT || action.event === INPUT_SDK_JUDGE_EVENT)
+        && action.judgeTargetId === element.id,
     ),
   );
 
@@ -122,6 +127,9 @@ export default function ActionEditor({
     ] : []),
     ...((sdkJudgeTargets.length > 0 || hasSdkJudgeEvent) ? [
       { value: SDK_JUDGE_EVENT, label: '点击 + SDK 判断（可配置结果）' },
+    ] : []),
+    ...((inputSdkJudgeTargets.length > 0 || hasInputSdkJudgeEvent) ? [
+      { value: INPUT_SDK_JUDGE_EVENT, label: '输入后立即 SDK 判断（可配置结果）' },
     ] : []),
     ...(isConfirmButton && hasChoiceOrInput && !isHwOrEval ? [
       { value: 'onClickInitConfirm', label: '点击 + SDK 默认反馈（兼容）' },
@@ -322,6 +330,19 @@ export default function ActionEditor({
     ));
   }
 
+  function newInputSdkJudgeActions(groupId: string, judgeTarget?: Element): Action[] {
+    const capability = getSdkJudgeCapability(judgeTarget);
+    if (!capability || (capability.kind !== 'inputImage' && capability.kind !== 'input')) return [];
+    return capability.conditions.map((condition) => newJudgeAction(
+      INPUT_SDK_JUDGE_EVENT,
+      groupId,
+      generateId(),
+      condition,
+      judgeTarget,
+      condition === 'right' ? 'showAnswerRight' : condition === 'wrong' ? 'showAnswerWrong' : 'none',
+    ));
+  }
+
   /** 切换某子事件的 condition（同 branchId 的所有 actions 都更新） */
   const updateBranchCondition = (group: Group, branchId: string, cond: JudgeCondition) =>
     onChange(actions.map((a, idx) =>
@@ -378,7 +399,7 @@ export default function ActionEditor({
       const lastIdx = group.indices[group.indices.length - 1];
       const groupId = actions[lastIdx]?.groupId ?? group.key;
       next.splice(lastIdx + 1, 0, newJudgeAction(
-        SDK_JUDGE_EVENT,
+        group.event,
         groupId,
         generateId(),
         'null',
@@ -443,6 +464,20 @@ export default function ActionEditor({
                     : undefined;
                   const judgeTarget = isSdkJudgeTarget(currentTarget) ? currentTarget : sdkJudgeTargets[0];
                   const newActions = newSdkJudgeActions(groupId, judgeTarget);
+                  if (newActions.length === 0) return;
+                  const minIdx = Math.min(...group.indices);
+                  const next = actions.filter((_, idx) => !group.indices.includes(idx));
+                  next.splice(minIdx, 0, ...newActions);
+                  onChange(next);
+                  return;
+                }
+                if (nextEvent === INPUT_SDK_JUDGE_EVENT && group.event !== INPUT_SDK_JUDGE_EVENT) {
+                  const groupId = actions[group.indices[0]]?.groupId ?? group.key;
+                  const currentTarget = group.judgeTargetId
+                    ? allElements.find((item) => item.id === group.judgeTargetId)
+                    : undefined;
+                  const judgeTarget = isInputSdkJudgeTarget(currentTarget) ? currentTarget : inputSdkJudgeTargets[0];
+                  const newActions = newInputSdkJudgeActions(groupId, judgeTarget);
                   if (newActions.length === 0) return;
                   const minIdx = Math.min(...group.indices);
                   const next = actions.filter((_, idx) => !group.indices.includes(idx));
@@ -533,13 +568,16 @@ export default function ActionEditor({
               </div>
             </div>
           )}
-          {group.event === SDK_JUDGE_EVENT && (() => {
+          {(group.event === SDK_JUDGE_EVENT || group.event === INPUT_SDK_JUDGE_EVENT) && (() => {
             const judgeTarget = group.judgeTargetId
               ? allElements.find((item) => item.id === group.judgeTargetId)
               : undefined;
             const capability = getSdkJudgeCapability(judgeTarget);
-            const targetMissing = Boolean(group.judgeTargetId && !capability);
+            const targetMissing = Boolean(group.judgeTargetId && (
+              !capability || (group.event === INPUT_SDK_JUDGE_EVENT && !isInputSdkJudgeTarget(judgeTarget))
+            ));
             const targetLocked = judgeTarget ? isElementLocked(judgeTarget, elementMap) : false;
+            const targetOptions = group.event === INPUT_SDK_JUDGE_EVENT ? inputSdkJudgeTargets : sdkJudgeTargets;
             return (
               <div className="mb-2 space-y-1.5">
                 <div className="flex items-center gap-1">
@@ -562,7 +600,7 @@ export default function ActionEditor({
                         目标已失效：{group.judgeTargetNameSnapshot ?? group.judgeTargetId}
                       </option>
                     )}
-                    {sdkJudgeTargets.map((item) => (
+                    {targetOptions.map((item) => (
                       <option key={item.id} value={item.id}>
                         {getActionElementLabel(item)} ({elementMeta[item.type]?.label ?? item.type})
                       </option>
@@ -644,7 +682,7 @@ export default function ActionEditor({
               </select>
             </div>
           )}
-          {group.event !== SDK_JUDGE_EVENT && group.event !== 'onAutoPlay' && group.event !== 'onAutoClick' && group.event !== 'onDragJudge' && group.event !== 'onChoiceJudge' && group.event !== 'onInputJudge' && group.event !== 'onMatchingJudge' && group.event !== 'onClickInitBrush' && group.event !== 'onInitBrush' && (() => {
+          {group.event !== SDK_JUDGE_EVENT && group.event !== INPUT_SDK_JUDGE_EVENT && group.event !== 'onAutoPlay' && group.event !== 'onAutoClick' && group.event !== 'onDragJudge' && group.event !== 'onChoiceJudge' && group.event !== 'onInputJudge' && group.event !== 'onMatchingJudge' && group.event !== 'onClickInitBrush' && group.event !== 'onInitBrush' && (() => {
             const isInitConfirm = group.event === 'onClickInitConfirm' || group.event === 'onClickInitConfirmWithLock';
             const isInitGameConfirm = group.event === 'onClickInitGameConfirm' || group.event === 'onClickInitGameConfirmWithLock'
               || group.event === 'onClickInitGameConfirmCH' || group.event === 'onClickInitGameConfirmCHWithLock';
@@ -762,7 +800,7 @@ export default function ActionEditor({
                     )}
                   </div>
 
-                  {group.event === SDK_JUDGE_EVENT && ELEMENT_TARGET_ACTIONS.has(action.actionType) && (
+                  {(group.event === SDK_JUDGE_EVENT || group.event === INPUT_SDK_JUDGE_EVENT) && ELEMENT_TARGET_ACTIONS.has(action.actionType) && (
                     <div className="mb-1 flex items-center gap-1">
                       <span className="w-12 shrink-0 text-slate-500">动作目标</span>
                       <select
@@ -1003,8 +1041,8 @@ export default function ActionEditor({
             };
 
             // 判定事件：按 branchId 二次分组渲染结果分支。
-            if (group.event === SDK_JUDGE_EVENT || group.event === 'onDragJudge' || group.event === 'onChoiceJudge' || group.event === 'onInputJudge' || group.event === 'onMatchingJudge') {
-              const isSdkJudge = group.event === SDK_JUDGE_EVENT;
+            if (group.event === SDK_JUDGE_EVENT || group.event === INPUT_SDK_JUDGE_EVENT || group.event === 'onDragJudge' || group.event === 'onChoiceJudge' || group.event === 'onInputJudge' || group.event === 'onMatchingJudge') {
+              const isSdkJudge = group.event === SDK_JUDGE_EVENT || group.event === INPUT_SDK_JUDGE_EVENT;
               let branches = getBranches(group);
               // 根据事件类型决定 condition 选项
               let conditionOpts = group.event === 'onDragJudge'
@@ -1015,7 +1053,7 @@ export default function ActionEditor({
                 ? [{ value: 'right', label: '全对' }, { value: 'wrong', label: '没有全对' }, { value: 'null', label: '还没有连线' }]
                 : [{ value: 'right', label: '全对' }, { value: 'wrong', label: '没有全对' }, { value: 'null', label: '还没有填写' }];
 
-              if (group.event === SDK_JUDGE_EVENT) {
+              if (group.event === SDK_JUDGE_EVENT || group.event === INPUT_SDK_JUDGE_EVENT) {
                 const judgeTarget = group.judgeTargetId
                   ? allElements.find((item) => item.id === group.judgeTargetId)
                   : undefined;

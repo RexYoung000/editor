@@ -5,13 +5,16 @@ import {
   buildExportRegressionArtifacts,
   buildHomeworkStandaloneInputJudgeCode,
   buildSdkJudgeClickInitCode,
+  buildSdkJudgeInputInitCode,
   collectElementsNeedingVar,
   collectHomeworkStandaloneInputJudgeTargets,
 } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
+import { KL_KEYBOARD_INPUT_LATER_EVENT } from '../src/utils/keyboardEvents';
 import {
   collectConfirmTargetIssues,
   getSdkJudgeCapability,
+  INPUT_SDK_JUDGE_EVENT,
   isSdkJudgeTarget,
   SDK_JUDGE_EVENT,
 } from '../src/utils/sdkJudge';
@@ -75,6 +78,14 @@ function judgeActions(judgeTarget: Element, actionTarget?: Element): Action[] {
       judgeTargetNameSnapshot: judgeTarget.name,
     },
   ];
+}
+
+function inputJudgeActions(judgeTarget: Element, actionTarget?: Element): Action[] {
+  return judgeActions(judgeTarget, actionTarget).map((action) => ({
+    ...action,
+    id: `input-${action.id}`,
+    event: INPUT_SDK_JUDGE_EVENT,
+  }));
 }
 
 function activePage(course: Course, preview = false): SubPage {
@@ -336,4 +347,94 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   assert.match(previewSource, /this\.preview_matching\.allRight/);
   assert.match(previewSource, /this\.preview_matching\.isNull\(\)/);
   assert.match(previewSource, /\(\["A"\]\)\.indexOf\(String\(this\.preview_input\.fontClipValue \|\| ""\)\) >= 0/);
+});
+
+test('输入后立即 SDK 判断绑定 INPUT_LATER 并复用结果分支', () => {
+  assert.equal(KL_KEYBOARD_INPUT_LATER_EVENT, 'inputLater');
+
+  const fraction = element('answer-fraction', 'FractionInput', {
+    props: { _judgeAnswer: '1<2_3>' },
+  });
+  const feedback = element('feedback-image', 'Image');
+  const source = element('source-image', 'Image', { actions: inputJudgeActions(fraction, feedback) });
+  const page: SubPage = { id: 'page', name: '页面', elements: [source, fraction, feedback] };
+
+  const code = buildSdkJudgeInputInitCode(
+    page,
+    (item) => item.name ?? item.id,
+    (action) => `run_${action.actionType}_${action.targetId ?? 'self'};`,
+    true,
+  );
+
+  assert.match(code, /this\.answer_fraction\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(code, /\(\["1<2_3>"\]\)\.indexOf\(String\(this\.answer_fraction\.fontClipValue \|\| ""\)\) >= 0/);
+  assert.match(code, /this\.answer_fraction\.valueOrSkinIsNull/);
+  assert.match(code, /this\.result = true/);
+  assert.match(code, /this\.result = false/);
+  assert.match(code, /this\.result = null/);
+  assert.match(code, /run_setVisible_feedback-image/);
+  assert.doesNotMatch(code, /Laya\.Event\.CLICK/);
+
+  const inputVars = collectElementsNeedingVar(page);
+  assert.equal(inputVars.has(source.id), true);
+  assert.equal(inputVars.has(fraction.id), true);
+  assert.equal(inputVars.has(feedback.id), true);
+});
+
+test('输入后立即 SDK 判断容器目标时绑定内部输入格', () => {
+  const container = element('answer-container', 'ContainerBox', {
+    props: { _inputRuleEnabled: true },
+  });
+  const input = element('answer-input', 'KlInputImage', {
+    parentId: container.id,
+    props: { _judgeAnswer: '42' },
+  });
+  const source = element('source-image', 'Image', { actions: inputJudgeActions(container) });
+  const page: SubPage = { id: 'page', name: '页面', elements: [source, container, input] };
+
+  const code = buildSdkJudgeInputInitCode(
+    page,
+    (item) => item.name ?? item.id,
+    (action) => `run_${action.branchCondition};`,
+  );
+
+  assert.match(code, /this\.answer_input\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(code, /this\.answer_container\.isRight\(\)/);
+  assert.match(code, /this\.answer_container\.isNull\(\)/);
+  assert.match(code, /run_right/);
+  assert.match(code, /run_wrong/);
+  assert.match(code, /run_null/);
+
+  const inputVars = collectElementsNeedingVar(page);
+  assert.equal(inputVars.has(container.id), true);
+  assert.equal(inputVars.has(input.id), true);
+});
+
+test('输入后立即 SDK 判断在正式、作业和预习导出中生效', () => {
+  const normal = normalCourseFixture();
+  const normalInput = element('normal-input-now', 'KlInputImage', { props: { _judgeAnswer: '8' } });
+  const normalSource = element('normal-source-now', 'Image', { actions: inputJudgeActions(normalInput) });
+  activePage(normal).elements.push(normalSource, normalInput);
+  const normalExportSource = buildExportRegressionArtifacts(normal, regressionImageSizes('game_lt')).scenes[0].source;
+  assert.match(normalExportSource, /this\.normal_input_now\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(normalExportSource, /\(\["8"\]\)\.indexOf\(String\(this\.normal_input_now\.fontClipValue \|\| ""\)\) >= 0/);
+
+  const homework = homeworkCourseFixture();
+  const homeworkInput = element('homework-input-now', 'KlInputImage', { props: { _judgeAnswer: '9' } });
+  const homeworkSource = element('homework-source-now', 'Image', { actions: inputJudgeActions(homeworkInput) });
+  activePage(homework).elements.push(homeworkSource, homeworkInput);
+  const homeworkExportSource = buildExportRegressionArtifacts(homework, regressionImageSizes('game_hw')).scenes[0].source;
+  assert.match(homeworkExportSource, /this\.homework_input_now\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(homeworkExportSource, /this\.result = true/);
+
+  const preview = previewCourseFixture();
+  const previewInput = element('preview-input-now', 'KlInputImage', { props: { _judgeAnswer: 'A' } });
+  const previewSource = element('preview-source-now', 'Image', { actions: inputJudgeActions(previewInput) });
+  activePage(preview, true).elements.push(previewSource, previewInput);
+  const previewExportSource = buildPreviewExportRegressionArtifacts(
+    preview,
+    regressionImageSizes('game_preview'),
+  ).scenes[0].source;
+  assert.match(previewExportSource, /this\.preview_input_now\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(previewExportSource, /\(\["A"\]\)\.indexOf\(String\(this\.preview_input_now\.fontClipValue \|\| ""\)\) >= 0/);
 });
