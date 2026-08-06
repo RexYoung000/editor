@@ -1,10 +1,17 @@
-import type { Action, Page } from '../../types';
+import type { Action, Element, Page } from '../../types';
 import { laya, clearAllObjects, setPreviewMode } from './core';
 import { createLayaComponent, applyKlProps } from './components';
 import { registerObject } from './core';
 import { objects } from './core';
-import { evaluateStructuredInputRuleState, getInputAnswerCandidates } from '../inputAnswerRules';
-import { getSdkJudgeCapability, SDK_JUDGE_EVENT, type JudgeCondition } from '../sdkJudge';
+import { evaluateStructuredInputRuleState, getFillAnswerInputs, getInputAnswerCandidates } from '../inputAnswerRules';
+import { KL_KEYBOARD_INPUT_LATER_EVENT } from '../keyboardEvents';
+import {
+  getSdkJudgeCapability,
+  INPUT_SDK_JUDGE_EVENT,
+  isInputSdkJudgeTarget,
+  SDK_JUDGE_EVENT,
+  type JudgeCondition,
+} from '../sdkJudge';
 
 let _previewPages: Page[] = [];
 let _previewPageIdx = 0;
@@ -115,6 +122,39 @@ function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | nul
   return isNull ? 'null' : 'wrong';
 }
 
+function _runPreviewSdkJudgeGroup(page: Page, source: Element, group: Action[]): void {
+  const condition = _getSdkJudgeCondition(page, group[0]);
+  if (!condition) return;
+  group
+    .filter((action) => (action.branchCondition ?? 'right') === condition)
+    .forEach((action) => _executePreviewAction(action, source.id));
+}
+
+function _groupJudgeActions(actions: Action[]): Map<string, Action[]> {
+  const groups = new Map<string, Action[]>();
+  actions.forEach((action) => {
+    const key = action.groupId ?? `__legacy:${action.judgeTargetId ?? ''}`;
+    const group = groups.get(key) ?? [];
+    group.push(action);
+    groups.set(key, group);
+  });
+  return groups;
+}
+
+function _getInputSdkJudgeObjects(page: Page, action: Action): unknown[] {
+  const target = action.judgeTargetId
+    ? page.elements.find((element) => element.id === action.judgeTargetId)
+    : undefined;
+  if (!target || !isInputSdkJudgeTarget(target)) return [];
+  if (target.type === 'KlInputImage' || target.type === 'FractionInput') {
+    const targetObject = objects().get(target.id);
+    return targetObject ? [targetObject] : [];
+  }
+  return getFillAnswerInputs(target, page.elements)
+    .map((input) => objects().get(input.id))
+    .filter(Boolean);
+}
+
 function _renderPreviewPage(idx: number): void {
   clearAllObjects();
   const page = _previewPages[idx];
@@ -123,6 +163,10 @@ function _renderPreviewPage(idx: number): void {
     const obj = createLayaComponent(el);
     if (!obj) return;
     registerObject(el.id, obj);
+  });
+  page.elements.forEach((el) => {
+    const obj = objects().get(el.id);
+    if (!obj) return;
     // 绑定所有事件
     const eventMap: Record<string, string> = {
       onClick: 'click',
@@ -141,20 +185,18 @@ function _renderPreviewPage(idx: number): void {
               eventActions.forEach((action) => _executePreviewAction(action, el.id));
               return;
             }
-            const groups = new Map<string, Action[]>();
-            eventActions.forEach((action) => {
-              const key = action.groupId ?? `__legacy:${action.judgeTargetId ?? ''}`;
-              const group = groups.get(key) ?? [];
-              group.push(action);
-              groups.set(key, group);
-            });
-            groups.forEach((group) => {
-              const condition = _getSdkJudgeCondition(page, group[0]);
-              if (!condition) return;
-              group
-                .filter((action) => (action.branchCondition ?? 'right') === condition)
-                .forEach((action) => _executePreviewAction(action, el.id));
-            });
+            _groupJudgeActions(eventActions).forEach((group) => _runPreviewSdkJudgeGroup(page, el, group));
+          });
+        }
+        if (evt === INPUT_SDK_JUDGE_EVENT) {
+          const eventActions = el.actions?.filter((action) => action.event === INPUT_SDK_JUDGE_EVENT) ?? [];
+          _groupJudgeActions(eventActions).forEach((group) => {
+            for (const inputObject of _getInputSdkJudgeObjects(page, group[0])) {
+              if (inputObject && typeof (inputObject as { on?: unknown }).on === 'function') {
+                (inputObject as { on: (event: string, caller: unknown, listener: () => void) => void })
+                  .on(KL_KEYBOARD_INPUT_LATER_EVENT, null, () => _runPreviewSdkJudgeGroup(page, el, group));
+              }
+            }
           });
         }
       });

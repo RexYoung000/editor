@@ -16,7 +16,13 @@ import {
   internalPageActionBody,
 } from './internalPageCompiler';
 import { buildOrdinaryActionBindings, isSharedOrdinaryAction } from './ordinaryActionCompiler';
-import { collectCourseConfirmTargetIssues, getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
+import {
+  collectCourseConfirmTargetIssues,
+  getSdkJudgeCapability,
+  INPUT_SDK_JUDGE_EVENT,
+  isInputSdkJudgeTarget,
+  SDK_JUDGE_EVENT,
+} from './sdkJudge';
 import {
   buildInputRuleConfirmInitCode,
   buildInputRuleInitCode,
@@ -401,7 +407,20 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
     for (const input of getFillAnswerInputs(el, elements)) needsVar.add(input.id);
   }
 
-  // 数学键盘初始化代码会直接引用这些组件，需要把对应 var 写入 scene。
+  // 输入后立即 SDK 判断会直接引用判定目标或容器内输入格，需要把对应 var 写入 scene。
+  for (const el of elements) {
+    for (const action of el.actions ?? []) {
+      if (action.event !== INPUT_SDK_JUDGE_EVENT || !action.judgeTargetId) continue;
+      const target = elements.find((item) => item.id === action.judgeTargetId);
+      if (!target || !isInputSdkJudgeTarget(target)) continue;
+      if (target.type === 'KlInputImage' || target.type === 'FractionInput') {
+        needsVar.add(target.id);
+      } else {
+        for (const input of getFillAnswerInputs(target, elements)) needsVar.add(input.id);
+      }
+    }
+  }
+
   const decimalCamps = new Set(elements.flatMap((el) => {
     const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
     return el.type === 'KlBaseKeyboard'
@@ -1267,6 +1286,29 @@ type ActionBodyBuilder = (
   sourceElement?: Element,
 ) => string;
 
+function buildSdkJudgeChecks(
+  target: Element,
+  targetRef: string,
+): { rightCheck: string; nullCheck: string | null } | null {
+  const capability = getSdkJudgeCapability(target);
+  if (!capability) return null;
+  const rightCheck = capability.kind === 'inputImage'
+    ? `!${targetRef}.valueOrSkinIsNull && (${JSON.stringify(getInputAnswerCandidates(target))}).indexOf(String(${targetRef}.fontClipValue || "")) >= 0`
+    : capability.kind === 'input'
+    ? `${targetRef}.isRight()`
+    : capability.kind === 'drag'
+      ? `${targetRef}.dragsOnRightDrops()`
+      : `${targetRef}.${capability.kind === 'matching' ? 'allRight' : 'isRight'}`;
+  const nullCheck = capability.kind === 'inputImage'
+    ? `${targetRef}.valueOrSkinIsNull`
+    : capability.kind === 'input' || capability.kind === 'matching'
+    ? `${targetRef}.isNull()`
+    : capability.kind === 'choice'
+      ? `${targetRef}.isNull`
+      : null;
+  return { rightCheck, nullCheck };
+}
+
 /**
  * 把触发元素上的通用 SDK 判定关系转换为点击监听。
  * 判定只读取目标组件已有 SDK 状态，结果动作仍使用 action.targetId。
@@ -1322,26 +1364,90 @@ export function buildSdkJudgeClickInitCode(
         return parts.join(' ');
       };
 
-      const rightCheck = capability.kind === 'inputImage'
-        ? `!${targetRef}.valueOrSkinIsNull && (${JSON.stringify(getInputAnswerCandidates(target))}).indexOf(String(${targetRef}.fontClipValue || "")) >= 0`
-        : capability.kind === 'input'
-        ? `${targetRef}.isRight()`
-        : capability.kind === 'drag'
-          ? `${targetRef}.dragsOnRightDrops()`
-          : `${targetRef}.${capability.kind === 'matching' ? 'allRight' : 'isRight'}`;
-      const nullCheck = capability.kind === 'inputImage'
-        ? `${targetRef}.valueOrSkinIsNull`
-        : capability.kind === 'input' || capability.kind === 'matching'
-        ? `${targetRef}.isNull()`
-        : capability.kind === 'choice'
-          ? `${targetRef}.isNull`
-          : null;
+      const checks = buildSdkJudgeChecks(target, targetRef);
+      if (!checks) continue;
 
       code += `        if (${sourceRef}) ${sourceRef}.on(Laya.Event.CLICK, this, function() {\n`;
-      code += `            if (${rightCheck}) { ${resultBody('right')} }\n`;
-      if (nullCheck) code += `            else if (${nullCheck}) { ${resultBody('null')} }\n`;
+      code += `            if (${checks.rightCheck}) { ${resultBody('right')} }\n`;
+      if (checks.nullCheck) code += `            else if (${checks.nullCheck}) { ${resultBody('null')} }\n`;
       code += `            else { ${resultBody('wrong')} }\n`;
       code += `        });\n`;
+    }
+  }
+
+  return code;
+}
+
+export function buildSdkJudgeInputInitCode(
+  page: SubPage,
+  getVar: (element: Element) => string,
+  buildActionBody: ActionBodyBuilder,
+  writeHomeworkResult = false,
+): string {
+  let code = '';
+
+  for (const source of page.elements) {
+    const judgeActions = (source.actions ?? []).filter((action) => action.event === INPUT_SDK_JUDGE_EVENT);
+    if (judgeActions.length === 0) continue;
+
+    const groups = new Map<string, Action[]>();
+    for (const action of judgeActions) {
+      const key = action.groupId ?? `__legacy:${action.judgeTargetId ?? ''}`;
+      const group = groups.get(key) ?? [];
+      group.push(action);
+      groups.set(key, group);
+    }
+
+    for (const actions of groups.values()) {
+      const judgeTargetId = actions[0]?.judgeTargetId;
+      const target = judgeTargetId
+        ? page.elements.find((element) => element.id === judgeTargetId)
+        : undefined;
+      if (!target || !isInputSdkJudgeTarget(target)) continue;
+
+      const sourceRef = `this.${getVar(source)}`;
+      const targetRef = `this.${getVar(target)}`;
+      const checks = buildSdkJudgeChecks(target, targetRef);
+      const capability = getSdkJudgeCapability(target);
+      if (!checks || !capability) continue;
+
+      const branchBodies: Record<'right' | 'wrong' | 'null', string[]> = {
+        right: [],
+        wrong: [],
+        null: [],
+      };
+      for (const action of actions) {
+        const condition = action.branchCondition ?? 'right';
+        if (!capability.conditions.includes(condition)) continue;
+        const body = buildActionBody(action, sourceRef, page, source);
+        if (body) branchBodies[condition].push(body);
+      }
+
+      const resultBody = (condition: 'right' | 'wrong' | 'null') => {
+        const parts = [...branchBodies[condition]];
+        if (writeHomeworkResult) {
+          const value = condition === 'right' ? 'true' : condition === 'wrong' ? 'false' : 'null';
+          parts.unshift(`this.result = ${value};`);
+        }
+        return parts.join(' ');
+      };
+
+      const inputRefs = target.type === 'KlInputImage' || target.type === 'FractionInput'
+        ? [targetRef]
+        : getFillAnswerInputs(target, page.elements).map((input) => `this.${getVar(input)}`);
+      if (inputRefs.length === 0) continue;
+
+      const handlerBody = [
+        `if (${checks.rightCheck}) { ${resultBody('right')} }`,
+        checks.nullCheck ? `else if (${checks.nullCheck}) { ${resultBody('null')} }` : '',
+        `else { ${resultBody('wrong')} }`,
+      ].filter(Boolean).join('\n            ');
+
+      for (const inputRef of inputRefs) {
+        code += `        if (${inputRef}) ${inputRef}.on(KlKeyboardEvent.INPUT_LATER, this, function() {\n`;
+        code += `            ${handlerBody}\n`;
+        code += `        });\n`;
+      }
     }
   }
 
@@ -1546,6 +1652,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   // ─── DragViewBox 统一处理（每个 DVB 一对 EVENT_SUCCESS/EVENT_FAILD，合并 dropSkin + onDragJudge）───
   initCode += buildDvbInitCode(page, getVar, buildActionBody as never, uiNamespace);
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
+  initCode += buildSdkJudgeInputInitCode(page, getVar, buildActionBody);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, uiNamespace);
   initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, uiNamespace);
 
@@ -1611,7 +1718,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
       }
 
       // 通用 SDK 判定已由 buildSdkJudgeClickInitCode 按 groupId 和结果分支统一生成。
-      if (rawEvent === SDK_JUDGE_EVENT) continue;
+      if (rawEvent === SDK_JUDGE_EVENT || rawEvent === INPUT_SDK_JUDGE_EVENT) continue;
 
       // onClickInitConfirm / onClickInitConfirmWithLock：直接在 initView 注入 GameUtils.initConfirm / initChoiceBoxConfirm，不绑定事件
       if (rawEvent === 'onClickInitConfirm' || rawEvent === 'onClickInitConfirmWithLock') {
@@ -1944,6 +2051,7 @@ function generateHomeworkSceneTs(
   initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
+  initCode += buildSdkJudgeInputInitCode(page, getVar, buildActionBody, true);
   initCode += buildChoiceVisualInitCode(page, getVar, false);
   initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, 'game_hw');
 
