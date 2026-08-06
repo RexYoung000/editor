@@ -138,7 +138,7 @@ test('旧版分数输入框导出时迁移完整位图字符表', () => {
   assert.equal(fractionNode?.props?.sheet, '0123456789+-×÷=()><.tabcdxyπ²');
 });
 
-test('分数输入框同步基类 inputValue 供 SDK 判空', () => {
+test('分数输入框普通数字和分数结构同步基类 inputValue 供 SDK 判空', () => {
   const runtimeFiles = [
     'public/builtin/layaProjectModel/Game1_LT/src/view/game_lt/Components/FractionInput.ts',
     'public/builtin/layaProjectModel/Game1_HW/src/view/game_hw/Components/FractionInput.ts',
@@ -150,6 +150,7 @@ test('分数输入框同步基类 inputValue 供 SDK 判空', () => {
     assert.match(source, /private setFontClipValueForJudge\(v: string\)/);
     assert.match(source, /\(this as any\)\.inputValue = value/);
     assert.equal((source.match(/this\.setFontClipValueForJudge\(v\)/g) ?? []).length, 3);
+    assert.match(source, /this\.fontClipValue \+= key\.output/);
     assert.doesNotMatch(source, /this\._fontClipValue = v;/);
   }
 });
