@@ -40,7 +40,7 @@
 | `DragViewBox` | 子级拖拽对象与放置区关系 | `dragsOnRightDrops()` | 正确、错误 |
 | `MatchingGame` | 子级连线项的正确连接关系 | `allRight` / `isNull()` | 正确、错误、未完成 |
 
-`KlInputImage` 没有 SDK 容器式 `isRight()`，但 SDK 已提供 `fontClipValue` 和 `valueOrSkinIsNull`。编辑器使用 `_judgeAnswer` 保存答案，导出时生成等值判断，不把 `_judgeAnswer` 写入运行时 scene。自定义输入运行时如果维护自己的显示值，必须同步 SDK 基类 `inputValue`，否则 `valueOrSkinIsNull` 会把已显示内容判为空。普通图片、文本、图层组和没有作答状态的组件不能作为 SDK 判定目标；判断它们的 `visible`、`selected` 或自定义属性属于另一套“属性条件判断”能力，不在 SDK 通用判定中隐式支持。
+`KlInputImage` 没有 SDK 容器式 `isRight()`，但 SDK 已提供 `fontClipValue` 和 `valueOrSkinIsNull`。编辑器使用 `_judgeAnswer` 保存答案，导出时生成等值判断，不把 `_judgeAnswer` 写入运行时 scene。自定义输入运行时如果维护自己的显示值，必须安全暴露给 SDK 读取的 `inputValue`，否则 `valueOrSkinIsNull` 会把已显示内容判为空；不要在组件内部内容节点创建前直接调用 SDK 基类 `inputValue` setter。普通图片、文本、图层组和没有作答状态的组件不能作为 SDK 判定目标；判断它们的 `visible`、`selected` 或自定义属性属于另一套“属性条件判断”能力，不在 SDK 通用判定中隐式支持。
 
 ## 四、编辑器交互
 

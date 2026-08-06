@@ -142,10 +142,15 @@ export default class FractionInput extends KlInputImage {
         this.setFontClipValueForJudge(v);
         this.updateValue();
     }
+    public get inputValue(): string {
+        return this._fontClipValue || "";
+    }
+    public set inputValue(v: string) {
+        this.fontClipValue = v || "";
+    }
     private setFontClipValueForJudge(v: string) {
         const value = v || "";
         this._fontClipValue = value;
-        (this as any).inputValue = value;
     }
     private _place: number;
     public get place(): number {
