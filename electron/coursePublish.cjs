@@ -6,6 +6,7 @@ const { execFile } = require('child_process');
 const MANIFEST_FILE = 'forge-publish.json';
 const PROJECT_NAMES = new Set(['Game1_LT', 'Game1_PREVIEW', 'Game1_HW', 'Game1_REVIEW']);
 const MANAGED_PUBLISH_NAMES = new Set([MANIFEST_FILE, ...PROJECT_NAMES]);
+const RUNTIME_OUTPUT_RESIDUE_NAMES = new Set(['image', 'sound', 'animation', 'res', 'bin']);
 let svnRuntime = {
   command: process.env.FORGE_SVN_BINARY || 'svn',
   bundled: false,
@@ -443,8 +444,12 @@ function clearPublishTarget(targetPath) {
   }
 }
 
-function clearManagedPublishTarget(targetPath) {
-  for (const entryName of MANAGED_PUBLISH_NAMES) {
+function managedPublishNames(extraNames = []) {
+  return new Set([...MANAGED_PUBLISH_NAMES, ...extraNames]);
+}
+
+function clearManagedPublishTarget(targetPath, extraNames = []) {
+  for (const entryName of managedPublishNames(extraNames)) {
     fs.rmSync(path.join(targetPath, entryName), { recursive: true, force: true });
   }
 }
@@ -457,26 +462,28 @@ function parseSvnStatus(stdout) {
   }));
 }
 
-function managedStatusEntries(stdout, targetPath, includeRoot = false) {
+function managedStatusEntries(stdout, targetPath, includeRoot = false, extraNames = []) {
+  const managedNames = managedPublishNames(extraNames);
   const root = path.resolve(targetPath);
   return parseSvnStatus(stdout).filter((entry) => {
     const absolute = path.resolve(entry.path);
     const relative = path.relative(root, absolute);
     if (!relative) return includeRoot;
     if (relative.startsWith('..') || path.isAbsolute(relative)) return false;
-    return MANAGED_PUBLISH_NAMES.has(relative.split(path.sep)[0]);
+    return managedNames.has(relative.split(path.sep)[0]);
   });
 }
 
-function managedCommitPaths(targetPath, changes, includeRoot = false) {
+function managedCommitPaths(targetPath, changes, includeRoot = false, extraNames = []) {
   if (includeRoot) return [targetPath];
+  const managedNames = managedPublishNames(extraNames);
   const paths = new Set();
   const root = path.resolve(targetPath);
   for (const entry of changes) {
     const relative = path.relative(root, path.resolve(entry.path));
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
     const topLevel = relative.split(path.sep)[0];
-    if (MANAGED_PUBLISH_NAMES.has(topLevel)) paths.add(path.join(targetPath, topLevel));
+    if (managedNames.has(topLevel)) paths.add(path.join(targetPath, topLevel));
   }
   return [...paths].sort();
 }
@@ -495,22 +502,43 @@ async function markSvnChanges(targetPath, runner = runSvn) {
   return parseSvnStatus(finalStatus.stdout);
 }
 
-async function markManagedSvnChanges(targetPath, projectNames, runner = runSvn, rootNeedsCommit = false) {
+async function markManagedSvnChanges(targetPath, projectNames, runner = runSvn, rootNeedsCommit = false, extraNames = []) {
   if (rootNeedsCommit) await runner(['add', '--depth', 'empty', targetPath]);
   for (const entryName of [MANIFEST_FILE, ...projectNames]) {
     await runner(['add', '--parents', '--force', path.join(targetPath, entryName)]);
   }
   const status = await runner(['status', targetPath]);
-  for (const entry of managedStatusEntries(status.stdout, targetPath, rootNeedsCommit)) {
+  for (const entry of managedStatusEntries(status.stdout, targetPath, rootNeedsCommit, extraNames)) {
     if (entry.code === '!' && entry.path) await runner(['delete', '--force', entry.path]);
   }
   const finalStatus = await runner(['status', targetPath]);
-  const changes = managedStatusEntries(finalStatus.stdout, targetPath, rootNeedsCommit);
+  const changes = managedStatusEntries(finalStatus.stdout, targetPath, rootNeedsCommit, extraNames);
   const unversioned = changes.filter((entry) => entry.code === '?');
   if (unversioned.length > 0) {
     throw new CoursePublishError('UNVERSIONED_FILES', '待提交工程仍有未纳管文件，已停止发布', unversioned.map((entry) => entry.path));
   }
   return changes;
+}
+
+async function listVersionedRuntimeResidues(targetPath, runner = runSvn) {
+  const residues = [];
+  for (const entryName of RUNTIME_OUTPUT_RESIDUE_NAMES) {
+    const entryPath = path.join(targetPath, entryName);
+    if (!fs.existsSync(entryPath)) continue;
+    const kind = await localInfoItem('kind', entryPath, runner, true);
+    if (kind === 'dir' || kind === 'file') residues.push(entryName);
+  }
+  if (residues.length === 0) return residues;
+  const status = await runner(['status', targetPath]);
+  const dirtyResidues = managedStatusEntries(status.stdout, targetPath, false, residues);
+  if (dirtyResidues.length > 0) {
+    throw new CoursePublishError(
+      'LOCAL_SVN_FOLDER_HAS_CHANGES',
+      '当前课件旧运行产物有尚未提交的本地修改，请先通过公司 SVN 客户端处理后重试',
+      dirtyResidues.map((entry) => entry.path),
+    );
+  }
+  return residues;
 }
 
 function relativeUrlSegments(ancestorUrl, targetUrl) {
@@ -652,6 +680,7 @@ async function ensureWorkspace(params, inspection, runner = runSvn) {
 }
 
 async function restorePreparedTarget(prepared, runner = runSvn) {
+  const extraNames = prepared.managedResidueNames ?? [];
   if (prepared.inspection.transferMode === 'in-place') {
     if (prepared.rootNeedsCommit) {
       try {
@@ -659,14 +688,14 @@ async function restorePreparedTarget(prepared, runner = runSvn) {
       } catch {
         // 新增课件目录尚未形成完整 SVN 节点时继续清理受管发布文件。
       }
-      clearManagedPublishTarget(prepared.targetPath);
+      clearManagedPublishTarget(prepared.targetPath, extraNames);
       const remaining = await runner(['status', prepared.targetPath]);
-      if (managedStatusEntries(remaining.stdout, prepared.targetPath).length > 0) {
+      if (managedStatusEntries(remaining.stdout, prepared.targetPath, false, extraNames).length > 0) {
         throw new CoursePublishError('LOCAL_RESTORE_INCOMPLETE', '取消准备后未能完整恢复本地发布文件，请先通过公司 SVN 客户端处理');
       }
       return;
     } else {
-      for (const entryName of MANAGED_PUBLISH_NAMES) {
+      for (const entryName of managedPublishNames(extraNames)) {
         try {
           await runner(['revert', '--recursive', path.join(prepared.targetPath, entryName)]);
         } catch {
@@ -675,11 +704,11 @@ async function restorePreparedTarget(prepared, runner = runSvn) {
       }
     }
     const { stdout } = await runner(['status', prepared.targetPath]);
-    for (const entry of managedStatusEntries(stdout, prepared.targetPath)) {
+    for (const entry of managedStatusEntries(stdout, prepared.targetPath, false, extraNames)) {
       if (entry.code === '?' && entry.path) fs.rmSync(entry.path, { recursive: true, force: true });
     }
     const remaining = await runner(['status', prepared.targetPath]);
-    if (managedStatusEntries(remaining.stdout, prepared.targetPath).length > 0) {
+    if (managedStatusEntries(remaining.stdout, prepared.targetPath, false, extraNames).length > 0) {
       throw new CoursePublishError('LOCAL_RESTORE_INCOMPLETE', '取消准备后未能完整恢复本地发布文件，请先通过公司 SVN 客户端处理');
     }
     return;
@@ -722,7 +751,10 @@ async function preparePublish(params, dependencies = {}) {
   const sourceTreeDigest = hashDirectory(params.sourceRoot);
   const projectDigests = Object.fromEntries(params.projectNames.map((name) => [name, hashDirectory(path.join(params.sourceRoot, name))]));
   const workspace = await ensureWorkspace(params, inspection, runner);
-  const preparedBase = { ...workspace, inspection };
+  const managedResidueNames = inspection.transferMode === 'in-place'
+    ? await listVersionedRuntimeResidues(workspace.targetPath, runner)
+    : [];
+  const preparedBase = { ...workspace, inspection, managedResidueNames };
   try {
     if (inspection.targetExists && inspection.manifest?.projectTreeDigest) {
       const existingProjectNames = inspection.manifest.projects.map((project) => project.name);
@@ -734,7 +766,7 @@ async function preparePublish(params, dependencies = {}) {
       }
     }
 
-    if (inspection.transferMode === 'in-place') clearManagedPublishTarget(workspace.targetPath);
+    if (inspection.transferMode === 'in-place') clearManagedPublishTarget(workspace.targetPath, managedResidueNames);
     else clearPublishTarget(workspace.targetPath);
     for (const projectName of params.projectNames) {
       copyTree(path.join(params.sourceRoot, projectName), path.join(workspace.targetPath, projectName));
@@ -760,10 +792,10 @@ async function preparePublish(params, dependencies = {}) {
       throw new CoursePublishError('SYNC_INCOMPLETE', '生成工程与待提交工程不完整一致，已停止发布');
     }
     const changes = inspection.transferMode === 'in-place'
-      ? await markManagedSvnChanges(workspace.targetPath, params.projectNames, runner, workspace.rootNeedsCommit)
+      ? await markManagedSvnChanges(workspace.targetPath, params.projectNames, runner, workspace.rootNeedsCommit, managedResidueNames)
       : await markSvnChanges(workspace.targetPath, runner);
     const commitPaths = inspection.transferMode === 'in-place'
-      ? managedCommitPaths(workspace.targetPath, changes, workspace.rootNeedsCommit)
+      ? managedCommitPaths(workspace.targetPath, changes, workspace.rootNeedsCommit, managedResidueNames)
       : [workspace.createdRootPath ?? workspace.targetPath];
     return {
       inspection,
@@ -772,6 +804,7 @@ async function preparePublish(params, dependencies = {}) {
       workspaceKind: 'existing',
       createdRootPath: workspace.createdRootPath,
       rootNeedsCommit: workspace.rootNeedsCommit,
+      managedResidueNames,
       commitPaths,
       manifest,
       changes,
@@ -839,7 +872,7 @@ async function commitPreparedPublish(prepared, message, dependencies = {}) {
   await committer({ commitPath, commitPaths, message, runner, prepared });
   const status = await runner(['status', commitPath]);
   const remainingChanges = prepared.inspection.transferMode === 'in-place'
-    ? managedStatusEntries(status.stdout, prepared.targetPath, prepared.rootNeedsCommit)
+    ? managedStatusEntries(status.stdout, prepared.targetPath, prepared.rootNeedsCommit, prepared.managedResidueNames ?? [])
     : parseSvnStatus(status.stdout);
   if (remainingChanges.length > 0) {
     throw new CoursePublishError(

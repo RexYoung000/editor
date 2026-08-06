@@ -105,7 +105,7 @@ Windows 安装包内置固定版本、带完整运行依赖和许可证的 SVN C
 └── Game1_PREVIEW/
 ```
 
-不同课型也可能只有 `Game1_HW` 或 `Game1_REVIEW`。原地发布时，同一物理目录可以同时保留老师的可编辑课件文件；Forge 仍只 add、revert、commit 和核验身份文件与实际 `Game1_*`，不把课件 JSON、原始 `images/`、`project/` 中间层、`esBuild/`、日志或版本管理元数据纳入本次发布。
+不同课型也可能只有 `Game1_HW` 或 `Game1_REVIEW`。原地发布时，同一物理目录可以同时保留老师的可编辑课件文件；Forge 仍只 add、revert、commit 和核验身份文件与实际 `Game1_*`，不把课件 JSON、原始 `images/`、`project/` 中间层、`esBuild/`、日志或版本管理元数据纳入本次发布。若最终目录中已被 SVN 纳管的根级 `image/`、`sound/`、`animation/`、`res/`、`bin/` 等旧运行产物残留存在，原地发布会把它们作为本次受管范围删除并提交，避免更新后保留非规定工程结构。
 
 `forge-publish.json` 记录 schema 版本、课件 ID、课型、课件文件夹名、发布内容指纹、编辑器版本、模板与运行资源环境版本、工程列表、工程树指纹和生成时间。它位于课件目录根部，不进入任何 `Game1_*`，也不作为打包机工程 URL；实际提交时间和 revision 保存在最近一次发布记录中。
 

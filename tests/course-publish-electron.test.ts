@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync as fsExists } from 'node:fs';
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -385,6 +386,76 @@ test('原地发布只同步发布文件并保留课件源文件', async () => {
     await assert.rejects(access(join(courseDir, 'forge-publish.json')));
     assert.equal(await readFile(join(courseDir, 'course.json'), 'utf8'), '{"id":"course","stages":[]}');
     assert.equal(await readFile(join(courseDir, 'images', 'source.png'), 'utf8'), 'source');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('原地更新会清理根级旧运行资源残留', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-prepare-in-place-residue-'));
+  const courseDir = join(root, 'V9', 'S10', 'course');
+  const sourceRoot = join(courseDir, 'project', 'course');
+  const calls: string[][] = [];
+  let residueDeleted = false;
+  try {
+    await mkdir(join(root, '.svn'), { recursive: true });
+    await mkdir(join(sourceRoot, 'Game1_HW'), { recursive: true });
+    await mkdir(join(courseDir, 'Game1_HW'), { recursive: true });
+    await mkdir(join(courseDir, 'image', 'img'), { recursive: true });
+    await writeFile(join(sourceRoot, 'Game1_HW', 'config.json'), '{"lesson":1}');
+    await writeFile(join(courseDir, 'Game1_HW', 'config.json'), '{"lesson":1}');
+    await writeFile(join(courseDir, 'image', 'img', 'stale.png'), 'stale');
+    const sourceTreeDigest = publish.hashDirectory(sourceRoot);
+    await writeFile(join(courseDir, 'forge-publish.json'), JSON.stringify({
+      schemaVersion: 1,
+      courseId: 'course',
+      courseKind: 'homework',
+      courseFolderName: 'course',
+      editorVersion: '1.4.1',
+      environmentVersion: 'env-1',
+      generatedAt: '2026-08-06T00:00:00.000Z',
+      contentDigest: 'content',
+      projectTreeDigest: sourceTreeDigest,
+      projects: [{ name: 'Game1_HW', digest: publish.hashDirectory(join(sourceRoot, 'Game1_HW')) }],
+    }));
+    const runner: SvnRunner = async (args) => {
+      calls.push(args);
+      const item = args[2];
+      const localPath = args[3];
+      if (args[0] === 'info' && item === 'url' && localPath === root) return { stdout: 'svn://server/base\n', stderr: '' };
+      if (args[0] === 'info' && item === 'repos-root-url' && localPath === root) return { stdout: 'svn://server\n', stderr: '' };
+      if (args[0] === 'info' && item === 'kind' && localPath === courseDir) return { stdout: 'dir\n', stderr: '' };
+      if (args[0] === 'info' && item === 'url' && localPath === courseDir) return { stdout: 'svn://server/base/V9/S10/course\n', stderr: '' };
+      if (args[0] === 'info' && item === 'kind' && localPath === join(courseDir, 'image')) return { stdout: 'dir\n', stderr: '' };
+      if (args[0] === 'info' && item === 'last-changed-revision') return { stdout: '12\n', stderr: '' };
+      if (args[0] === 'delete' && args[2] === join(courseDir, 'image')) {
+        residueDeleted = true;
+        return { stdout: '', stderr: '' };
+      }
+      if (args[0] === 'status') {
+        if (!residueDeleted && !fsExists(join(courseDir, 'image'))) {
+          return { stdout: `M       ${join(courseDir, 'forge-publish.json')}\nM       ${join(courseDir, 'Game1_HW', 'config.json')}\n!       ${join(courseDir, 'image')}\n`, stderr: '' };
+        }
+        if (residueDeleted) {
+          return { stdout: `M       ${join(courseDir, 'forge-publish.json')}\nM       ${join(courseDir, 'Game1_HW', 'config.json')}\nD       ${join(courseDir, 'image')}\n`, stderr: '' };
+        }
+        return { stdout: '', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    };
+    const prepared = await publish.preparePublish({
+      courseId: 'course', courseKind: 'homework', courseFolderName: 'course',
+      baseUrl: 'svn://server/base', parentPath: 'V9/S10', projectNames: ['Game1_HW'],
+      sourceRoot, sourceCourseDir: courseDir, workspacePath: root, workspaceKind: 'existing',
+      editorVersion: '1.4.1', environmentVersion: 'env-1', contentDigest: 'content',
+    }, { runner });
+    await assert.rejects(access(join(courseDir, 'image')));
+    assert.deepEqual(prepared.commitPaths, [
+      join(courseDir, 'Game1_HW'),
+      join(courseDir, 'forge-publish.json'),
+      join(courseDir, 'image'),
+    ]);
+    assert.ok(calls.some((args) => args[0] === 'delete' && args[2] === join(courseDir, 'image')));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
