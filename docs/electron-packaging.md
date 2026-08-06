@@ -136,3 +136,9 @@ electron-builder 的 `app-builder.exe` 默认会尝试从网络（GitHub release
 - TortoiseSVN 关闭后必须再次用内置 CLI 检查本次受管发布范围；仍有修改、取消或提交失败均不通知打包机。原地发布中的课件 JSON、`images/`、`project/` 等源文件状态不参与该判断。
 - 只有本地状态干净，并能从身份文件与各工程目录读取实际 revision、URL 时，才把这些真实结果交给现有 `integrationRequest`。
 - 自动测试可以注入假的提交执行器；真实 Windows 验收必须使用公司 TortoiseSVN、公司 SASL 账号和实际网络完成。
+
+### Forge MCP 与 Agent 适配产物
+
+MCP 随客户端版本交付，并由已安装的 `wandouEditor` 可执行文件以 stdio 模式启动；老师电脑不应额外安装 Node.js。MCP 运行依赖必须预打包为自包含 CJS 放入 `electron/vendor/`，不能依赖 NSIS 安装目录之外的项目 `node_modules`。
+
+中立 Skill 和 Codex、Claude Code、OpenCode、WorkBuddy 配置片段作为只读 `extraResources` 进入安装包。安装配置只能写老师明确选择的 Agent 配置，不覆盖未知字段或已有服务器。打包验证必须检查 MCP bundle、Skill 根 `SKILL.md`、四端适配文件和许可证；Windows 真机还要实际从至少一个 Agent 启动可见编辑器并完成 Manifest 调用。详细契约见 [Agent 作业草稿制作与 Forge MCP](./ai-authoring.md)。

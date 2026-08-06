@@ -25,6 +25,10 @@ import {
 } from '../utils/keyboardBinding';
 import { isInputRuleHost } from '../utils/inputAnswerRules';
 import { applyQuickTemplateConfirmDefaults } from '../utils/quickTemplateConfirm';
+import {
+  createHomeworkChoiceElements,
+  createHomeworkFillBlankElements,
+} from '../agent/homeworkAuthoring';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -392,9 +396,32 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
     if (frozen) return;
     const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
     const isFlat = isFlatLesson(useEditorStore.getState().currentCourse?.kind);
-    const choiceBox = createDefaultElement('ChoiceBox', subPageId);
-
     const optionNames = ['a', 'b', 'c', 'd'];
+
+    if (isFlat) {
+      const generated = createHomeworkChoiceElements({
+        id: makeId('toolbar-choice'),
+        type: 'single-choice',
+        title: '选择题',
+        options: optionNames.map((id) => ({ id, text: id.toUpperCase() })),
+        answerSource: 'none',
+        answerConfirmed: false,
+      }, subPageId ?? '', { layout: 'toolbar-default', includeOptionLabels: false });
+      const objectById = new Map<string, ReturnType<typeof createLayaComponent>>();
+      generated.forEach((element) => {
+        const parentObject = element.parentId ? objectById.get(element.parentId) ?? getObject(element.parentId) : undefined;
+        const object = createLayaComponent(element, parentObject ?? undefined);
+        if (object) {
+          registerObject(element.id, object);
+          objectById.set(element.id, object);
+        }
+        addElement(element);
+      });
+      selectElement(generated[0].id, false);
+      return;
+    }
+
+    const choiceBox = createDefaultElement('ChoiceBox', subPageId);
     const positions = [
       { x: 343, y: 938 }, { x: 714, y: 938 },
       { x: 1085, y: 938 }, { x: 1456, y: 938 },
@@ -417,30 +444,6 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
       };
       return opt;
     });
-
-    if (isFlat) {
-      // 作业：给 ChoiceBox 预置 onChoiceJudge 事件（含 right + wrong + null 三个子事件，actionType='none'）
-      const mkId = () => crypto.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const groupId = mkId();
-      choiceBox.actions = [
-        { id: mkId(), event: 'onChoiceJudge', actionType: 'none', groupId, branchId: mkId(), branchCondition: 'right' },
-        { id: mkId(), event: 'onChoiceJudge', actionType: 'none', groupId, branchId: mkId(), branchCondition: 'wrong' },
-        { id: mkId(), event: 'onChoiceJudge', actionType: 'none', groupId, branchId: mkId(), branchCondition: 'null' },
-      ];
-
-      const choiceObj = createLayaComponent(choiceBox);
-      if (choiceObj) registerObject(choiceBox.id, choiceObj);
-      addElement(choiceBox);
-
-      options.forEach(opt => {
-        const obj = createLayaComponent(opt, choiceObj);
-        if (obj) registerObject(opt.id, obj);
-        addElement(opt);
-      });
-
-      selectElement(choiceBox.id, false);
-      return;
-    }
 
     // 正课：保留 ConfirmButton 原逻辑
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
@@ -523,20 +526,35 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
       }
     }
 
-    // 创建 KlInputBox 容器
-    const inputBox = createDefaultElement('KlInputBox', subPageId);
-
     if (isFlat) {
-      // 作业：给 KlInputBox 预置 onInputJudge 事件（含 right + wrong + null 三个子事件，actionType='none'）
-      const mkId = () => crypto.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const groupId = mkId();
-      inputBox.actions = [
-        { id: mkId(), event: 'onInputJudge', actionType: 'none', groupId, branchId: mkId(), branchCondition: 'right' },
-        { id: mkId(), event: 'onInputJudge', actionType: 'none', groupId, branchId: mkId(), branchCondition: 'wrong' },
-        { id: mkId(), event: 'onInputJudge', actionType: 'none', groupId, branchId: mkId(), branchCondition: 'null' },
-      ];
+      const generated = createHomeworkFillBlankElements({
+        id: makeId('toolbar-fill'),
+        type: 'fill-blank',
+        title: '填空题',
+        answers: [[]],
+        answerSource: 'none',
+        answerConfirmed: false,
+      }, subPageId ?? '', {
+        layout: 'toolbar-default',
+        includeKeyboard: false,
+        keyboardCamp: kbCamp,
+      });
+      const objectById = new Map<string, ReturnType<typeof createLayaComponent>>();
+      generated.forEach((element) => {
+        const parentObject = element.parentId ? objectById.get(element.parentId) ?? getObject(element.parentId) : undefined;
+        const object = createLayaComponent(element, parentObject ?? undefined);
+        if (object) {
+          registerObject(element.id, object);
+          objectById.set(element.id, object);
+        }
+        addElement(element);
+      });
+      selectElement(generated[0].id, false);
+      return;
     }
 
+    // 创建 KlInputBox 容器
+    const inputBox = createDefaultElement('KlInputBox', subPageId);
     const inputBoxObj = createLayaComponent(inputBox);
     if (inputBoxObj) registerObject(inputBox.id, inputBoxObj);
     addElement(inputBox);
@@ -550,12 +568,6 @@ export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
     const inputObj = createLayaComponent(firstInput, inputBoxObj);
     if (inputObj) registerObject(firstInput.id, inputObj);
     addElement(firstInput);
-
-    if (isFlat) {
-      // 作业：不创建 ConfirmButton
-      selectElement(inputBox.id, false);
-      return;
-    }
 
     // 正课：创建确定按钮（顶级元素，与 KlInputBox 同级）
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);

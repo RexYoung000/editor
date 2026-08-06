@@ -62,4 +62,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   convertPptToImages: (params) => ipcRenderer.invoke('convert-ppt-to-images', params),
   cancelPptConversion: (conversionId) => ipcRenderer.invoke('cancel-ppt-conversion', conversionId),
   cleanupTempDir: (dirPath) => ipcRenderer.invoke('cleanup-temp-dir', dirPath),
+  onAgentRequest: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on('forge-agent-request', listener);
+    return () => ipcRenderer.removeListener('forge-agent-request', listener);
+  },
+  replyAgentRequest: (requestId, response) => ipcRenderer.send('forge-agent-response', requestId, response),
+  markAgentRendererReady: () => ipcRenderer.send('forge-agent-renderer-ready'),
+  agentAcquireDraftLock: (courseDir, sessionId) => ipcRenderer.invoke('agent-acquire-draft-lock', courseDir, sessionId),
+  agentReleaseDraftLock: (courseDir, sessionId) => ipcRenderer.invoke('agent-release-draft-lock', courseDir, sessionId),
+  agentWriteCheckpoint: (courseDir, courseId, courseJson, metadata) => ipcRenderer.invoke('agent-write-checkpoint', courseDir, courseId, courseJson, metadata),
+  agentListCheckpoints: (courseDir) => ipcRenderer.invoke('agent-list-checkpoints', courseDir),
+  agentReadCheckpoint: (courseDir, checkpointId) => ipcRenderer.invoke('agent-read-checkpoint', courseDir, checkpointId),
+  agentSaveCapture: (courseDir, pageId, dataUrl) => ipcRenderer.invoke('agent-save-capture', courseDir, pageId, dataUrl),
+  agentWriteFeedbackReport: (report) => ipcRenderer.invoke('agent-write-feedback-report', report),
 });

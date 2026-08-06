@@ -1,0 +1,4 @@
+interface:
+  display_name: "Forge 作业课件制作"
+  short_description: "通过 Forge MCP 与老师对话制作并校验待审核作业草稿"
+  default_prompt: "Use $forge-homework-authoring to create or revise my Forge homework draft from these requirements."

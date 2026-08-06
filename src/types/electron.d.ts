@@ -218,6 +218,16 @@ export interface ElectronAPI {
   }>;
   cancelPptConversion: (conversionId: string) => Promise<{ ok: boolean; error?: string }>;
   cleanupTempDir: (dirPath: string) => Promise<{ ok: boolean }>;
+  onAgentRequest?: (callback: (request: import('../agent/rendererBridge').AgentRendererRequest) => void) => () => void;
+  replyAgentRequest?: (requestId: string, response: { ok: true; result: unknown } | { ok: false; error: string }) => void;
+  markAgentRendererReady?: () => void;
+  agentAcquireDraftLock: (courseDir: string, sessionId: string) => Promise<{ ok: boolean; error?: string }>;
+  agentReleaseDraftLock: (courseDir: string, sessionId: string) => Promise<{ ok: boolean }>;
+  agentWriteCheckpoint: (courseDir: string, courseId: string, courseJson: string, metadata: { sessionId: string; reason: string }) => Promise<{ ok: boolean; checkpointId?: string; path?: string }>;
+  agentListCheckpoints: (courseDir: string) => Promise<{ ok: boolean; checkpoints: Array<{ checkpointId: string; courseId: string; createdAt: string; reason: string }> }>;
+  agentReadCheckpoint: (courseDir: string, checkpointId: string) => Promise<{ ok: true; courseJson: string } | { ok: false; error: string }>;
+  agentSaveCapture: (courseDir: string, pageId: string, dataUrl: string) => Promise<{ ok: true; path: string } | { ok: false; error: string }>;
+  agentWriteFeedbackReport: (report: Record<string, unknown>) => Promise<{ ok: boolean; reportId?: string; path?: string }>;
 }
 
 declare global {

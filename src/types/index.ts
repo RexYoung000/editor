@@ -119,6 +119,39 @@ export interface Stage {
   subPages: SubPage[];
 }
 
+export type AgentHomeworkQuestionType = 'single-choice' | 'multiple-choice' | 'fill-blank' | 'content';
+export type AgentAnswerSource = 'teacher' | 'source' | 'inferred' | 'none';
+
+export interface AgentHomeworkQuestionSpec {
+  id: string;
+  type: AgentHomeworkQuestionType;
+  title: string;
+  body?: string;
+  options?: Array<{ id: string; text: string }>;
+  correctOptionIds?: string[];
+  answers?: string[][];
+  answerSource: AgentAnswerSource;
+  answerConfirmed: boolean;
+  image?: {
+    relativePath: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  };
+}
+
+export interface AiAuthoringMetadata {
+  origin: 'agent';
+  status: 'ai-draft';
+  skillVersion: string;
+  capabilityRevision: string;
+  revision: number;
+  updatedAt: string;
+  presetId: string;
+  questions: AgentHomeworkQuestionSpec[];
+}
+
 export interface Course {
   id: string;
   kind?: 'normal' | 'homework' | 'sEvaluation' | 'review';  // 缺省 = 'normal'，旧数据兼容
@@ -130,4 +163,6 @@ export interface Course {
   feedback?: 'spirit' | 'newLD';  // 通用反馈动画，缺省 'spirit'（豌豆精灵）
   requiredFeatures?: string[];
   minimumEditorVersion?: string;
+  /** 编辑器侧 Agent 草稿元数据；不提供运行时能力，也不能代表老师已审核。 */
+  aiAuthoring?: AiAuthoringMetadata;
 }

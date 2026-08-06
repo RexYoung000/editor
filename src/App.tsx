@@ -1,5 +1,5 @@
 import { useEditorStore } from './store/editorStore';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Toolbar from './components/Toolbar';
 import PageList from './components/PageList';
 import Canvas from './components/Canvas';
@@ -14,6 +14,7 @@ import FocusWorkspace from './components/FocusWorkspace';
 import { isInternalPagesSubPage, isInternalPagesWorkbenchReadonly } from './utils/internalPages';
 import { requestPageThumbnailFlush } from './utils/pageThumbnailSync';
 import { commitPendingPropertyEdits } from './utils/propertyEditSession';
+import { installAgentAuthoringBridge } from './agent/rendererBridge';
 
 function App() {
   const setCurrentCourse = useEditorStore((state) => state.setCurrentCourse);
@@ -48,10 +49,12 @@ function App() {
     }
   }, [phase]);
 
-  const handleEnterEditor = (course: Course) => {
+  const handleEnterEditor = useCallback((course: Course) => {
     setCurrentCourse(course);
     setPhase('editor');
-  };
+  }, [setCurrentCourse]);
+
+  useEffect(() => installAgentAuthoringBridge(handleEnterEditor), [handleEnterEditor]);
 
   // 课件切换时统一同步 window.__forgeCourseId 和 forge-local 协议的 courseId→dir 映射。
   // 不仅是从 landing 进入 editor 时，编辑器内 Toolbar"打开已有课件"切换也要走这里，

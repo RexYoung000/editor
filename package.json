@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/build-agent-mcp.mjs && node scripts/build-agent-adapters.mjs",
+    "build:mcp": "node scripts/build-agent-mcp.mjs",
+    "build:agent-adapters": "node scripts/build-agent-adapters.mjs",
     "test": "node scripts/run-unit-tests.mjs",
     "pack-game": "node scripts/pack-game-zip.mjs",
-    "electron:dev": "electron .",
+    "electron:dev": "node scripts/build-agent-mcp.mjs && node scripts/build-agent-adapters.mjs && electron .",
     "electron:start": "electron .",
-    "electron:build": "electron-builder",
+    "electron:build": "node scripts/build-agent-mcp.mjs && node scripts/build-agent-adapters.mjs && electron-builder",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -28,6 +30,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -48,6 +51,7 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
     "vite": "^8.0.9",
+    "zod": "^4.4.3",
     "zustand": "^5.0.12"
   },
   "packageManager": "pnpm@10.13.1+sha512.37ebf1a5c7a30d5fabe0c5df44ee8da4c965ca0c5af3dbab28c3a1681b70a256218d05c81c9c0dcf767ef6b8551eb5b960042b9ed4300c59242336377e01cfad",
@@ -99,6 +103,10 @@
       {
         "from": "electron/vendor/svn-cli/windows-x64",
         "to": "svn-cli"
+      },
+      {
+        "from": "agent/dist",
+        "to": "agent-integrations"
       }
     ],
     "afterPack": "./electron/afterPack.cjs"

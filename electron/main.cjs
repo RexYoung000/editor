@@ -24,6 +24,17 @@ const {
   serializePublishError,
   setCoursePublishState,
 } = require('./coursePublish.cjs');
+const {
+  acquireDraftLock,
+  listCheckpoints,
+  readCheckpoint,
+  releaseDraftLock,
+  saveCapture,
+  writeCheckpoint,
+  writeFeedbackReport,
+} = require('./agentAuthoringFs.cjs');
+
+const isMcpMode = process.argv.includes('--mcp');
 
 configureSvnRuntime({
   isPackaged: app.isPackaged,
@@ -61,6 +72,38 @@ let inputWindowRef = null; // 服务器输入窗口引用，用于延迟销毁
 let currentServerUrl = ''; // 供 IPC get-server-url 读取
 const courseDirMap = new Map(); // courseId → courseDir，供 forge-local:// 协议查询
 const preparedPublishes = new Map();
+const pendingAgentRequests = new Map();
+let agentRendererReady = false;
+let agentRendererReadyWaiters = [];
+
+function waitForAgentRenderer(timeoutMs = 60000) {
+  if (agentRendererReady && mainWindow && !mainWindow.isDestroyed()) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      resolve: () => { clearTimeout(timer); resolve(); },
+      reject: (error) => { clearTimeout(timer); reject(error); },
+    };
+    const timer = setTimeout(() => {
+      agentRendererReadyWaiters = agentRendererReadyWaiters.filter((candidate) => candidate !== waiter);
+      reject(new Error('Forge 编辑器尚未准备好接收 Agent 请求'));
+    }, timeoutMs);
+    agentRendererReadyWaiters.push(waiter);
+  });
+}
+
+async function invokeAgentRenderer(request) {
+  await waitForAgentRenderer();
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('Forge 编辑器窗口不可用');
+  const id = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingAgentRequests.delete(id);
+      reject(new Error(`Agent 请求超时：${request.tool}`));
+    }, request.tool === 'forge_open_preview' ? 240000 : 60000);
+    pendingAgentRequests.set(id, { resolve, reject, timer });
+    mainWindow.webContents.send('forge-agent-request', { id, ...request });
+  });
+}
 
 // ─── 服务器连接配置 ───
 
@@ -189,7 +232,7 @@ function showServerInputWindow() {
 
 async function createMainWindow() {
   // dev 和 packaged 统一走输入窗口选择服务器地址
-  let serverUrl = getServerUrlFromArgs();
+  let serverUrl = getServerUrlFromArgs() || (isMcpMode ? loadSavedServerUrl() : '');
   if (!serverUrl) {
     serverUrl = await showServerInputWindow();
   }
@@ -256,12 +299,57 @@ async function createMainWindow() {
     dialog.showErrorBox('页面加载失败', `${errorDescription} (${errorCode})\n${serverUrl}`);
   });
 
+  mainWindow.webContents.on('did-start-loading', () => {
+    agentRendererReady = false;
+  });
+
+  mainWindow.on('closed', () => {
+    agentRendererReady = false;
+    const error = new Error('Forge 编辑器窗口已关闭');
+    agentRendererReadyWaiters.splice(0).forEach((waiter) => waiter.reject(error));
+    for (const pending of pendingAgentRequests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    pendingAgentRequests.clear();
+  });
+
   mainWindow.loadURL(serverUrl);
 }
 
 // ─── IPC handlers ───
 
 ipcMain.handle('get-server-url', () => currentServerUrl);
+
+ipcMain.on('forge-agent-renderer-ready', (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
+  agentRendererReady = true;
+  agentRendererReadyWaiters.splice(0).forEach((waiter) => waiter.resolve());
+});
+
+ipcMain.on('forge-agent-response', (event, requestId, response) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return;
+  const pending = pendingAgentRequests.get(String(requestId));
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pendingAgentRequests.delete(String(requestId));
+  if (response?.ok) pending.resolve(response.result);
+  else pending.reject(new Error(response?.error || 'Agent renderer 请求失败'));
+});
+
+ipcMain.handle('agent-acquire-draft-lock', (_event, courseDir, sessionId) => (
+  acquireDraftLock(String(courseDir), String(sessionId))
+));
+ipcMain.handle('agent-release-draft-lock', (_event, courseDir, sessionId) => (
+  releaseDraftLock(String(courseDir), String(sessionId))
+));
+ipcMain.handle('agent-write-checkpoint', (_event, courseDir, courseId, courseJson, metadata) => (
+  writeCheckpoint(String(courseDir), String(courseId), String(courseJson), metadata)
+));
+ipcMain.handle('agent-list-checkpoints', (_event, courseDir) => listCheckpoints(String(courseDir)));
+ipcMain.handle('agent-read-checkpoint', (_event, courseDir, checkpointId) => readCheckpoint(String(courseDir), String(checkpointId)));
+ipcMain.handle('agent-save-capture', (_event, courseDir, pageId, dataUrl) => saveCapture(String(courseDir), String(pageId), String(dataUrl)));
+ipcMain.handle('agent-write-feedback-report', (_event, report) => writeFeedbackReport(app.getPath('userData'), report));
 
 ipcMain.handle('select-directory', async () => {
   const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
@@ -1965,6 +2053,14 @@ app.whenReady().then(async () => {
 
   try {
     await createMainWindow();
+    if (isMcpMode) {
+      const { startForgeMcpServer } = require('./vendor/forge-mcp-server.bundle.cjs');
+      await startForgeMcpServer({
+        version: app.getVersion(),
+        sessionId: crypto.randomUUID(),
+        invokeRenderer: invokeAgentRenderer,
+      });
+    }
   } catch (e) {
     console.error('Failed to create main window:', e);
     app.quit();

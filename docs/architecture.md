@@ -107,6 +107,12 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 - `forge-local://` 协议把课程 ID 映射到 Electron 本机目录，用于安全读取本地课程资源。
 - 凭据、证书、本机课程和生成的预览内容都不进入 Git。
 
+## Agent 制作与 MCP
+
+老师的 Agent 通过 Forge 随客户端交付的本机 stdio MCP 制作课件草稿。MCP 由 Electron 主进程桥接到 renderer，并且只能通过现有课程模型、组件元数据和 Zustand store 执行语义编辑；不得直接写课程 JSON、建立第二套全局状态或绕过真实渲染。
+
+Skill 负责对话和工作流，当前版本、组件和工具能力必须从 MCP 动态发现。Agent 只能创建和编辑草稿、截图、校验和打开预览，不具备人工审核、SVN 或发布能力。完整边界见 [Agent 作业草稿制作与 Forge MCP](./ai-authoring.md)。
+
 ## 预览与导出
 
 工具栏的预览和发布都进入 `exportProject.ts`，根据课程类型生成正课、作业、预习、专题测评或复习课工程。
@@ -158,6 +164,7 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 - [开发服务器](./dev-server.md)
 - [导出流程](./export-pipeline.md)
 - [老师课件发布流程](./course-publishing.md)
+- [Agent 作业草稿制作与 Forge MCP](./ai-authoring.md)
 - [Electron 打包](./electron-packaging.md)
 - [自定义模板](./custom-templates.md)
 - [版本管理](./versioning.md)

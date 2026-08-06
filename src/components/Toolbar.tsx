@@ -273,6 +273,29 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     }
   };
 
+  useEffect(() => {
+    const handleAgentPreview = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        resolve: (value: unknown) => void;
+        reject: (error: unknown) => void;
+      }>).detail;
+      if (!currentCourse || busy) {
+        detail.reject(new Error('编辑器正在处理其他任务或尚未打开草稿'));
+        return;
+      }
+      setBusy(true);
+      void runCompileBuildAndOpen(false)
+        .then((record) => detail.resolve({ scope: record.scope, previewedAt: record.previewedAt }))
+        .catch((error: unknown) => {
+          setPublishError(error instanceof Error ? error.message : String(error));
+          detail.reject(error);
+        })
+        .finally(() => setBusy(false));
+    };
+    window.addEventListener('forge:agent-open-preview', handleAgentPreview);
+    return () => window.removeEventListener('forge:agent-open-preview', handleAgentPreview);
+  });
+
   const runPublishPreview = async (scope: PublishScope) => {
     if (!currentCourse || busy) throw new Error('编辑器正在处理其他任务');
     setBusy(true);
