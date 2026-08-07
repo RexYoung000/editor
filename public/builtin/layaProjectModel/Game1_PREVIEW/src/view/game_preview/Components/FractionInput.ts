@@ -172,7 +172,8 @@ export default class FractionInput extends KlInputImage {
         VipThink.viewMgr.once(ViewEvent.MAINVIEW_PREPARED, this, this.onPrepared);
         this.inputs = [];
         this.clips = [];
-        this.fontClipValue = "";
+        this.setFontClipValueForJudge("");
+        this.updateValue();
         this.align = "center";
     }
     private onPrepared() {

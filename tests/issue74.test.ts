@@ -153,6 +153,10 @@ test('分数输入框普通数字和分数结构安全提供 inputValue 供 SDK 
     assert.match(source, /public set inputValue\(v: string\)/);
     assert.match(source, /this\.fontClipValue = v \|\| ""/);
     assert.equal((source.match(/this\.setFontClipValueForJudge\(v\)/g) ?? []).length, 3);
+    const createChildrenBlock = source.match(/createChildren\(\) \{[\s\S]*?\n {4}\}/)?.[0] ?? '';
+    assert.match(createChildrenBlock, /this\.setFontClipValueForJudge\(""\)/);
+    assert.match(createChildrenBlock, /this\.updateValue\(\)/);
+    assert.doesNotMatch(createChildrenBlock, /this\.fontClipValue = ""/);
     assert.match(source, /this\.fontClipValue \+= key\.output/);
     assert.doesNotMatch(source, /\(this as any\)\.inputValue = value/);
     assert.doesNotMatch(source, /this\._fontClipValue = v;/);
