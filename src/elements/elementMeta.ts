@@ -302,6 +302,7 @@ export const elementMeta: Record<string, Meta> = {
       valign: 'top',
       bold: false,
       italic: false,
+      underline: false,
       textSizingMode: 'fixed-width',
       mouseEnabled: false,
       fontLibraryId: DEFAULT_FONT_ID,

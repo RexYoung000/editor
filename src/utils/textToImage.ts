@@ -1,13 +1,8 @@
-/**
- * 文字 → PNG 图像渲染。
- * 用 Canvas 2D API 把一段文字按 NewTextArea 的视觉属性烘焙成位图。
- * 字体由 fontLoader 统一管理,优先级:本地字体 → 库字体 → 思源黑体 Regular。
- */
-
 import { resolveElementFont } from './fontLoader';
 import { DEFAULT_FONT_FACE, DEFAULT_FONT_ID } from '../elements/fontLibrary';
 import { loadLibraryFont } from './fontLoader';
-import { layoutText } from './textLayout';
+import { layoutRichText } from './textLayout';
+import type { RichTextStyle } from './richText';
 
 export interface RenderTextProps {
   fontSize?: number;
@@ -20,10 +15,11 @@ export interface RenderTextProps {
   leading?: number;
   fontLibraryId?: string;
   fontLocalPath?: string;
-  /** 已完成加载和注册的字体名；传入时不再执行字体解析或兜底。 */
   fontFace?: string;
   bold?: boolean;
   italic?: boolean;
+  underline?: boolean;
+  textHtml?: string;
   textSizingMode?: 'auto' | 'fixed-width' | 'fixed';
 }
 
@@ -35,15 +31,32 @@ async function resolveRenderFontFace(props: RenderTextProps, courseId?: string):
   return (await loadLibraryFont(DEFAULT_FONT_ID)) ?? DEFAULT_FONT_FACE;
 }
 
-/**
- * 把文本渲染成 PNG data URL。
- * @param text       文本内容(可含 \n)
- * @param width      元素宽(1× 设计稿尺寸)
- * @param height     元素高
- * @param props      视觉属性 + 字体设置
- * @param scale      渲染倍率,默认 2
- * @param courseId   解析本地字体需要;为空则走库字体或兜底
- */
+function fontForStyle(props: RenderTextProps, style: RichTextStyle, fontFace: string): string {
+  const italic = style.italic || props.italic ? 'italic ' : '';
+  const bold = style.bold || props.bold ? '700 ' : '400 ';
+  const fontSize = props.fontSize ?? 20;
+  return `${italic}${bold}${fontSize}px "${fontFace}"`;
+}
+
+function drawUnderline(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  x2: number,
+  y: number,
+  color: string,
+  thickness: number,
+): void {
+  if (x2 <= x1) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = thickness;
+  ctx.beginPath();
+  ctx.moveTo(x1, y);
+  ctx.lineTo(x2, y);
+  ctx.stroke();
+  ctx.restore();
+}
+
 export async function renderTextToImage(
   text: string,
   width: number,
@@ -53,7 +66,6 @@ export async function renderTextToImage(
   courseId?: string,
 ): Promise<string> {
   const fontFace = await resolveRenderFontFace(props, courseId);
-
   const fontSize = props.fontSize ?? 20;
   const color = props.color ?? '#333333';
   const stroke = Math.max(0, props.stroke ?? 0);
@@ -61,46 +73,63 @@ export async function renderTextToImage(
   const align = props.align ?? 'left';
   const valign = props.valign ?? 'top';
   const leading = props.leading ?? 0;
-  const lineHeight = fontSize + leading;
+  const lineHeight = Math.max(1, fontSize + leading);
+  const layout = layoutRichText(text, width, height, props, fontFace);
 
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.ceil(width * scale));
   canvas.height = Math.max(1, Math.ceil(height * scale));
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas.toDataURL('image/png');
   ctx.scale(scale, scale);
-  ctx.font = `${props.italic ? 'italic ' : ''}${props.bold ? '700 ' : '400 '}${fontSize}px "${fontFace}"`;
   ctx.textBaseline = 'top';
   ctx.fillStyle = color;
   ctx.lineJoin = 'round';
+  ctx.lineCap = 'square';
   ctx.lineWidth = stroke;
   ctx.strokeStyle = strokeColor;
 
-  const lines = layoutText(text, width, height, props, fontFace).lines;
-
-  const totalHeight = lines.length * lineHeight;
-  let startY: number;
+  const totalHeight = layout.lines.length * lineHeight;
+  let startY = 0;
   if (valign === 'middle') startY = (height - totalHeight) / 2;
   else if (valign === 'bottom') startY = height - totalHeight;
-  else startY = 0;
 
-  let drawX: number;
-  if (align === 'center') { ctx.textAlign = 'center'; drawX = width / 2; }
-  else if (align === 'right') { ctx.textAlign = 'right'; drawX = width; }
-  else { ctx.textAlign = 'left'; drawX = 0; }
+  ctx.textAlign = 'left';
 
-  for (let i = 0; i < lines.length; i++) {
-    const drawY = startY + i * lineHeight;
-    if (stroke > 0) ctx.strokeText(lines[i], drawX, drawY);
-    ctx.fillText(lines[i], drawX, drawY);
-  }
+  const underlineThickness = Math.max(1, Math.round(fontSize / 16));
+  const underlineYDelta = fontSize + 2;
+
+  layout.richLines.forEach((line, lineIndex) => {
+    const drawY = startY + lineIndex * lineHeight;
+    let cursorX = 0;
+    if (align === 'center') cursorX = (width - line.width) / 2;
+    else if (align === 'right') cursorX = width - line.width;
+    let underlineStart: number | null = null;
+    const flushUnderline = (endX: number) => {
+      if (underlineStart === null) return;
+      drawUnderline(ctx, underlineStart, endX, drawY + underlineYDelta, color, underlineThickness);
+      underlineStart = null;
+    };
+
+    for (const glyph of line.glyphs) {
+      const glyphFont = fontForStyle(props, glyph.style, fontFace);
+      ctx.font = glyphFont;
+      const glyphWidth = ctx.measureText(glyph.char).width;
+      if (stroke > 0) ctx.strokeText(glyph.char, cursorX, drawY);
+      ctx.fillText(glyph.char, cursorX, drawY);
+      if (glyph.style.underline) {
+        if (underlineStart === null) underlineStart = cursorX;
+      } else {
+        flushUnderline(cursorX);
+      }
+      cursorX += glyphWidth;
+    }
+    flushUnderline(cursorX);
+  });
 
   return canvas.toDataURL('image/png');
 }
 
-/**
- * 把字符集合烘焙为横向等宽 FontClip 字库图。
- * 返回图片按 `characters` 顺序切分，每个字符占一个固定单元格。
- */
 export async function renderGlyphSheetToImage(
   characters: string,
   cellWidth: number,
@@ -110,7 +139,7 @@ export async function renderGlyphSheetToImage(
   courseId?: string,
 ): Promise<string> {
   const glyphs = Array.from(characters);
-  if (glyphs.length === 0) throw new Error('位图字库至少需要一个字符');
+  if (glyphs.length === 0) throw new Error('Glyph sheet requires at least one character.');
 
   const fontFace = await resolveRenderFontFace(props, courseId);
   const fontSize = props.fontSize ?? 20;
@@ -120,7 +149,8 @@ export async function renderGlyphSheetToImage(
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.ceil(cellWidth * glyphs.length * scale));
   canvas.height = Math.max(1, Math.ceil(cellHeight * scale));
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return canvas.toDataURL('image/png');
   ctx.scale(scale, scale);
   ctx.font = `${props.italic ? 'italic ' : ''}${props.bold ? '700 ' : '400 '}${fontSize}px "${fontFace}"`;
   ctx.textAlign = 'center';
