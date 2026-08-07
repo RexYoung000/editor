@@ -6,6 +6,7 @@ import {
   isPointInsideElement,
 } from '../src/utils/canvasGeometry';
 import {
+  findCanvasPointerTarget,
   findTopElementAtPoint,
   getContainerIds,
   getSelectionContextContainerIds,
@@ -109,12 +110,35 @@ test('父子不会同时作为选择或变换根，锁定元素不参与变换',
   assert.deepEqual(getTransformRootIds([parent, child, locked], ['parent', 'child', 'locked']), ['parent']);
 });
 
-test('锁定元素可以命中查看，但不进入框选或变换手柄', () => {
+test('锁定元素退出画布命中并穿透到下方未锁定元素', () => {
+  const below = element('below', { x: 10, y: 10 });
   const locked = element('locked', { x: 10, y: 10, locked: true });
-  assert.equal(findTopElementAtPoint([locked], { x: 20, y: 20 }, [])?.id, 'locked');
+  const lockedButton = element('locked-button', { type: 'ScaleButton', x: 10, y: 10, locked: true });
+  const point = { x: 20, y: 20 };
+
+  assert.equal(findTopElementAtPoint([below, locked], point, [])?.id, 'below');
+  assert.equal(findTopElementAtPoint([locked, below], point, [])?.id, 'below');
+  assert.equal(findTopElementAtPoint([below, lockedButton], point, [])?.id, 'below');
+  assert.equal(findTopElementAtPoint([below, locked], point, ['locked'])?.id, 'below');
+  assert.equal(findTopElementAtPoint([locked], point, []), null);
+  assert.equal(findTopElementAtPoint([locked], point, [], { includeLocked: true })?.id, 'locked');
   assert.deepEqual(selectElementsInRect([locked], { x: 0, y: 0, width: 100, height: 100 }), []);
   assert.equal(getSelectionFrame([locked], ['locked']), null);
   assert.ok(getSelectionFrame([locked], ['locked'], { includeLocked: true }));
+});
+
+test('父级锁定后代和锁定容器画布入口都不能截获点击', () => {
+  const below = element('below', { x: 10, y: 10 });
+  const parent = element('parent', { type: 'ContainerBox', locked: true, width: 300, height: 300 });
+  const child = element('child', { x: 10, y: 10, parentId: 'parent' });
+  const point = { x: 20, y: 20 };
+  const elements = [below, parent, child];
+
+  assert.equal(findTopElementAtPoint(elements, point, ['child'])?.id, 'below');
+  assert.equal(findCanvasPointerTarget(elements, point, ['parent'], 'parent')?.id, 'below');
+  assert.equal(findCanvasPointerTarget([parent, child], point, ['parent'], 'parent'), null);
+  parent.locked = false;
+  assert.equal(findCanvasPointerTarget(elements, point, [], 'parent')?.id, 'parent');
 });
 
 test('编组点击会选择整组，修饰键再次点击会移除整组', () => {

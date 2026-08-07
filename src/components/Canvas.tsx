@@ -9,13 +9,16 @@ import {
 import { applyKlProps, applyEditorLayerVisibility, drawPlaceholder } from '../utils/laya/components';
 import { objects, canvasRoot, laya } from '../utils/laya/core';
 import CanvasOverlay from './CanvasOverlay';
+import SelectionArrangeToolbar from './SelectionArrangeToolbar';
 import { useI18n } from '../i18n/context';
 import CanvasRuler, { RULER_PX } from './CanvasRuler';
 import { LockKeyhole, PanelTopOpen } from 'lucide-react';
 import { createDefaultElement } from '../elements/elementMeta';
+import { layoutText } from '../utils/textLayout';
 import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
+import { getCourseResourceVersion } from '../utils/electronFs';
 import { isFlatLesson, isVideoOnlyCourse } from '../utils/courseKind';
 import { isElementLocked } from '../utils/layerState';
 import { findCanvasElementPage, isInternalPagesWorkbenchReadonly } from '../utils/internalPages';
@@ -33,6 +36,12 @@ import {
   saveCanvasAssistPreferences,
   type CanvasAssistPreferences,
 } from '../utils/canvasAssistPreferences';
+import {
+  createPageThumbnailScheduler,
+  isSamePageThumbnailTarget,
+  PAGE_THUMBNAIL_FLUSH_EVENT,
+  type PageThumbnailTarget,
+} from '../utils/pageThumbnailSync';
 
 const CANVAS_W = 1920;
 const CANVAS_H = 1080;
@@ -80,7 +89,11 @@ function sortChildrenParentFirst(children: Element[], topLevelIds: Set<string>):
   return result;
 }
 
-export default function Canvas() {
+interface CanvasProps {
+  textCreateRequest?: number;
+}
+
+export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
   const { t } = useI18n();
   const currentCourse    = useEditorStore((s) => s.currentCourse);
   const currentStageId = useEditorStore((s) => s.currentStageId);
@@ -91,6 +104,7 @@ export default function Canvas() {
   const clearSelection = useEditorStore((s) => s.clearSelection);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
   const selectElement    = useEditorStore((s) => s.selectElement);
+  const addElement       = useEditorStore((s) => s.addElement);
   const updateElement    = useEditorStore((s) => s.updateElement);
   const deleteElement    = useEditorStore((s) => s.deleteElement);
   const saveHistory      = useEditorStore((s) => s.saveHistory);
@@ -102,9 +116,13 @@ export default function Canvas() {
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const [layaReady, setLayaReady] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [textCaretPoint, setTextCaretPoint] = useState<{ x: number; y: number } | null>(null);
+  const [selectAllTextOnEdit, setSelectAllTextOnEdit] = useState(false);
+  const handledTextCreateRequest = useRef(0);
   const [showReadonlyTip, setShowReadonlyTip] = useState(false);
   const readonlyTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const prevPageIdRef = useRef<string | null>(null);
+  const renderedThumbnailTargetRef = useRef<PageThumbnailTarget | null>(null);
+  const thumbnailSchedulerRef = useRef<ReturnType<typeof createPageThumbnailScheduler> | null>(null);
   const prevElementsRef = useRef<Map<string, Element>>(new Map());
 
   // ─── 固定工作区 + 整体页面画布状态 ───
@@ -136,7 +154,30 @@ export default function Canvas() {
     () => findCanvasElementPage(currentCourse, currentSubPageId, currentInternalPageId),
     [currentCourse, currentSubPageId, currentInternalPageId],
   );
+  const currentCourseId = currentCourse?.id ?? null;
+  const currentCourseResourceVersion = currentCourseId ? getCourseResourceVersion(currentCourseId) : 0;
   const workbenchReadonly = isInternalPagesWorkbenchReadonly(currentCourse, currentSubPageId, focusSubPageId);
+
+  useEffect(() => {
+    if (textCreateRequest <= handledTextCreateRequest.current) return;
+    if (!currentPage || currentPage.frozen || workbenchReadonly || !layaReady) return;
+    handledTextCreateRequest.current = textCreateRequest;
+
+    const element = createDefaultElement('NewTextArea', currentSubPageId ?? undefined);
+    const layout = layoutText(String(element.props.text ?? ''), element.width, element.height, element.props);
+    element.width = layout.width;
+    element.height = layout.height;
+    const viewport = worldRef.current;
+    const centerX = (workspaceSize.width / 2 - viewport.panX) / viewport.zoom;
+    const centerY = (workspaceSize.height / 2 - viewport.panY) / viewport.zoom;
+    element.x = Math.round(Math.max(0, Math.min(CANVAS_W - element.width, centerX - element.width / 2)));
+    element.y = Math.round(Math.max(0, Math.min(CANVAS_H - element.height, centerY - element.height / 2)));
+
+    const object = createLayaComponent(element);
+    if (object) registerObject(element.id, object);
+    addElement(element);
+    selectElement(element.id, false);
+  }, [addElement, currentPage, currentSubPageId, layaReady, selectElement, textCreateRequest, workbenchReadonly, workspaceSize.height, workspaceSize.width]);
 
   useEffect(() => {
     if (!workbenchReadonly) return;
@@ -293,38 +334,75 @@ export default function Canvas() {
     setWorldTransform(world.panX, world.panY, world.zoom);
   }, [world, layaReady]);
 
-  const captureThumb = useCallback((pageId: string) => {
+  const captureThumb = useCallback((target: PageThumbnailTarget) => {
+    if (!isSamePageThumbnailTarget(renderedThumbnailTargetRef.current, target)) return;
     const canvas = layaHostRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
-    if (!canvas) return;
-    try { setPageThumbnail(pageId, canvas.toDataURL('image/jpeg', 0.5)); } catch { /* tainted */ }
+    if (!canvas) {
+      console.warn('[forge] 页面缩略图截图失败：未找到 Laya canvas', target);
+      return;
+    }
+    try {
+      setPageThumbnail(target.pageId, canvas.toDataURL('image/jpeg', 0.5));
+    } catch (error) {
+      console.warn('[forge] 页面缩略图截图失败，保留已有缩略图', target, error);
+    }
   }, [setPageThumbnail]);
+  useEffect(() => {
+    const scheduler = createPageThumbnailScheduler(captureThumb);
+    thumbnailSchedulerRef.current = scheduler;
+    return () => {
+      scheduler.cancel();
+      if (thumbnailSchedulerRef.current === scheduler) thumbnailSchedulerRef.current = null;
+    };
+  }, [captureThumb]);
+  const scheduleThumbnail = useCallback((target: PageThumbnailTarget) => {
+    thumbnailSchedulerRef.current?.schedule(target);
+  }, []);
+  const flushThumbnail = useCallback((target: PageThumbnailTarget) => {
+    thumbnailSchedulerRef.current?.flush(target);
+  }, []);
+  const cancelThumbnail = useCallback(() => {
+    thumbnailSchedulerRef.current?.cancel();
+  }, []);
+  const flushCurrentThumbnail = useCallback(() => {
+    const target = renderedThumbnailTargetRef.current;
+    if (target) flushThumbnail(target);
+  }, [flushThumbnail]);
 
   // ─── 课件切换：强制清除所有对象 ───
   // 必须在重建元素之前更新 __forgeCourseId，否则 Spine 动画会用旧 courseId 拼 forge-local URL，
   // 导致 templet._path 指向旧课件目录，音频路径错误。
   useEffect(() => {
     if (!layaReady) return;
-    if (currentCourse) {
-      (window as unknown as { __forgeCourseId?: string }).__forgeCourseId = currentCourse.id;
+    if (currentCourseId) {
+      (window as unknown as { __forgeCourseId?: string }).__forgeCourseId = currentCourseId;
+    }
+    const renderedTarget = renderedThumbnailTargetRef.current;
+    if (renderedTarget && renderedTarget.courseId !== currentCourseId) {
+      flushThumbnail(renderedTarget);
+      renderedThumbnailTargetRef.current = null;
     }
     clearAllObjects();
     prevElementsRef.current = new Map();
-  }, [currentCourse, layaReady]);
+  }, [currentCourseId, currentCourseResourceVersion, flushThumbnail, layaReady]);
 
   // ─── 页面切换：全量重建 ───
   useEffect(() => {
     if (!layaReady) return;
-    if (!currentPage) {
-      if (prevPageIdRef.current) captureThumb(prevPageIdRef.current);
-      prevPageIdRef.current = null;
+    const nextTarget = currentCourseId && currentPage
+      ? { courseId: currentCourseId, pageId: currentPage.id }
+      : null;
+    const renderedTarget = renderedThumbnailTargetRef.current;
+    if (renderedTarget && !isSamePageThumbnailTarget(renderedTarget, nextTarget)) {
+      flushThumbnail(renderedTarget);
+      renderedThumbnailTargetRef.current = null;
+    }
+    if (!currentPage || !nextTarget) {
+      cancelThumbnail();
       clearAllObjects();
       prevElementsRef.current = new Map();
       return;
     }
-    if (prevPageIdRef.current && prevPageIdRef.current !== currentPage.id) {
-      captureThumb(prevPageIdRef.current);
-    }
-    prevPageIdRef.current = currentPage.id;
     clearAllObjects();
     prevElementsRef.current = new Map();
     const topLevel = currentPage.elements.filter(e => !e.parentId);
@@ -345,19 +423,9 @@ export default function Canvas() {
       if (obj) applyEditorLayerVisibility(obj, el, currentPage.elements);
     });
     prevElementsRef.current = new Map(currentPage.elements.map(e => [e.id, { ...e, props: { ...e.props } }]));
-    let cancelled = false;
-    setTimeout(() => {
-      if (cancelled) return;
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        requestAnimationFrame(() => {
-          if (cancelled) return;
-          captureThumb(currentPage.id);
-        });
-      });
-    }, 500);
-    return () => { cancelled = true; };
-  }, [currentPage?.id, layaReady]); // eslint-disable-line react-hooks/exhaustive-deps
+    renderedThumbnailTargetRef.current = nextTarget;
+    scheduleThumbnail(nextTarget);
+  }, [cancelThumbnail, currentCourseId, currentCourseResourceVersion, currentPage?.id, flushThumbnail, layaReady, scheduleThumbnail]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── 统一同步 effect：增删改 + z-order ───
   useEffect(() => {
@@ -390,17 +458,16 @@ export default function Canvas() {
           const newParent = el.parentId ? getObject(el.parentId) : canvasRoot();
           if (newParent?.addChild) newParent.addChild(obj);
         }
+        const sizeChanged = !prevEl || prevEl.width !== el.width || prevEl.height !== el.height;
         if (!prevEl || prevEl.x !== el.x || prevEl.y !== el.y || prevEl.width !== el.width || prevEl.height !== el.height || prevEl.opacity !== el.opacity || prevEl.rotation !== el.rotation) {
-          syncTransform(id, el.x, el.y, el.width, el.height);
+          syncTransform(id, el);
           obj.alpha = el.opacity;
-          obj.rotation = el.rotation;
-          const sizeChanged = !prevEl || prevEl.width !== el.width || prevEl.height !== el.height;
           const isTextAreaEdit = el.layaType === 'TextArea';
           if (sizeChanged && !el.props?.skin && !obj.skin && !((obj._childs ?? obj._children) && (obj._childs ?? obj._children).length > 0) && !isTextAreaEdit && el.layaType !== 'DragViewBox' && el.type !== 'DragDropBox' && el.type !== 'DragDragBox') {
             drawPlaceholder(obj, el);
           }
         }
-        if (!prevEl || prevEl.props !== el.props) {
+        if (!prevEl || prevEl.props !== el.props || (sizeChanged && el.type === 'NewTextArea')) {
           applyKlProps(obj, el);
         }
       }
@@ -444,13 +511,18 @@ export default function Canvas() {
       for (const el of videoElements) {
         const videoUrl = (el.props as Record<string, unknown>)?.videoUrl as string;
         if (!videoUrl) continue;
+        const target = { courseId, pageId: currentPage.id };
         const applyThumbnail = (thumbnail: string) => {
+          if (!isSamePageThumbnailTarget(renderedThumbnailTargetRef.current, target)) return;
           const obj = getObject(el.id);
           if (obj) {
-            try { obj.skin = thumbnail; } catch { /* ignore */ }
+            try {
+              obj.skin = thumbnail;
+              scheduleThumbnail(target);
+            } catch { /* ignore */ }
           }
         };
-        const cached = getCachedVideoThumbnail(videoUrl);
+        const cached = getCachedVideoThumbnail(videoUrl, courseId);
         if (cached) {
           applyThumbnail(cached);
         } else {
@@ -460,7 +532,19 @@ export default function Canvas() {
         }
       }
     }
-  }, [currentPage?.elements, layaReady]); // eslint-disable-line react-hooks/exhaustive-deps
+    const target = renderedThumbnailTargetRef.current;
+    if (target) scheduleThumbnail(target);
+  }, [currentPage?.elements, layaReady, scheduleThumbnail]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 保存、预览入口以及窗口重新获得焦点时提交当前最新画面。
+  useEffect(() => {
+    window.addEventListener(PAGE_THUMBNAIL_FLUSH_EVENT, flushCurrentThumbnail);
+    window.addEventListener('focus', flushCurrentThumbnail);
+    return () => {
+      window.removeEventListener(PAGE_THUMBNAIL_FLUSH_EVENT, flushCurrentThumbnail);
+      window.removeEventListener('focus', flushCurrentThumbnail);
+    };
+  }, [flushCurrentThumbnail]);
 
   // ─── 预览关闭后重建 ───
   useEffect(() => {
@@ -489,14 +573,21 @@ export default function Canvas() {
       // 恢复编辑态 world transform + stage 尺寸
       resizeStageRef.current?.();
       setWorldTransform(worldRef.current.panX, worldRef.current.panY, worldRef.current.zoom);
+      const target = renderedThumbnailTargetRef.current;
+      if (target) {
+        requestAnimationFrame(() => requestAnimationFrame(() => flushThumbnail(target)));
+      }
     };
     window.addEventListener('forge:preview-closed', handler);
     return () => window.removeEventListener('forge:preview-closed', handler);
-  }, [currentPage]);
+  }, [currentPage, flushThumbnail]);
 
   useEffect(() => {
     return () => {
       try {
+        const target = renderedThumbnailTargetRef.current;
+        if (target) captureThumb(target);
+        cancelThumbnail();
         // Stop Laya frameLoop
         const L = laya();
         if (L && frameLoopFnRef.current) {
@@ -518,7 +609,7 @@ export default function Canvas() {
         console.warn('[forge] Canvas cleanup error:', e);
       }
     };
-  }, []);
+  }, [cancelThumbnail, captureThumb]);
 
   // ─── 键盘：删除 + 方向键微调 ───
   useEffect(() => {
@@ -961,6 +1052,7 @@ export default function Canvas() {
             弹窗编辑 · 主界面底板只读
           </div>
         )}
+        <SelectionArrangeToolbar />
         {workbenchReadonly && (
           <div
             role="button"
@@ -1022,6 +1114,14 @@ export default function Canvas() {
               showSnapGuides={assistPreferences.showSnapGuides}
               distanceHintsEnabled={assistPreferences.showDistanceHints}
               setEditingId={setEditingId}
+              textCaretPoint={textCaretPoint}
+              setTextCaretPoint={setTextCaretPoint}
+              selectAllTextOnEdit={selectAllTextOnEdit}
+              setSelectAllTextOnEdit={setSelectAllTextOnEdit}
+              onTextSessionEnd={() => {
+                setTextCaretPoint(null);
+                setSelectAllTextOnEdit(false);
+              }}
             />
           </div>
         )}

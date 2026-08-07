@@ -2,6 +2,8 @@ export interface Action {
   id: string;
   event: string;        // 'onClick' | 'onLoad'
   targetId?: string;    // undefined = self
+  /** 普通元素目标删除后用于显示失效关系，不参与运行时引用。 */
+  targetNameSnapshot?: string;
   actionType: string;   // 'setProperty' | 'toggleVisible' | 'changePage' | 'showOverlay' | 'hideOverlay'
   property?: string;    // for setProperty
   value?: unknown;

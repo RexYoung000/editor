@@ -1,3 +1,5 @@
+import { PRESET_VIDEOS } from './presetVideos';
+
 /**
  * 内置资源清单。
  *
@@ -27,6 +29,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'klInput.active',      src: 'runtime/game/inputImg/img_2.png',     exportPath: 'game/inputImg/img_2.png' },
   { id: 'klInput.wrong',       src: 'runtime/game/inputImg/img_3.png',     exportPath: 'game/inputImg/img_3.png' },
   { id: 'klInput.font',        src: 'runtime/game/inputImg/jp_num40.png',  exportPath: 'game/inputImg/jp_num40.png' },
+  { id: 'klInput.fontPercent', src: 'runtime/game/inputImg/jp_num40_percent.png', exportPath: 'game/inputImg/jp_num40_percent.png' },
   // 新组件：确定按钮（旧路径保留兼容）
   { id: 'btn.confirm',         src: 'runtime/game/image/btn_qd2.png',      exportPath: 'game/image/btn_qd2.png' },
   // 封面底图（编辑器和运行时都需要）
@@ -54,6 +57,13 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'preset.img1',          src: 'editor/img_1.png' },
   { id: 'preset.img2',          src: 'editor/img_2.png' },
   { id: 'preset.video',         src: 'editor/video-placeholder.png' },
+  { id: 'preset.questionLayoutAqua.background', src: 'runtime/game/preset/question-layout-aqua-01/background.jpg', exportPath: 'game/preset/question-layout-aqua-01/background.jpg' },
+  { id: 'preset.questionLayoutBlue.background', src: 'runtime/game/preset/question-layout-blue-01/background.jpg', exportPath: 'game/preset/question-layout-blue-01/background.jpg' },
+  { id: 'preset.questionLayoutBlue.titlePaper', src: 'runtime/game/preset/question-layout-blue-01/title-paper.png', exportPath: 'game/preset/question-layout-blue-01/title-paper.png' },
+  { id: 'preset.woodScroll.background', src: 'runtime/game/preset/lesson-layout-wood-scroll-01/background.jpg', exportPath: 'game/preset/lesson-layout-wood-scroll-01/background.jpg' },
+  { id: 'preset.woodScroll.titleFrame', src: 'runtime/game/preset/lesson-layout-wood-scroll-01/title-frame.png', exportPath: 'game/preset/lesson-layout-wood-scroll-01/title-frame.png' },
+  { id: 'preset.woodScroll.soundButton', src: 'runtime/game/preset/lesson-layout-wood-scroll-01/sound-button.png', exportPath: 'game/preset/lesson-layout-wood-scroll-01/sound-button.png' },
+  ...PRESET_VIDEOS.map((video) => ({ id: video.assetId, src: video.assetPath })),
 
   // 键盘预设1：数字键盘（参考 LessonZK 模板）
   { id: 'keyboard.preset1.bg',          src: 'runtime/game/jpL11/jp_3.png',       exportPath: 'game/jpL11/jp_3.png' },
@@ -70,6 +80,98 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'keyboard.preset2.numFont',     src: 'runtime/game/jpL8/jp_szt.png',      exportPath: 'game/jpL8/jp_szt.png' },
   { id: 'keyboard.preset2.delIcon',     src: 'runtime/game/jpL8/img_delete.png',  exportPath: 'game/jpL8/img_delete.png' },
   { id: 'keyboard.preset2.thumbnail',   src: 'editor/keyboard-preset2-thumb.png' },
+
+  // v1.2 数学输入键盘：沿用 SDK KeyBoard41UI 的黄色主题资源
+  { id: 'keyboard.math.bg',             src: 'runtime/game/mathKeyboard/yellow/img_jpk.png',     exportPath: 'game/mathKeyboard/yellow/img_jpk.png' },
+  { id: 'keyboard.math.keyNormal',      src: 'runtime/game/mathKeyboard/yellow/img_anniu1a.png', exportPath: 'game/mathKeyboard/yellow/img_anniu1a.png' },
+  { id: 'keyboard.math.keyActive',      src: 'runtime/game/mathKeyboard/yellow/img_anniu1b.png', exportPath: 'game/mathKeyboard/yellow/img_anniu1b.png' },
+  { id: 'keyboard.math.wideNormal',     src: 'runtime/game/mathKeyboard/yellow/img_anniu2a.png', exportPath: 'game/mathKeyboard/yellow/img_anniu2a.png' },
+  { id: 'keyboard.math.wideActive',     src: 'runtime/game/mathKeyboard/yellow/img_anniu2b.png', exportPath: 'game/mathKeyboard/yellow/img_anniu2b.png' },
+  { id: 'keyboard.math.numNormal',      src: 'runtime/game/mathKeyboard/yellow/img_shuzi1.png',  exportPath: 'game/mathKeyboard/yellow/img_shuzi1.png' },
+  { id: 'keyboard.math.numActive',      src: 'runtime/game/mathKeyboard/yellow/img_shuzi2.png',  exportPath: 'game/mathKeyboard/yellow/img_shuzi2.png' },
+  { id: 'keyboard.math.delIcon',        src: 'runtime/game/mathKeyboard/yellow/img_delete1.png',  exportPath: 'game/mathKeyboard/yellow/img_delete1.png' },
+  { id: 'keyboard.math.delActive',      src: 'runtime/game/mathKeyboard/yellow/img_delete2.png',  exportPath: 'game/mathKeyboard/yellow/img_delete2.png' },
+  { id: 'keyboard.math.arrow',          src: 'runtime/game/mathKeyboard/yellow/img_ydjt.png',    exportPath: 'game/mathKeyboard/yellow/img_ydjt.png' },
+  { id: 'keyboard.math.fractionNormal', src: 'runtime/game/mathKeyboard/img_fraction1.png', exportPath: 'game/mathKeyboard/img_fraction1.png' },
+  { id: 'keyboard.math.fractionActive', src: 'runtime/game/mathKeyboard/img_fraction2.png', exportPath: 'game/mathKeyboard/img_fraction2.png' },
+  { id: 'keyboard.math.fractionLine',   src: 'runtime/game/mathKeyboard/img_line.png',      exportPath: 'game/mathKeyboard/img_line.png' },
+  { id: 'keyboard.math.inputFont',      src: 'runtime/game/mathKeyboard/img_w2Input.png',   exportPath: 'game/mathKeyboard/img_w2Input.png' },
+  { id: 'keyboard.decimal.thumbnail',   src: 'editor/keyboard-decimal-thumb.png' },
+  { id: 'keyboard.fraction.thumbnail',  src: 'editor/keyboard-fraction-thumb.png' },
+  { id: 'keyboard.percent.thumbnail',           src: 'editor/keyboard-percent-thumb.png' },
+  { id: 'keyboard.percentDecimal.thumbnail',    src: 'editor/keyboard-percent-decimal-thumb.png' },
+  { id: 'keyboard.percentOperators.thumbnail',  src: 'editor/keyboard-percent-operators-thumb.png' },
+  { id: 'keyboard.percentExpression.thumbnail', src: 'editor/keyboard-percent-expression-thumb.png' },
+  { id: 'keyboard.decimalFraction.thumbnail',   src: 'editor/keyboard-decimal-fraction-thumb.png' },
+  { id: 'keyboard.mathExpression.thumbnail',    src: 'editor/keyboard-math-expression-thumb.png' },
+  { id: 'keyboard.customAnswer.thumbnail', src: 'editor/keyboard-custom-answer-thumb.png' },
+
+  // 数学键盘三色主题：皮肤复用文本键盘，字形和分数图标使用独立主题资源
+  { id: 'keyboard.math.yellow.bg',             src: 'runtime/game/textKeyboard/yellow/bg.png',             exportPath: 'game/textKeyboard/yellow/bg.png' },
+  { id: 'keyboard.math.yellow.keyNormal',      src: 'runtime/game/textKeyboard/yellow/key-normal.png',     exportPath: 'game/textKeyboard/yellow/key-normal.png' },
+  { id: 'keyboard.math.yellow.keyActive',      src: 'runtime/game/textKeyboard/yellow/key-active.png',     exportPath: 'game/textKeyboard/yellow/key-active.png' },
+  { id: 'keyboard.math.yellow.wideNormal',     src: 'runtime/game/textKeyboard/yellow/wide-normal.png',    exportPath: 'game/textKeyboard/yellow/wide-normal.png' },
+  { id: 'keyboard.math.yellow.wideActive',     src: 'runtime/game/textKeyboard/yellow/wide-active.png',    exportPath: 'game/textKeyboard/yellow/wide-active.png' },
+  { id: 'keyboard.math.yellow.glyphNormal',    src: 'runtime/game/mathKeyboard/yellow/glyph-normal.png',   exportPath: 'game/mathKeyboard/yellow/glyph-normal.png' },
+  { id: 'keyboard.math.yellow.glyphActive',    src: 'runtime/game/mathKeyboard/yellow/glyph-active.png',   exportPath: 'game/mathKeyboard/yellow/glyph-active.png' },
+  { id: 'keyboard.math.yellow.delNormal',      src: 'runtime/game/textKeyboard/yellow/clear-normal.png',   exportPath: 'game/textKeyboard/yellow/clear-normal.png' },
+  { id: 'keyboard.math.yellow.delActive',      src: 'runtime/game/textKeyboard/yellow/clear-active.png',   exportPath: 'game/textKeyboard/yellow/clear-active.png' },
+  { id: 'keyboard.math.yellow.fractionNormal', src: 'runtime/game/mathKeyboard/yellow/fraction-normal.png', exportPath: 'game/mathKeyboard/yellow/fraction-normal.png' },
+  { id: 'keyboard.math.yellow.fractionActive', src: 'runtime/game/mathKeyboard/yellow/fraction-active.png', exportPath: 'game/mathKeyboard/yellow/fraction-active.png' },
+  { id: 'keyboard.math.yellow.percent',        src: 'runtime/game/mathKeyboard/yellow/percent.png',         exportPath: 'game/mathKeyboard/yellow/percent.png' },
+  { id: 'keyboard.math.yellow.arrow',          src: 'runtime/game/textKeyboard/yellow/arrow.png',          exportPath: 'game/textKeyboard/yellow/arrow.png' },
+  { id: 'keyboard.math.blue.bg',             src: 'runtime/game/textKeyboard/blue/bg.png',             exportPath: 'game/textKeyboard/blue/bg.png' },
+  { id: 'keyboard.math.blue.keyNormal',      src: 'runtime/game/textKeyboard/blue/key-normal.png',     exportPath: 'game/textKeyboard/blue/key-normal.png' },
+  { id: 'keyboard.math.blue.keyActive',      src: 'runtime/game/textKeyboard/blue/key-active.png',     exportPath: 'game/textKeyboard/blue/key-active.png' },
+  { id: 'keyboard.math.blue.wideNormal',     src: 'runtime/game/textKeyboard/blue/wide-normal.png',    exportPath: 'game/textKeyboard/blue/wide-normal.png' },
+  { id: 'keyboard.math.blue.wideActive',     src: 'runtime/game/textKeyboard/blue/wide-active.png',    exportPath: 'game/textKeyboard/blue/wide-active.png' },
+  { id: 'keyboard.math.blue.glyphNormal',    src: 'runtime/game/mathKeyboard/blue/glyph-normal.png',   exportPath: 'game/mathKeyboard/blue/glyph-normal.png' },
+  { id: 'keyboard.math.blue.glyphActive',    src: 'runtime/game/mathKeyboard/blue/glyph-active.png',   exportPath: 'game/mathKeyboard/blue/glyph-active.png' },
+  { id: 'keyboard.math.blue.delNormal',      src: 'runtime/game/textKeyboard/blue/clear-normal.png',   exportPath: 'game/textKeyboard/blue/clear-normal.png' },
+  { id: 'keyboard.math.blue.delActive',      src: 'runtime/game/textKeyboard/blue/clear-active.png',   exportPath: 'game/textKeyboard/blue/clear-active.png' },
+  { id: 'keyboard.math.blue.fractionNormal', src: 'runtime/game/mathKeyboard/blue/fraction-normal.png', exportPath: 'game/mathKeyboard/blue/fraction-normal.png' },
+  { id: 'keyboard.math.blue.fractionActive', src: 'runtime/game/mathKeyboard/blue/fraction-active.png', exportPath: 'game/mathKeyboard/blue/fraction-active.png' },
+  { id: 'keyboard.math.blue.percent',        src: 'runtime/game/mathKeyboard/blue/percent.png',         exportPath: 'game/mathKeyboard/blue/percent.png' },
+  { id: 'keyboard.math.blue.arrow',          src: 'runtime/game/textKeyboard/blue/arrow.png',          exportPath: 'game/textKeyboard/blue/arrow.png' },
+  { id: 'keyboard.math.green.bg',             src: 'runtime/game/textKeyboard/green/bg.png',             exportPath: 'game/textKeyboard/green/bg.png' },
+  { id: 'keyboard.math.green.keyNormal',      src: 'runtime/game/textKeyboard/green/key-normal.png',     exportPath: 'game/textKeyboard/green/key-normal.png' },
+  { id: 'keyboard.math.green.keyActive',      src: 'runtime/game/textKeyboard/green/key-active.png',     exportPath: 'game/textKeyboard/green/key-active.png' },
+  { id: 'keyboard.math.green.wideNormal',     src: 'runtime/game/textKeyboard/green/wide-normal.png',    exportPath: 'game/textKeyboard/green/wide-normal.png' },
+  { id: 'keyboard.math.green.wideActive',     src: 'runtime/game/textKeyboard/green/wide-active.png',    exportPath: 'game/textKeyboard/green/wide-active.png' },
+  { id: 'keyboard.math.green.glyphNormal',    src: 'runtime/game/mathKeyboard/green/glyph-normal.png',   exportPath: 'game/mathKeyboard/green/glyph-normal.png' },
+  { id: 'keyboard.math.green.glyphActive',    src: 'runtime/game/mathKeyboard/green/glyph-active.png',   exportPath: 'game/mathKeyboard/green/glyph-active.png' },
+  { id: 'keyboard.math.green.delNormal',      src: 'runtime/game/textKeyboard/green/clear-normal.png',   exportPath: 'game/textKeyboard/green/clear-normal.png' },
+  { id: 'keyboard.math.green.delActive',      src: 'runtime/game/textKeyboard/green/clear-active.png',   exportPath: 'game/textKeyboard/green/clear-active.png' },
+  { id: 'keyboard.math.green.fractionNormal', src: 'runtime/game/mathKeyboard/green/fraction-normal.png', exportPath: 'game/mathKeyboard/green/fraction-normal.png' },
+  { id: 'keyboard.math.green.fractionActive', src: 'runtime/game/mathKeyboard/green/fraction-active.png', exportPath: 'game/mathKeyboard/green/fraction-active.png' },
+  { id: 'keyboard.math.green.percent',        src: 'runtime/game/mathKeyboard/green/percent.png',         exportPath: 'game/mathKeyboard/green/percent.png' },
+  { id: 'keyboard.math.green.arrow',          src: 'runtime/game/textKeyboard/green/arrow.png',          exportPath: 'game/textKeyboard/green/arrow.png' },
+
+  // 自定义答案键盘：三套同结构主题；文字在编辑器内烘焙为 PNG
+  { id: 'keyboard.customAnswer.yellow.bg',           src: 'runtime/game/textKeyboard/yellow/bg.png',           exportPath: 'game/textKeyboard/yellow/bg.png' },
+  { id: 'keyboard.customAnswer.yellow.keyNormal',    src: 'runtime/game/textKeyboard/yellow/key-normal.png',   exportPath: 'game/textKeyboard/yellow/key-normal.png' },
+  { id: 'keyboard.customAnswer.yellow.keyActive',    src: 'runtime/game/textKeyboard/yellow/key-active.png',   exportPath: 'game/textKeyboard/yellow/key-active.png' },
+  { id: 'keyboard.customAnswer.yellow.wideNormal',   src: 'runtime/game/textKeyboard/yellow/wide-normal.png',  exportPath: 'game/textKeyboard/yellow/wide-normal.png' },
+  { id: 'keyboard.customAnswer.yellow.wideActive',   src: 'runtime/game/textKeyboard/yellow/wide-active.png',  exportPath: 'game/textKeyboard/yellow/wide-active.png' },
+  { id: 'keyboard.customAnswer.yellow.clearNormal',  src: 'runtime/game/textKeyboard/yellow/clear-normal.png', exportPath: 'game/textKeyboard/yellow/clear-normal.png' },
+  { id: 'keyboard.customAnswer.yellow.clearActive',  src: 'runtime/game/textKeyboard/yellow/clear-active.png', exportPath: 'game/textKeyboard/yellow/clear-active.png' },
+  { id: 'keyboard.customAnswer.yellow.arrow',        src: 'runtime/game/textKeyboard/yellow/arrow.png',        exportPath: 'game/textKeyboard/yellow/arrow.png' },
+  { id: 'keyboard.customAnswer.blue.bg',             src: 'runtime/game/textKeyboard/blue/bg.png',             exportPath: 'game/textKeyboard/blue/bg.png' },
+  { id: 'keyboard.customAnswer.blue.keyNormal',      src: 'runtime/game/textKeyboard/blue/key-normal.png',     exportPath: 'game/textKeyboard/blue/key-normal.png' },
+  { id: 'keyboard.customAnswer.blue.keyActive',      src: 'runtime/game/textKeyboard/blue/key-active.png',     exportPath: 'game/textKeyboard/blue/key-active.png' },
+  { id: 'keyboard.customAnswer.blue.wideNormal',     src: 'runtime/game/textKeyboard/blue/wide-normal.png',    exportPath: 'game/textKeyboard/blue/wide-normal.png' },
+  { id: 'keyboard.customAnswer.blue.wideActive',     src: 'runtime/game/textKeyboard/blue/wide-active.png',    exportPath: 'game/textKeyboard/blue/wide-active.png' },
+  { id: 'keyboard.customAnswer.blue.clearNormal',    src: 'runtime/game/textKeyboard/blue/clear-normal.png',   exportPath: 'game/textKeyboard/blue/clear-normal.png' },
+  { id: 'keyboard.customAnswer.blue.clearActive',    src: 'runtime/game/textKeyboard/blue/clear-active.png',   exportPath: 'game/textKeyboard/blue/clear-active.png' },
+  { id: 'keyboard.customAnswer.blue.arrow',          src: 'runtime/game/textKeyboard/blue/arrow.png',          exportPath: 'game/textKeyboard/blue/arrow.png' },
+  { id: 'keyboard.customAnswer.green.bg',            src: 'runtime/game/textKeyboard/green/bg.png',            exportPath: 'game/textKeyboard/green/bg.png' },
+  { id: 'keyboard.customAnswer.green.keyNormal',     src: 'runtime/game/textKeyboard/green/key-normal.png',    exportPath: 'game/textKeyboard/green/key-normal.png' },
+  { id: 'keyboard.customAnswer.green.keyActive',     src: 'runtime/game/textKeyboard/green/key-active.png',    exportPath: 'game/textKeyboard/green/key-active.png' },
+  { id: 'keyboard.customAnswer.green.wideNormal',    src: 'runtime/game/textKeyboard/green/wide-normal.png',   exportPath: 'game/textKeyboard/green/wide-normal.png' },
+  { id: 'keyboard.customAnswer.green.wideActive',    src: 'runtime/game/textKeyboard/green/wide-active.png',   exportPath: 'game/textKeyboard/green/wide-active.png' },
+  { id: 'keyboard.customAnswer.green.clearNormal',   src: 'runtime/game/textKeyboard/green/clear-normal.png',  exportPath: 'game/textKeyboard/green/clear-normal.png' },
+  { id: 'keyboard.customAnswer.green.clearActive',   src: 'runtime/game/textKeyboard/green/clear-active.png',  exportPath: 'game/textKeyboard/green/clear-active.png' },
+  { id: 'keyboard.customAnswer.green.arrow',         src: 'runtime/game/textKeyboard/green/arrow.png',         exportPath: 'game/textKeyboard/green/arrow.png' },
 
   // ─── 标签图资源（标签图组件 NewTabImg 的内置皮肤库）───
   { id: 'tabImg.img_bc',      src: 'runtime/game/tabImg/img_bc.png',      exportPath: 'game/tabImg/img_bc.png' },
@@ -185,6 +287,7 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'okBtn.m_qddk_on', src: 'runtime/game/okBtn/m_qddk_on.png', exportPath: 'game/okBtn/m_qddk_on.png' },
   { id: 'okBtn.btn_dpon',  src: 'runtime/game/okBtn/btn_dpon.png',  exportPath: 'game/okBtn/btn_dpon.png' },
   { id: 'okBtn.btn_1',     src: 'runtime/game/okBtn/btn_1.png',     exportPath: 'game/okBtn/btn_1.png' },
+  { id: 'okBtn.quickTemplateYellowTraditional', src: 'runtime/game/okBtn/quick-template-yellow-traditional.png', exportPath: 'game/okBtn/quick-template-yellow-traditional.png' },
 
   // ─── 翻页组件资源 ───
   { id: 'pageTurn.btnLeft',       src: 'runtime/game/image/btn_return_new.png', exportPath: 'game/image/btn_return_new.png' },
@@ -200,6 +303,11 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'selectableObj.btn2', src: 'runtime/game/selectableObj/btn_2.png', exportPath: 'game/selectableObj/btn_2.png' },
   { id: 'selectableObj.btn3', src: 'runtime/game/selectableObj/btn_3.png', exportPath: 'game/selectableObj/btn_3.png' },
   { id: 'selectableObj.btn4', src: 'runtime/game/selectableObj/btn_4.png', exportPath: 'game/selectableObj/btn_4.png' },
+  { id: 'choiceOption.normal', src: 'runtime/game/choiceOption/normal.png', exportPath: 'game/choiceOption/normal.png' },
+  { id: 'choiceOption.pressed', src: 'runtime/game/choiceOption/pressed.png', exportPath: 'game/choiceOption/pressed.png' },
+  { id: 'choiceOption.selected', src: 'runtime/game/choiceOption/selected.png', exportPath: 'game/choiceOption/selected.png' },
+  { id: 'choiceOption.correct', src: 'runtime/game/choiceOption/correct.png', exportPath: 'game/choiceOption/correct.png' },
+  { id: 'choiceOption.wrong', src: 'runtime/game/choiceOption/wrong.png', exportPath: 'game/choiceOption/wrong.png' },
   // ─── 口才课选择题：选择题容器透明占位图 ───
   { id: 'choiceBox.placeholder', src: 'editor/choicebox-placeholder.png' },
   // ─── 容器Box透明占位图 ───
@@ -215,6 +323,12 @@ export const BUILTIN_ASSETS: BuiltinAsset[] = [
   { id: 'feedback.CH.yes.png', src: 'runtime/game/animation/zx_yes/zx_yes.png', exportPath: 'game/animation/zx_yes/zx_yes.png' },
   { id: 'feedback.CH.no.sk', src: 'runtime/game/animation/zx_no/zx_no.sk', exportPath: 'game/animation/zx_no/zx_no.sk' },
   { id: 'feedback.CH.no.png', src: 'runtime/game/animation/zx_no/zx_no.png', exportPath: 'game/animation/zx_no/zx_no.png' },
+
+  // ─── Spine 预设 ───
+  { id: 'spine.handClick.sk', src: 'runtime/game/animation/hand-click/game.sk', exportPath: 'game/animation/hand-click/game.sk' },
+  { id: 'spine.handClick.png', src: 'runtime/game/animation/hand-click/game.png', exportPath: 'game/animation/hand-click/game.png' },
+  { id: 'spine.handClick.thumbnail', src: 'editor/spine-hand-click-thumb.png' },
+  { id: 'spine.handMove.thumbnail', src: 'editor/spine-hand-move-thumb.png' },
 
   // ─── 画笔组件资源 ───
   { id: 'newBrushSprite.drawBtn',   src: 'runtime/game/image/img/img_draw.png',     exportPath: 'game/image/img/img_draw.png' },

@@ -1,4 +1,6 @@
-import type { Action, Element } from '../types';
+import type { Action, Course, Element, SubPage } from '../types';
+import { isInputRuleHost } from './inputAnswerRules';
+import { getLayerDisplayName } from './layerPresentation';
 
 export const SDK_JUDGE_EVENT = 'onClickSdkJudge';
 
@@ -8,9 +10,15 @@ export type SdkJudgeTargetKind = 'inputImage' | 'input' | 'choice' | 'drag' | 'm
 export interface SdkJudgeCapability {
   kind: SdkJudgeTargetKind;
   conditions: JudgeCondition[];
-  answerKey?: '_judgeAnswer' | 'answer' | 'rightItemNames';
+  answerKey?: '_judgeAnswer' | 'answer';
   answerLabel?: string;
   emptyLabel?: string;
+}
+
+export interface ConfirmTargetIssue {
+  code: 'missing-target' | 'invalid-target';
+  sourceId: string;
+  message: string;
 }
 
 const THREE_STATE: JudgeCondition[] = ['right', 'wrong', 'null'];
@@ -18,7 +26,7 @@ const TWO_STATE: JudgeCondition[] = ['right', 'wrong'];
 
 export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCapability | null {
   if (!element) return null;
-  if (element.type === 'KlInputImage') {
+  if (element.type === 'KlInputImage' || element.type === 'FractionInput') {
     return {
       kind: 'inputImage',
       conditions: THREE_STATE,
@@ -27,7 +35,7 @@ export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCap
       emptyLabel: '还没有填写',
     };
   }
-  if (element.type === 'KlInputBox') {
+  if (isInputRuleHost(element)) {
     return {
       kind: 'input',
       conditions: THREE_STATE,
@@ -40,7 +48,6 @@ export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCap
     return {
       kind: 'choice',
       conditions: THREE_STATE,
-      answerKey: 'rightItemNames',
       answerLabel: '正确选项',
       emptyLabel: '还没有选择',
     };
@@ -60,6 +67,56 @@ export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCap
 
 export function isSdkJudgeTarget(element: Element | undefined): element is Element {
   return getSdkJudgeCapability(element) !== null;
+}
+
+const INPUT_CONFIRM_EVENTS = new Set(['onClickInitConfirm', 'onClickInitConfirmWithLock']);
+
+export function collectConfirmTargetIssues(page: Pick<SubPage, 'elements'>): ConfirmTargetIssue[] {
+  const issues: ConfirmTargetIssue[] = [];
+  const elementsById = new Map(page.elements.map((element) => [element.id, element]));
+  for (const source of page.elements) {
+    for (const action of source.actions ?? []) {
+      if (!INPUT_CONFIRM_EVENTS.has(action.event)) continue;
+      const sourceLabel = getLayerDisplayName(source);
+      if (!action.targetId) {
+        issues.push({
+          code: 'missing-target',
+          sourceId: source.id,
+          message: `确定按钮“${sourceLabel}”尚未选择判定目标`,
+        });
+        continue;
+      }
+      const target = elementsById.get(action.targetId);
+      if (!target) {
+        issues.push({
+          code: 'missing-target',
+          sourceId: source.id,
+          message: `确定按钮“${sourceLabel}”引用的判定目标“${action.targetNameSnapshot ?? action.targetId}”已失效，请重新选择`,
+        });
+        continue;
+      }
+      if (!isInputRuleHost(target) && target.layaType !== 'ChoiceBox') {
+        issues.push({
+          code: 'invalid-target',
+          sourceId: source.id,
+          message: `确定按钮“${sourceLabel}”的目标“${getLayerDisplayName(target)}”不支持当前判定，请重新选择`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+export function collectCourseConfirmTargetIssues(course: Course): ConfirmTargetIssue[] {
+  const issues: ConfirmTargetIssue[] = [];
+  for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
+    for (const subPage of stage.subPages) {
+      for (const page of [subPage, ...(subPage.internalPages ?? [])]) {
+        issues.push(...collectConfirmTargetIssues(page));
+      }
+    }
+  }
+  return issues;
 }
 
 export function getSdkJudgeConditionLabel(

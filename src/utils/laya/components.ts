@@ -1,19 +1,189 @@
 import type { LayaObj, LayaAny } from './core';
 import type { Element } from '../../types';
-import { laya, classUtils, isPreviewMode, canvasRoot } from './core';
+import { applyElementTransform, laya, classUtils, isPreviewMode, canvasRoot } from './core';
 import { elementMeta } from '../../elements/elementMeta';
 import { lookupBuiltinByExportPath } from '../../elements/builtinAssets';
-import { readFileAsDataUrl } from '../electronFs';
-import { getKeyboardPreset } from '../../elements/keyboardPresets';
+import { getCourseResourceUrl, readFileAsDataUrl } from '../electronFs';
+import {
+  getCustomAnswerKeyboardLayout,
+  getCustomAnswerThemeAssets,
+  getKeyboardPreset,
+  getMathKeyboardChildren,
+  isMathKeyboardPresetId,
+  normalizeCustomAnswerOptions,
+  readCustomAnswerKeyboardConfig,
+  type ExportChild,
+} from '../../elements/keyboardPresets';
 import { getCachedVideoThumbnail } from '../videoThumbnail';
 import { getDefaultSkins, generateButtonSkin, generateCheckboxSkin, generateRadioSkin, generateInputSkin } from '../skinGenerator';
-import { resolveElementFont } from '../fontLoader';
+import { renderTextToImage, type RenderTextProps } from '../textToImage';
 import { getEditorCanvasFillColor, isEditorCanvasHitThrough } from '../canvasComposite';
 import { isElementHidden } from '../layerState';
+import { renderCustomAnswerTextSkin } from '../customAnswerKeyboardText';
+import { pauseSpineAtFirstFrame, resolveSpineAnimationIndex } from '../spinePreview';
 
 function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string | null, stroke?: string, sw?: number) {
   if (stroke && sw && sw > 0) g.drawRect(x, y, w, h, fill, stroke, sw);
   else if (fill) g.drawRect(x, y, w, h, fill);
+}
+
+export function applyNewTextAreaRender(comp: LayaObj, element: Element): void {
+  const props: Record<string, unknown> = {
+    ...(elementMeta[element.type]?.defaultProps ?? {}),
+    ...(element.props ?? {}),
+  };
+  const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
+  const renderKey = JSON.stringify([element.width, element.height, props]);
+  const previousRenderWidth = Number(comp._forgeTextRenderWidth);
+  const previousRenderHeight = Number(comp._forgeTextRenderHeight);
+  comp._forgeTextRenderKey = renderKey;
+  // 新位图生成前保留旧文字的视觉尺寸，避免把旧纹理拉伸到新框体。
+  if (previousRenderWidth > 0 && element.width > 0) comp.scaleX = previousRenderWidth / element.width;
+  if (previousRenderHeight > 0 && element.height > 0) comp.scaleY = previousRenderHeight / element.height;
+  const applyRenderedText = (dataUrl: string) => {
+    if (comp._forgeTextRenderKey !== renderKey) return;
+    try {
+      comp.skin = dataUrl;
+      comp.scaleX = 1;
+      comp.scaleY = 1;
+      comp._forgeTextRenderWidth = element.width;
+      comp._forgeTextRenderHeight = element.height;
+    } catch { /* ignore */ }
+  };
+  renderTextToImage(
+    String(props.text ?? ''),
+    element.width,
+    element.height,
+    props as RenderTextProps,
+    2,
+    courseId,
+  ).then((dataUrl) => {
+    if (comp._forgeTextRenderKey !== renderKey) return;
+    const L = laya();
+    if (L?.loader && L.Handler) {
+      L.loader.load([{ url: dataUrl, type: 'image' }], L.Handler.create(null, () => applyRenderedText(dataUrl)));
+    } else {
+      applyRenderedText(dataUrl);
+    }
+  }).catch(() => {});
+}
+
+export function applyCustomAnswerKeyboardRender(comp: LayaObj, element: Element): void {
+  if (isPreviewMode()) return;
+  const presetId = (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (presetId !== 'customAnswer') return;
+  const cu = classUtils();
+  if (!cu) return;
+
+  const config = readCustomAnswerKeyboardConfig(element);
+  const renderKey = JSON.stringify([element.width, element.height, config]);
+  if (comp._customAnswerRenderKey === renderKey) return;
+  comp._customAnswerRenderKey = renderKey;
+  comp.removeChildren?.();
+
+  const assets = getCustomAnswerThemeAssets(config.theme, true);
+  const normalizedAnswers = normalizeCustomAnswerOptions(config.answers);
+  const answers = normalizedAnswers.length >= 2 ? normalizedAnswers : ['东', '南', '西', '北'];
+  const layout = getCustomAnswerKeyboardLayout(answers);
+  const boardX = (460 - layout.boardWidth) / 2;
+  const makeImage = (skin: string, x: number, y: number, width?: number, height?: number) => {
+    const image = cu.getInstance('Image');
+    if (!image) return null;
+    image.skin = skin;
+    image.x = x;
+    image.y = y;
+    if (width !== undefined) image.width = width;
+    if (height !== undefined) image.height = height;
+    return image;
+  };
+
+  const bg = makeImage(assets.bg, boardX, 65, layout.boardWidth, layout.boardHeight);
+  if (bg) {
+    bg.sizeGrid = '53,52,57,52';
+    comp.addChild(bg);
+  }
+  const arrow = makeImage(assets.arrow, 216, 0);
+  if (arrow) comp.addChild(arrow);
+
+  const addTextSkin = (parent: LayaObj, answer: string, width: number) => {
+    const textImage = makeImage('', 0, 0, width, 88);
+    if (!textImage) return;
+    textImage.mouseEnabled = false;
+    parent.addChild(textImage);
+    void renderCustomAnswerTextSkin(answer, config.theme, width).then((dataUrl) => {
+      if (comp._customAnswerRenderKey !== renderKey || textImage.destroyed) return;
+      const L = laya();
+      const applySkin = () => {
+        if (comp._customAnswerRenderKey === renderKey && !textImage.destroyed) textImage.skin = dataUrl;
+      };
+      if (L?.loader && L.Handler) {
+        L.loader.load([{ url: dataUrl, type: 'image' }], L.Handler.create(null, applySkin));
+      } else {
+        applySkin();
+      }
+    }).catch((error) => {
+      console.error('[customAnswerKeyboard] 键帽文字图片生成失败', error);
+    });
+  };
+
+  answers.forEach((answer, index) => {
+    const position = layout.answerPositions[index];
+    const key = makeImage(
+      assets.keyNormal,
+      boardX + position.x - position.width / 2,
+      65 + position.y - 44,
+      position.width,
+      88,
+    );
+    if (!key) return;
+    key.sizeGrid = '0,28,0,28';
+    addTextSkin(key, answer, position.width);
+    comp.addChild(key);
+  });
+
+  const clearWidth = layout.clearPosition.width;
+  const clear = makeImage(
+    assets.wideNormal,
+    boardX + layout.clearPosition.x - clearWidth / 2,
+    65 + layout.clearPosition.y - 44,
+    clearWidth,
+    88,
+  );
+  if (clear) {
+    clear.sizeGrid = '0,28,0,28';
+    const icon = makeImage(assets.clearNormal, (clearWidth - 65) / 2, (88 - 55) / 2);
+    if (icon) clear.addChild(icon);
+    comp.addChild(clear);
+  }
+
+}
+
+export function applyMathKeyboardRender(comp: LayaObj, element: Element): void {
+  if (isPreviewMode()) return;
+  const presetId = (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (!isMathKeyboardPresetId(presetId)) return;
+  const cu = classUtils();
+  const children = getMathKeyboardChildren(element, true);
+  if (!cu || !children) return;
+
+  const renderKey = JSON.stringify([presetId, element.props._mathKeyboardTheme]);
+  if (comp._mathKeyboardRenderKey === renderKey) return;
+  comp._mathKeyboardRenderKey = renderKey;
+  comp.removeChildren?.();
+
+  const addNode = (node: ExportChild, parent: LayaObj) => {
+    const instance = cu.getInstance(node.type === 'KlKey' ? 'Box' : node.type);
+    if (!instance) return;
+    parent.addChild(instance);
+    for (const [key, value] of Object.entries(node.props)) {
+      if (key === 'runtime' || key === 'output' || value === undefined || value === null) continue;
+      try { instance[key] = value; } catch { /* ignore unsupported editor-only props */ }
+    }
+    const nested = node.type === 'KlKey' ? node.child?.slice(0, 1) : node.child;
+    nested?.forEach((child) => addNode(child, instance));
+  };
+
+  children.forEach((child) => addNode(child, comp));
 }
 
 export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj | null {
@@ -25,6 +195,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
 
   if (element.layaType) {
     let resolvedType = element.layaType;
+    if (element.type === 'NewTextArea') resolvedType = 'Image';
     if (!preview) {
       // 编辑模式下若干 sdk_baiya 组件用 Laya 内置类替代，便于占位渲染
       if (resolvedType === 'TextInput') resolvedType = 'Box';
@@ -38,10 +209,20 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
       // MatchingGame 编辑模式下用 Box 替代，避免真实 runtime 的 init() 在 rightItemNames 未配置时崩溃
       // 导出时仍按原 layaType 输出
       else if (resolvedType === 'MatchingGame') resolvedType = 'Box';
-      // TextArea 编辑模式下用 Label 显示文字（live 渲染，配合双击 HTML 浮层做行内编辑）
+      // 其他 TextArea 编辑模式下用 Label 显示文字。
       else if (resolvedType === 'TextArea') resolvedType = 'Label';
       // SoundButton 编辑模式下用 Image 替代（类似图片组件，避免实例化真 SoundButton）
       else if (resolvedType === 'SoundButton') resolvedType = 'Image';
+      // 可配置主题的键盘需要在编辑画布显示实例的真实布局和皮肤。
+      else if (
+        element.type === 'KlBaseKeyboard'
+        && (
+          (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id === 'customAnswer'
+          || isMathKeyboardPresetId(
+            (element.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id,
+          )
+        )
+      ) resolvedType = 'Sprite';
       // Spine 动画：编辑模式下用原生 laya.ani.bone.Skeleton，绕过 KlSkeleton1 的自动重播逻辑
       // sdk_baiya 通过 View.regComponent("Skeleton", KlSkeleton1) 覆盖了 ClassUtils，
       // 但 Laya.Skeleton / Laya.__classmap['laya.ani.bone.Skeleton'] 仍是原生类
@@ -76,10 +257,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
 
   if (!comp) { console.warn('[laya-bridge] Failed to create:', element.layaType ?? element.type); return null; }
 
-  comp.x = element.x;
-  comp.y = element.y;
-  comp.width = element.width;
-  comp.height = element.height;
+  applyElementTransform(comp, element);
   comp.name = element.name;
 
   if (element.layaType) {
@@ -123,6 +301,7 @@ export function createLayaComponent(element: Element, parent?: LayaObj): LayaObj
 }
 
 export function applyKlProps(comp: LayaObj, element: Element): void {
+  applyElementTransform(comp, element);
   // 编辑器可见性：_editorHidden=true 时在画布上隐藏，否则使用 visible 属性（翻页组件切换页）
   if (!isPreviewMode()) {
     const elProps = element.props as Record<string, unknown>;
@@ -141,8 +320,6 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
   }
 
   if (element.opacity !== undefined) comp.alpha = element.opacity;
-  if (element.rotation !== undefined) comp.rotation = element.rotation;
-
   // 合并 defaultProps 和 element.props（旧数据可能缺少 defaultProps 里的字段）
   const meta = elementMeta[element.type];
   const props: Record<string, unknown> = { ...(meta?.defaultProps ?? {}), ...(element.props ?? {}) };
@@ -161,25 +338,20 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
     if (isUrlSk && urlStr) {
       const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
       const animName = (props.currAniName as string) ?? '';
-      const animList = Array.isArray(props._animationList) ? (props._animationList as string[]) : [];
       if (courseId && comp.load) {
-        const forgeLocalUrl = `forge-local://${courseId}/${urlStr}`;
-        if (comp._lastSkUrl !== forgeLocalUrl) {
-          comp._lastSkUrl = forgeLocalUrl;
+        const builtin = lookupBuiltinByExportPath(urlStr);
+        const loadUrl = builtin ? `/builtin/${builtin.src}` : getCourseResourceUrl(courseId, urlStr);
+        if (comp._lastSkUrl !== loadUrl) {
+          comp._lastSkUrl = loadUrl;
           comp._lastAnimName = animName;
           const L = laya();
           const handler = L.Handler.create(null, () => {
-            const idx = animList.indexOf(animName);
-            try { comp.play(idx >= 0 ? idx : 0, true); } catch { /* ignore */ }
+            try { pauseSpineAtFirstFrame(comp, resolveSpineAnimationIndex(props, animName)); } catch { /* ignore */ }
           });
-          comp.load(forgeLocalUrl, handler, 0);
-        } else if (comp._lastAnimName !== animName && animList.length > 0) {
+          comp.load(loadUrl, handler, 0);
+        } else if (comp._lastAnimName !== animName && animName) {
           comp._lastAnimName = animName;
-          const idx = animList.indexOf(animName);
-          try {
-            comp.play(idx >= 0 ? idx : 0, true);
-            if (comp._spinePaused) comp.paused();
-          } catch { /* ignore */ }
+          try { pauseSpineAtFirstFrame(comp, resolveSpineAnimationIndex(props, animName)); } catch { /* ignore */ }
         }
       }
     }
@@ -199,7 +371,8 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
     } else if (element.type === 'Video') {
       const videoUrl = (props.videoUrl as string) ?? '';
       if (videoUrl) {
-        const cached = getCachedVideoThumbnail(videoUrl);
+        const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId ?? '';
+        const cached = getCachedVideoThumbnail(videoUrl, courseId);
         if (cached) {
           props.skin = cached;
         } else {
@@ -324,23 +497,18 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
       } catch { /* ignore */ }
     }
     for (const [key, value] of Object.entries(props)) {
-      if (key === 'skin' || key === 'tipSkin' || key === 'stateNum' || key === 'sizeGrid' || key.startsWith('_') || (key === 'visible' && !isPreviewMode()) || key === 'isHide') continue;
+      if (key === 'skin' || key === 'tipSkin' || key === 'stateNum' || key === 'sizeGrid' || key === 'mirrorX' || key === 'mirrorY' || key.startsWith('_') || (key === 'visible' && !isPreviewMode()) || key === 'isHide') continue;
       if (value === undefined || value === null) continue;
       try { comp[key] = value; } catch { /* ignore */ }
     }
   }
 
-  // NewTextArea 编辑模式下被替换成 Label,需要把字体 face 写到 comp.font。
-  if (!isPreviewMode() && element.type === 'NewTextArea') {
-    try { comp.font = 'FZLanTingHei'; } catch { /* ignore */ }
-    const courseId = (window as unknown as { __forgeCourseId?: string }).__forgeCourseId;
-    if (courseId) {
-      const fontLocalPath = (props.fontLocalPath as string | undefined) ?? '';
-      const fontLibraryId = (props.fontLibraryId as string | undefined) ?? '';
-      resolveElementFont(courseId, fontLocalPath, fontLibraryId)
-        .then((name) => { try { comp.font = name; } catch { /* ignore */ } })
-        .catch(() => {});
-    }
+  if (element.type === 'NewTextArea') {
+    applyNewTextAreaRender(comp, element);
+  }
+  if (element.type === 'KlBaseKeyboard') {
+    applyCustomAnswerKeyboardRender(comp, element);
+    applyMathKeyboardRender(comp, element);
   }
 
   // DropObj 编辑模式：用 Box 渲染，手动管理 skin + tipSkin 两个子 Image

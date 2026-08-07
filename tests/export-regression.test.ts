@@ -274,10 +274,10 @@ test('预习导出保持独立资源前缀、预习页面类型和视频差异',
   );
   assert.equal(artifacts.scenes.length, 1, '[预习] 视频关卡不生成 scene');
   assert.match(artifacts.scenes[0].source, /extends ui\.game_preview\.Game1UI/);
-  assert.doesNotMatch(
+  assert.match(
     artifacts.scenes[0].source,
     /game_preview\/sound\/wrong\.mp3/,
-    '[预习] 普通用户 Action 当前不生成场景绑定代码',
+    '[预习] 普通用户 Action 生成场景绑定代码',
   );
 
   assert.equal(artifacts.config.mode, 'preview');
@@ -285,15 +285,17 @@ test('预习导出保持独立资源前缀、预习页面类型和视频差异',
   assert.deepEqual(
     {
       name: pages[0].name,
-      view: pages[0].view,
-      classType: pages[0].classType,
+      subviews: pages[0].subviews,
     },
     {
       name: '预习1',
-      view: 'view/game_preview/Game1.ts',
-      classType: 'yx',
+      subviews: [{
+        view: 'view/game_preview/Game1.ts',
+        param: '1',
+        classType: 'yx',
+      }],
     },
-    '[预习] 普通页面配置',
+    '[预习] 普通大关卡通过 subviews 承载小关卡',
   );
   assertResource('预习', resourceEntries(pages[0]), {
     url: 'game_preview/image/img/large.png',
@@ -311,6 +313,110 @@ test('预习导出保持独立资源前缀、预习页面类型和视频差异',
       classType: 'yxdh',
     },
     '[预习] 视频页面配置',
+  );
+});
+
+test('画笔组合导出可创建的运行节点并兼容旧内置资源路径', () => {
+  const course = previewCourseFixture();
+  const page = course.previewStages?.[0]?.subPages[0];
+  assert.ok(page);
+  page.elements.push(
+    {
+      id: 'brush-box',
+      type: 'NewBrushSprite',
+      layaType: 'Box',
+      name: 'NewBrushSprite_1',
+      x: 0,
+      y: 0,
+      width: 1920,
+      height: 1080,
+      rotation: 0,
+      opacity: 1,
+      props: {},
+      actions: [{
+        id: 'brush-init',
+        event: 'onInitBrush',
+        actionType: 'none',
+      }],
+    },
+    {
+      id: 'brush-draw',
+      type: 'BrushDrawBtn',
+      layaType: 'SelectableObj',
+      name: 'BrushDrawBtn_1',
+      parentId: 'brush-box',
+      x: 900,
+      y: 280,
+      width: 119,
+      height: 119,
+      rotation: 0,
+      opacity: 1,
+      props: {
+        _foregroundSkin: 'game/image/img/img_draw.png',
+        _bgSkin: 'game/image/img/img_anniu-xz.png',
+      },
+      actions: [],
+    },
+    {
+      id: 'brush-clear',
+      type: 'BrushClearBtn',
+      layaType: 'ScaleButton',
+      name: 'BrushClearBtn_1',
+      parentId: 'brush-box',
+      x: 1173,
+      y: 284,
+      width: 119,
+      height: 119,
+      rotation: 0,
+      opacity: 1,
+      props: {
+        skin: 'game/image/img/img_cel.png',
+        visible: true,
+        hidden: true,
+      },
+      actions: [],
+    },
+  );
+
+  const artifacts = buildPreviewExportRegressionArtifacts(course);
+  assert.deepEqual(
+    {
+      draw: artifacts.resources['game/image/img/img_draw.png'],
+      selected: artifacts.resources['game/image/img/img_anniu-xz.png'],
+      clear: artifacts.resources['game/image/img/img_cel.png'],
+    },
+    {
+      draw: 'game_preview/image/img/img_draw.png',
+      selected: 'game_preview/image/img/img_anniu-xz.png',
+      clear: 'game_preview/image/img/img_cel.png',
+    },
+    '[画笔] 旧发布路径只能保留一层 img',
+  );
+
+  const [scene] = artifacts.scenes;
+  const brush = findNode(
+    '画笔',
+    scene.scene,
+    (node) => node.props?.var === 'NewBrushSprite_1',
+    '画笔运行节点',
+  );
+  assert.equal(brush.type, 'BrushSprite', '[画笔] 必须使用当前 SDK 已注册的运行类');
+  assert.equal(
+    sceneNodes(scene.scene).some((node) => node.type === 'NewBrushSprite'),
+    false,
+    '[画笔] 不得导出当前 SDK 无法创建的 NewBrushSprite 节点',
+  );
+  const clear = findNode(
+    '画笔',
+    scene.scene,
+    (node) => node.props?.var === 'BrushClearBtn_1',
+    '画笔清空按钮',
+  );
+  assert.equal(clear.props?.visible, false, '[画笔] 清空按钮保持初始隐藏');
+  assert.match(
+    scene.source,
+    /GameUtils\.initDraw\(this, this\.BrushDrawBtn_1, this\.BrushClearBtn_1, this\.NewBrushSprite_1\);/,
+    '[画笔] 运行交互绑定必须保留',
   );
 });
 

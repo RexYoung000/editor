@@ -1,7 +1,7 @@
 {
   "name": "forge",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.5.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -43,7 +43,7 @@
     "globals": "^17.5.0",
     "immer": "^11.1.4",
     "layaair2-cmd": "^1.6.15",
-    "postcss": "^8.5.10",
+    "postcss": "^8.5.23",
     "tailwindcss": "^4.2.3",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
@@ -95,6 +95,10 @@
       {
         "from": "node_modules/.pnpm/iconv-lite@0.5.2/node_modules/safer-buffer",
         "to": "node_modules/safer-buffer"
+      },
+      {
+        "from": "electron/vendor/svn-cli/windows-x64",
+        "to": "svn-cli"
       }
     ],
     "afterPack": "./electron/afterPack.cjs"

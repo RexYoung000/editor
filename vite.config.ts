@@ -10,6 +10,7 @@ import { LIBRARY_QUICK_TAGS, matchesLibraryQuickTag } from './src/utils/libraryQ
 import type { LibraryQuickTagId } from './src/utils/libraryQuickTags'
 import { detectLibrarySeries, matchesLibrarySearchQuery } from './src/utils/librarySearch'
 import { getCourseRouteCandidates } from './src/utils/previewCourseRoute'
+import { resolvePathInside } from './server/pathSafety'
 
 // 本地定义 lessonSuffix 函数（避免引入跨模块构建依赖）
 function lessonSuffix(kind?: string): string {
@@ -25,6 +26,23 @@ const requireFromConfig = createRequire(path.resolve(process.cwd(), 'vite.config
 
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024; // 100MB
 const MAX_COMPILED_ZIP_SIZE = 300 * 1024 * 1024; // 300MB
+
+function publishEnvironmentVersion(): string {
+  const files = [
+    'public/builtin/layaProjectModel/Game1_LT.zip',
+    'public/builtin/layaProjectModel/Game1_PREVIEW.zip',
+    'public/builtin/layaProjectModel/Game1_HW.zip',
+    'public/builtin/layaProjectModel/Game1_REVIEW.zip',
+    'public/builtin/runtime/game.zip',
+  ];
+  const hash = crypto.createHash('sha256');
+  for (const relativePath of files) {
+    const absolutePath = path.resolve(process.cwd(), relativePath);
+    hash.update(relativePath);
+    hash.update(fs.readFileSync(absolutePath));
+  }
+  return hash.digest('hex');
+}
 
 // 资源库根目录（绝对路径，dev server 启动时一次性算出）
 const LIBRARY_ROOT = path.resolve(process.cwd(), 'public/builtin/library');
@@ -361,6 +379,10 @@ function computeFileHash(safeRel: string, absFile: string): string {
 function forgePlugin(): Plugin {
   const courseOutputDirs = new Map<string, string>(); // courseId → localOutputDir
   const installersDir = path.resolve(__dirname, 'installers');
+  const previewServerDir = path.resolve(__dirname, 'preview-server');
+  const lessonsDir = path.join(previewServerDir, 'lessons');
+  const previewGameDir = path.resolve(__dirname, 'public/preview-game');
+  const presetThumbnailDir = path.resolve(__dirname, 'public/builtin/editor');
 
   
   return {
@@ -373,7 +395,11 @@ function forgePlugin(): Plugin {
         const afterPrefix = rawUrl.slice('/preview-server'.length);
         let relativePath = (afterPrefix.startsWith('/') ? afterPrefix.slice(1) : afterPrefix).replace(/\?.*$/, '');
         if (!relativePath || relativePath.endsWith('/')) relativePath += 'index.html';
-        const filePath = path.resolve(__dirname, 'preview-server', relativePath);
+        const filePath = resolvePathInside(previewServerDir, relativePath, { decodeUrl: true });
+        if (!filePath) {
+          jsonError(res, 400, '非法预览文件路径');
+          return;
+        }
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
           const ext = path.extname(filePath);
           const mimeTypes: Record<string, string> = {
@@ -395,7 +421,11 @@ function forgePlugin(): Plugin {
       server.middlewares.use((req, res, next) => {
         const url = (req.url || '').replace(/\/\/+/g, '/').replace(/\?.*$/, '');
         if (previewServerRootPaths.some(p => url.startsWith(p))) {
-          const filePath = path.resolve(__dirname, 'preview-server', url.slice(1));
+          const filePath = resolvePathInside(previewServerDir, url.slice(1), { decodeUrl: true });
+          if (!filePath) {
+            jsonError(res, 400, '非法预览资源路径');
+            return;
+          }
           if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
             const ext = path.extname(filePath);
             const mimeTypes: Record<string, string> = {
@@ -428,7 +458,11 @@ function forgePlugin(): Plugin {
         }
         if (!baseDir) {
           for (const fallbackProjectName of route.fallbackProjectNames) {
-            const fallbackDir = path.resolve(__dirname, 'preview-server/lessons', fallbackProjectName);
+            const fallbackDir = resolvePathInside(lessonsDir, fallbackProjectName, { decodeUrl: true });
+            if (!fallbackDir) {
+              jsonError(res, 400, '非法课件目录');
+              return;
+            }
             if (fs.existsSync(fallbackDir)) {
               baseDir = fallbackDir;
               break;
@@ -439,7 +473,11 @@ function forgePlugin(): Plugin {
         if (!baseDir) { next(); return; }
 
         if (!route.relativePath) { next(); return; }
-        const filePath = path.join(baseDir, route.relativePath);
+        const filePath = resolvePathInside(baseDir, route.relativePath, { decodeUrl: true });
+        if (!filePath) {
+          jsonError(res, 400, '非法课件文件路径');
+          return;
+        }
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
           const ext = path.extname(filePath);
           const mimeTypes: Record<string, string> = {
@@ -466,7 +504,12 @@ function forgePlugin(): Plugin {
       // preview-game HTML 拦截
       server.middlewares.use((req, res, next) => {
         if (req.url?.startsWith('/preview-game/') && req.url?.endsWith('.html')) {
-          const filePath = path.resolve(__dirname, 'public', req.url.slice(1));
+          const relativePath = req.url.slice('/preview-game/'.length);
+          const filePath = resolvePathInside(previewGameDir, relativePath, { decodeUrl: true });
+          if (!filePath) {
+            jsonError(res, 400, '非法预览页面路径');
+            return;
+          }
           if (fs.existsSync(filePath)) {
             res.setHeader('Content-Type', 'text/html');
             fs.createReadStream(filePath).pipe(res);
@@ -483,6 +526,20 @@ function forgePlugin(): Plugin {
         res.end(JSON.stringify({
           wsServer: process.env.WS_SERVER || 'ws://10.200.15.62:8187', // 打包机 WebSocket 接口地址
           wsHost: process.env.WS_HOST || '10.200.15.41:7800',          // 打包机拉取课件的目标服务器地址
+        }));
+      });
+      // GET /api/publish-config — 返回按课型维护的只读 SVN 基础地址
+      server.middlewares.use('/api/publish-config', (req, res) => {
+        if (req.method !== 'GET') { res.statusCode = 405; res.end('Method not allowed'); return; }
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({
+          environmentVersion: publishEnvironmentVersion(),
+          svn: {
+            normal: process.env.SVN_BASE_NORMAL || 'svn://192.168.74.9/product/trunk/course/Math',
+            homework: process.env.SVN_BASE_HOMEWORK || process.env.SVN_BASE_NORMAL || 'svn://192.168.74.9/product/trunk/course/Math',
+            sEvaluation: process.env.SVN_BASE_EVALUATION || 'svn://192.168.74.9/product/trunk/course/Math/SPECIAL_EVALUATION/YZ',
+            review: process.env.SVN_BASE_REVIEW || 'svn://192.168.74.9/product/trunk/course/Math/REVIEW/YZ',
+          },
         }));
       });
       // POST /api/upload-compiled-zip — Electron 编译发布产物 zip 上传
@@ -519,20 +576,31 @@ function forgePlugin(): Plugin {
             const suffix = lessonSuffix(kind);
             const projName = tid ? `test_${tid}_${courseId}${suffix}` : `${courseId}${suffix}`;
             const regKey = tid ? `test_${tid}_${courseId}` : courseId;
-            const lessonDir = path.resolve(__dirname, 'preview-server/lessons', projName);
-
-            // 清空旧目录后重建
-            if (fs.existsSync(lessonDir)) fs.rmSync(lessonDir, { recursive: true, force: true });
-            fs.mkdirSync(lessonDir, { recursive: true });
+            const lessonDir = resolvePathInside(lessonsDir, projName);
+            if (!lessonDir) {
+              jsonError(res, 400, '非法课件目录');
+              return;
+            }
 
             // 内存解压 zip → 写入 lessonDir
             const JSZip = requireFromConfig('jszip') as typeof JSZipModule;
             const zip = await JSZip.loadAsync(filePart.data);
-            const entries = Object.values(zip.files);
-            for (const entry of entries) {
-              if (entry.dir) continue;
+            const entries = Object.values(zip.files).filter((entry) => !entry.dir);
+            const safeEntries = entries.map((entry) => ({
+              entry,
+              destPath: resolvePathInside(lessonDir, entry.name),
+            }));
+            if (safeEntries.some(({ destPath }) => !destPath)) {
+              jsonError(res, 400, '压缩包包含非法文件路径');
+              return;
+            }
+
+            // 全部路径验证通过后再替换旧目录，失败请求不会破坏已有预览结果。
+            if (fs.existsSync(lessonDir)) fs.rmSync(lessonDir, { recursive: true, force: true });
+            fs.mkdirSync(lessonDir, { recursive: true });
+            for (const { entry, destPath } of safeEntries) {
               const content = await entry.async('nodebuffer');
-              const destPath = path.join(lessonDir, entry.name);
+              if (!destPath) continue;
               fs.mkdirSync(path.dirname(destPath), { recursive: true });
               fs.writeFileSync(destPath, content);
             }
@@ -580,9 +648,17 @@ function forgePlugin(): Plugin {
             const tid = teacherId || '';
             const suffix = lessonSuffix(kind);
             const projName = tid ? `test_${tid}_${courseId}${suffix}` : `${courseId}${suffix}`;
-            const lessonDir = path.resolve(__dirname, 'preview-server/lessons', projName);
+            const lessonDir = resolvePathInside(lessonsDir, projName);
+            if (!lessonDir) {
+              jsonError(res, 400, '非法课件目录');
+              return;
+            }
             if (!fs.existsSync(lessonDir)) { res.statusCode = 404; res.end(JSON.stringify({ ok: false, error: 'lesson 目录不存在，请先发布' })); return; }
-            const filePath = path.join(lessonDir, destPath);
+            const filePath = resolvePathInside(lessonDir, destPath);
+            if (!filePath) {
+              jsonError(res, 400, '非法资源目标路径');
+              return;
+            }
             fs.mkdirSync(path.dirname(filePath), { recursive: true });
             fs.writeFileSync(filePath, filePart.data);
             res.setHeader('Content-Type', 'application/json');
@@ -599,10 +675,17 @@ function forgePlugin(): Plugin {
         req.on('end', () => {
           try {
             const { name, dataUrl } = JSON.parse(body);
-            if (!name || !dataUrl) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: '缺少 name 或 dataUrl' })); return; }
+            if (typeof name !== 'string' || typeof dataUrl !== 'string' || !name || !dataUrl) {
+              jsonError(res, 400, '缺少 name 或 dataUrl');
+              return;
+            }
             const base64 = dataUrl.split(',')[1];
             if (!base64) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'dataUrl 格式错误' })); return; }
-            const filePath = path.resolve(__dirname, 'public/builtin/editor', `${name}.png`);
+            const filePath = resolvePathInside(presetThumbnailDir, `${name}.png`);
+            if (!filePath) {
+              jsonError(res, 400, '非法缩略图名称');
+              return;
+            }
             fs.mkdirSync(path.dirname(filePath), { recursive: true });
             fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
             res.setHeader('Content-Type', 'application/json');

@@ -15,16 +15,25 @@ import {
   pinTemplate,
 } from '../utils/customTemplateFs';
 import { getCourseDirPath } from '../utils/electronFs';
-import { PRESET_TEMPLATES } from '../presets';
+import { isPresetTemplateAvailable, PRESET_TEMPLATES } from '../presets';
 import { getUniqueElementName, normalizeElementNames, createDefaultElement, elementMeta, rebuildSubPageCounters, getNextNumberedName, getNextItemNameForCenterMatch } from '../elements/elementMeta';
+import { migrateCourseFontLibraryIds } from '../utils/fontMigration';
 import { getObject, removeObject, createLayaComponent, registerObject } from '../utils/layaBridge';
 import { getElementParentContainment, getFitContainerToChildrenUpdates } from '../utils/canvasGeometry';
 import { isContainerElementType } from '../utils/elementContainers';
 import { getLayerDisplayName, getNextLayerCopyName, withLayerLabel } from '../utils/layerPresentation';
 import { isElementLocked } from '../utils/layerState';
+import { toggleImageMirrorProps, type ImageMirrorAxis } from '../utils/imageMirror';
 import { canAssignElementsToGroup, canNestGroup, getEditorLayerGroups, resolveEditorLayerGroups } from '../utils/layerGroups';
 import {
+  getSelectionAlignmentUpdates,
+  getSelectionGeometryUpdates,
+  type SelectionAlignmentDirection,
+  type SelectionGeometryChange,
+} from '../utils/selectionSet';
+import {
   cloneInternalPageWithinSubPage,
+  cloneStageWithNewIds,
   cloneSubPageWithNewIds,
   createInternalPagesSubPage,
   findActiveElementPage,
@@ -36,8 +45,17 @@ import {
   resolveMovedPageName,
   validInternalPageGroupId,
 } from '../utils/internalPages';
+import { remapInputRelationRefs } from '../utils/inputAnswerRules';
+import {
+  isChoiceOption,
+  remapChoiceAnswerRefs,
+  removeChoiceAnswerRefs,
+  setChoiceCorrectOptionIds as applyChoiceCorrectOptionIds,
+} from '../utils/choiceAnswerRules';
+import { assetExport } from '../elements/builtinAssets';
 
 type InternalPagePlacement = { pageGroupId?: string; afterPageId?: string };
+type SelectionOrigin = 'canvas' | 'layer' | 'other';
 
 export type { Element, SubPage, Stage, Course };
 // Backwards alias: many call sites still import `Page`
@@ -73,6 +91,9 @@ interface EditorState {
   focusSubPageId: string | null;
   selectedElementIds: string[];
   selectedEditorLayerGroupId: string | null;
+  primarySelectedElementId: string | null;
+  hoveredElementId: string | null;
+  selectionOrigin: SelectionOrigin;
   selectedStageTarget?: 'preview' | 'normal';
   clipboard: Element[];
   clipboardEditorLayerGroups: EditorLayerGroup[];
@@ -105,16 +126,17 @@ interface EditorState {
   setPageThumbnail: (subPageId: string, dataUrl: string) => void;
 
   addStage: () => void;
-  addVideoStage: () => void;  // 复习课专用：添加视频关卡
+  addVideoStage: (videoUrl?: string) => void;  // 复习课专用：添加视频关卡
   addStageFromSubPage: (sourceSubPageId: string) => void;
   addStageFromTemplate: (templateId: string) => Promise<void>;
-  addStageFromPreset: (presetId: string) => void;
+  addStageFromPreset: (presetId: string, videoUrl?: string) => void;
+  duplicateStage: (stageId: string) => void;
   deleteStage: (stageId: string) => void;
   clearAllStages: () => void;
   reorderStages: (fromIndex: number, toIndex: number) => void;
 
   addPreviewStage: () => void;
-  addPreviewStageFromPreset: (presetId: string) => void;
+  addPreviewStageFromPreset: (presetId: string, videoUrl?: string) => void;
   addPreviewStageFromSubPage: (sourceSubPageId: string) => void;
   addPreviewStageFromTemplate: (templateId: string) => Promise<void>;
   deletePreviewStage: (stageId: string) => void;
@@ -134,8 +156,9 @@ interface EditorState {
   renameSubPage: (subPageId: string, name: string) => void;
   renameStage: (stageId: string, name: string) => void;
 
-  addElement: (element: Element) => void;
+  addElement: (element: Element, saveToHistory?: boolean) => void;
   updateElement: (id: string, updates: Partial<Element>) => void;
+  mirrorElement: (id: string, axis: ImageMirrorAxis) => void;
   setElementEditorHidden: (id: string, hidden: boolean) => void;
   setElementsEditorHidden: (ids: string[], hidden: boolean) => void;
   setElementLocked: (id: string, locked: boolean) => void;
@@ -152,9 +175,10 @@ interface EditorState {
   reorderElement: (id: string, newIndex: number, saveToHistory?: boolean) => void;
   moveElementLayer: (id: string, direction: 'up' | 'down' | 'top' | 'bottom') => void;
   setElementParent: (id: string, newParentId: string | undefined, saveToHistory?: boolean) => void;
-  selectElement: (id: string, multi?: boolean) => void;
-  selectElements: (ids: string[]) => void;
-  selectEditorLayerGroup: (groupId: string | null) => void;
+  selectElement: (id: string, multi?: boolean, origin?: SelectionOrigin) => void;
+  selectElements: (ids: string[], origin?: SelectionOrigin, primaryId?: string) => void;
+  selectEditorLayerGroup: (groupId: string | null, multi?: boolean, origin?: SelectionOrigin) => void;
+  setHoveredElementId: (id: string | null) => void;
   selectAll: () => void;
   clearSelection: () => void;
   copyElements: () => void;
@@ -163,7 +187,8 @@ interface EditorState {
   duplicateElementsForDrag: (sourceIds: string[]) => ElementPasteResult | null;
   updateElementsWithoutHistory: (updates: Array<Pick<Element, 'id' | 'x' | 'y' | 'width' | 'height' | 'rotation'>>) => void;
   removeElementsWithoutHistory: (ids: string[]) => void;
-  alignElements: (direction: 'left' | 'centerH' | 'right' | 'top' | 'centerV' | 'bottom' | 'distributeH' | 'distributeV') => void;
+  updateSelectionSetGeometry: (change: SelectionGeometryChange, saveToHistory?: boolean) => void;
+  alignElements: (direction: SelectionAlignmentDirection) => void;
   groupElements: () => void;
   ungroupElements: () => void;
   undo: () => void;
@@ -186,6 +211,7 @@ interface EditorState {
 
   addChoiceOption: (choiceBoxId: string) => void;
   removeChoiceOption: (choiceBoxId: string) => void;
+  setChoiceCorrectOptionIds: (choiceBoxId: string, optionIds: string[]) => void;
 
   addFillBlankInput: (klInputBoxId: string) => void;
   removeFillBlankInput: (klInputBoxId: string) => void;
@@ -231,6 +257,15 @@ function findStageOfSubPage(course: Course | null, subPageId: string | null): St
   return (course.previewStages ?? []).find((s) => s.subPages.some((sp) => sp.id === subPageId)) ?? null;
 }
 
+type StageArea = 'normal' | 'preview';
+
+function findStageWithArea(course: Course, stageId: string): { stage: Stage; area: StageArea } | null {
+  const normal = course.stages.find((stage) => stage.id === stageId);
+  if (normal) return { stage: normal, area: 'normal' };
+  const preview = course.previewStages?.find((stage) => stage.id === stageId);
+  return preview ? { stage: preview, area: 'preview' } : null;
+}
+
 let _idSeq = 0;
 function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}${(_idSeq++).toString(36)}`;
@@ -255,6 +290,8 @@ function cloneElementsWithNewIds(elements: Element[], idPrefix = 'el'): Element[
         if (a.judgeTargetId && idMap.has(a.judgeTargetId)) a.judgeTargetId = idMap.get(a.judgeTargetId);
       }
     }
+    remapInputRelationRefs(el, idMap, genId);
+    remapChoiceAnswerRefs(el, idMap);
   }
   return cloned;
 }
@@ -277,6 +314,15 @@ function ensureCourseShape(course: Course): Course {
   if (!course.previewStages) {
     course.previewStages = [];
   }
+  if ((course.kind ?? 'normal') === 'normal') {
+    for (const stage of course.previewStages) {
+      const isVideoStage = stage.subPages.some((subPage) =>
+        subPage.frozen && subPage.elements.some((element) => element.type === 'Video'),
+      );
+      if (!isVideoStage) stage.noSubPages = false;
+    }
+    renumberPreviewAll(course);
+  }
   if (course.previewShrinked === undefined) course.previewShrinked = false;
   if (course.normalShrinked === undefined) course.normalShrinked = false;
   return course;
@@ -286,6 +332,7 @@ function ensureCourseShape(course: Course): Course {
 const STAGE_DEFAULT_RE = /^关卡\s+\d+$/;
 const SUBPAGE_DEFAULT_RE = /^小关卡\s+\d+-\d+$/;
 const PREVIEW_STAGE_DEFAULT_RE = /^预习\s+\d+$/;
+const LEGACY_PREVIEW_SUBPAGE_DEFAULT_RE = /^预习\s+\d+$/;
 
 /** 按位置重排关卡序号，仅覆盖默认命名格式 */
 function renumberAll(course: Course): void {
@@ -306,19 +353,46 @@ function renumberPreviewAll(course: Course): void {
     if (PREVIEW_STAGE_DEFAULT_RE.test(stage.name)) {
       stage.name = `预习 ${si + 1}`;
     }
+    stage.subPages.forEach((sp, sj) => {
+      if (SUBPAGE_DEFAULT_RE.test(sp.name) || LEGACY_PREVIEW_SUBPAGE_DEFAULT_RE.test(sp.name)) {
+        sp.name = `小关卡 ${si + 1}-${sj + 1}`;
+      }
+    });
   });
 }
 
-function subPageFromPreset(preset: (typeof PRESET_TEMPLATES)[number], name: string): SubPage {
+function renumberStageArea(course: Course, area: StageArea): void {
+  if (area === 'preview') renumberPreviewAll(course);
+  else renumberAll(course);
+}
+
+function nextCopyName(sourceName: string, existingNames: string[]): string {
+  const occupied = new Set(existingNames);
+  let suffix = 1;
+  let candidate = `${sourceName} 副本`;
+  while (occupied.has(candidate)) candidate = `${sourceName} 副本 ${++suffix}`;
+  return candidate;
+}
+
+function subPageFromPreset(
+  preset: (typeof PRESET_TEMPLATES)[number],
+  name: string,
+  initialVideoUrl = '',
+): SubPage {
   if (preset.editorModel === 'internal-pages') {
     const subPage = createInternalPagesSubPage(genId('subpage'), name);
     subPage.elements = cloneElementsWithNewIds(preset.elements, 'el');
     return subPage;
   }
+  const elements = cloneElementsWithNewIds(preset.elements, 'el');
+  if (preset.id === 'video' && initialVideoUrl) {
+    const video = elements.find((element) => element.type === 'Video');
+    if (video) video.props = { ...video.props, videoUrl: initialVideoUrl };
+  }
   return {
     id: genId('subpage'),
     name,
-    elements: cloneElementsWithNewIds(preset.elements, 'el'),
+    elements,
     frozen: preset.frozen ?? false,
   };
 }
@@ -367,6 +441,9 @@ export const useEditorStore = create<EditorState>()(
     focusSubPageId: null,
     selectedElementIds: [],
     selectedEditorLayerGroupId: null,
+    primarySelectedElementId: null,
+    hoveredElementId: null,
+    selectionOrigin: 'other',
     selectedStageTarget: undefined,
     clipboard: [],
     clipboardEditorLayerGroups: [],
@@ -419,6 +496,7 @@ export const useEditorStore = create<EditorState>()(
     setCurrentCourse: (course) =>
       set((state) => {
         ensureCourseShape(course);
+        migrateCourseFontLibraryIds(course);
         const normalizeSubPage = (sp: SubPage): SubPage => ({
           ...sp,
           elements: normalizeElementNames(sp.elements),
@@ -436,6 +514,9 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = firstSub?.id ?? null;
         state.currentInternalPageId = isInternalPagesSubPage(firstSub) ? firstSub.id : null;
         state.focusSubPageId = null;
+        state.primarySelectedElementId = null;
+        state.hoveredElementId = null;
+        state.selectionOrigin = 'other';
         state.selectedEditorLayerGroupId = null;
         state.history = [JSON.parse(JSON.stringify(course))];
         state.historyIndex = 0;
@@ -464,6 +545,8 @@ export const useEditorStore = create<EditorState>()(
           state.selectedElementIds = [];
         }
         state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = state.selectedElementIds.at(-1) ?? null;
+        state.selectionOrigin = 'other';
         state.selectedStageTarget = state.currentCourse?.previewStages?.some(s => s.id === stageId) ? 'preview' : 'normal';
       }),
 
@@ -477,6 +560,8 @@ export const useEditorStore = create<EditorState>()(
         state.focusSubPageId = subPage.id;
         state.selectedElementIds = [];
         state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = null;
+        state.selectionOrigin = 'other';
         state.selectedStageTarget = state.currentCourse?.previewStages?.some((stage) => stage.id === stageId) ? 'preview' : 'normal';
       }),
 
@@ -486,6 +571,8 @@ export const useEditorStore = create<EditorState>()(
         state.currentInternalPageId = null;
         state.selectedElementIds = [];
         state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = null;
+        state.selectionOrigin = 'other';
       }),
 
     setCurrentInternalPage: (pageId) =>
@@ -496,6 +583,8 @@ export const useEditorStore = create<EditorState>()(
         state.currentInternalPageId = page.id;
         state.selectedElementIds = [];
         state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = null;
+        state.selectionOrigin = 'other';
       }),
 
     addInternalPage: (kind, name, placement) => {
@@ -794,7 +883,7 @@ export const useEditorStore = create<EditorState>()(
         get().saveHistory();
       }),
 
-    addVideoStage: () =>
+    addVideoStage: (videoUrl = '') =>
       set((state) => {
         if (!state.currentCourse) return;
         const stageNum = state.currentCourse.stages.length + 1;
@@ -811,7 +900,7 @@ export const useEditorStore = create<EditorState>()(
           opacity: 1,
           locked: true,
           actions: [],
-          props: { videoUrl: '' },
+          props: { videoUrl },
         };
         const newSub: SubPage = {
           id: genId('subpage'),
@@ -896,6 +985,39 @@ export const useEditorStore = create<EditorState>()(
       get().saveHistory();
     },
 
+    duplicateStage: (stageId) =>
+      set((state) => {
+        if (!state.currentCourse || (state.currentCourse.kind ?? 'normal') !== 'normal') return;
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located) return;
+        const stages = located.area === 'preview'
+          ? state.currentCourse.previewStages ?? []
+          : state.currentCourse.stages;
+        const sourceIndex = stages.findIndex((stage) => stage.id === stageId);
+        if (sourceIndex < 0) return;
+        const copy = cloneStageWithNewIds(located.stage, genId);
+        const usesDefaultName = located.area === 'preview'
+          ? PREVIEW_STAGE_DEFAULT_RE.test(located.stage.name)
+          : STAGE_DEFAULT_RE.test(located.stage.name);
+        copy.name = usesDefaultName
+          ? located.area === 'preview' ? '预习 0' : '关卡 0'
+          : nextCopyName(located.stage.name, stages.map((stage) => stage.name));
+        for (const subPage of copy.subPages) markInternalPagesFeature(state.currentCourse, subPage);
+        stages.splice(sourceIndex + 1, 0, copy);
+        const firstSubPage = copy.subPages[0];
+        state.currentStageId = copy.id;
+        state.currentSubPageId = firstSubPage?.id ?? null;
+        state.currentInternalPageId = isInternalPagesSubPage(firstSubPage) ? firstSubPage.id : null;
+        state.focusSubPageId = null;
+        state.selectedEditorLayerGroupId = null;
+        state.selectedElementIds = firstSubPage?.frozen
+          ? firstSubPage.elements.filter((element) => element.locked).map((element) => element.id)
+          : [];
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
+        get().saveHistory();
+      }),
+
     deleteStage: (stageId) =>
       set((state) => {
         if (!state.currentCourse) return;
@@ -946,13 +1068,13 @@ export const useEditorStore = create<EditorState>()(
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `预习 ${previewNum}`,
+          name: `小关卡 ${previewNum}-1`,
           elements: [],
         };
         const newStage: Stage = {
           id: genId('stage'),
           name: `预习 ${previewNum}`,
-          noSubPages: true,
+          noSubPages: false,
           subPages: [newSub],
         };
         state.currentCourse.previewStages.push(newStage);
@@ -965,20 +1087,24 @@ export const useEditorStore = create<EditorState>()(
         get().saveHistory();
       }),
 
-    addPreviewStageFromPreset: (presetId) => {
+    addPreviewStageFromPreset: (presetId, videoUrl = '') => {
       const preset = PRESET_TEMPLATES.find((p) => p.id === presetId);
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
+        if (!isPresetTemplateAvailable(preset, {
+          courseKind: state.currentCourse.kind ?? 'normal',
+          mode: 'stage',
+          supportsInternalPages: state.currentCourse.kind !== 'review',
+        })) return;
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `预习 ${previewNum}`);
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 ${previewNum}-1`, videoUrl);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: preset.defaultStageName ?? `预习 ${previewNum}`,
-          noSubPages: true,
+          noSubPages: preset.noSubPages ?? false,
           subPages: [newSub],
         };
         state.currentCourse.previewStages.push(newStage);
@@ -1017,12 +1143,12 @@ export const useEditorStore = create<EditorState>()(
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
-        newSub.name = `预习 ${previewNum}`;
+        newSub.name = `小关卡 ${previewNum}-1`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: `预习 ${previewNum}`,
-          noSubPages: true,
+          noSubPages: sourceSub.frozen ?? false,
           subPages: [newSub],
         };
         state.currentCourse.previewStages.push(newStage);
@@ -1053,12 +1179,12 @@ export const useEditorStore = create<EditorState>()(
         if (!state.currentCourse.previewStages) state.currentCourse.previewStages = [];
         const previewNum = state.currentCourse.previewStages.length + 1;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
-        newSub.name = `预习 ${previewNum}`;
+        newSub.name = `小关卡 ${previewNum}-1`;
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
           name: `预习 ${previewNum}`,
-          noSubPages: true,
+          noSubPages: applied.subPage.frozen ?? false,
           subPages: [newSub],
         };
         state.currentCourse.previewStages.push(newStage);
@@ -1143,12 +1269,12 @@ export const useEditorStore = create<EditorState>()(
     addSubPage: (stageId) =>
       set((state) => {
         if (!state.currentCourse) return;
-        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
-        if (!stage) return;
-        const stageIdx = state.currentCourse.stages.indexOf(stage);
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located || located.stage.noSubPages) return;
+        const stage = located.stage;
         const newSub: SubPage = {
           id: genId('subpage'),
-          name: `小关卡 ${stageIdx + 1}-${stage.subPages.length + 1}`,
+          name: '小关卡 0-0',
           elements: [],
         };
         stage.subPages.push(newSub);
@@ -1156,15 +1282,17 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
-        renumberAll(state.currentCourse);
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
         get().saveHistory();
       }),
 
     addSubPageFromSubPage: (stageId, sourceSubPageId) =>
       set((state) => {
         if (!state.currentCourse) return;
-        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
-        if (!stage) return;
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located || located.stage.noSubPages) return;
+        const stage = located.stage;
         // Find source sub-page across all stages
         let sourceSub: SubPage | null = null;
         for (const s of state.currentCourse.stages) {
@@ -1177,7 +1305,7 @@ export const useEditorStore = create<EditorState>()(
             if (found) { sourceSub = found; break; }
           }
         }
-        if (!sourceSub) return;
+        if (!sourceSub || sourceSub.frozen) return;
         if (state.currentCourse.kind === 'review' && isInternalPagesSubPage(sourceSub)) return;
         const newSub = cloneSubPageWithNewIds(sourceSub, genId);
         newSub.name = `小关卡 0-0`;
@@ -1187,7 +1315,8 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
-        renumberAll(state.currentCourse);
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
         get().saveHistory();
       }),
 
@@ -1206,8 +1335,9 @@ export const useEditorStore = create<EditorState>()(
       });
       set((state) => {
         if (!state.currentCourse) return;
-        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
-        if (!stage) return;
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located || located.stage.noSubPages || applied.subPage.frozen) return;
+        const stage = located.stage;
         const newSub = cloneSubPageWithNewIds(applied.subPage, genId);
         newSub.name = `小关卡 0-0`;
         markInternalPagesFeature(state.currentCourse, newSub);
@@ -1216,18 +1346,23 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
-        renumberAll(state.currentCourse);
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
       });
       get().saveHistory();
     },
 
-    addStageFromPreset: (presetId) => {
+    addStageFromPreset: (presetId, videoUrl = '') => {
       const preset = PRESET_TEMPLATES.find((p) => p.id === presetId);
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
-        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
+        if (!isPresetTemplateAvailable(preset, {
+          courseKind: state.currentCourse.kind ?? 'normal',
+          mode: 'stage',
+          supportsInternalPages: state.currentCourse.kind !== 'review',
+        })) return;
+        const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`, videoUrl);
         markInternalPagesFeature(state.currentCourse, newSub);
         const newStage: Stage = {
           id: genId('stage'),
@@ -1256,9 +1391,14 @@ export const useEditorStore = create<EditorState>()(
       if (!preset) return;
       set((state) => {
         if (!state.currentCourse) return;
-        if (state.currentCourse.kind === 'review' && preset.editorModel === 'internal-pages') return;
-        const stage = state.currentCourse.stages.find((s) => s.id === stageId);
-        if (!stage) return;
+        if (!isPresetTemplateAvailable(preset, {
+          courseKind: state.currentCourse.kind ?? 'normal',
+          mode: 'subPage',
+          supportsInternalPages: state.currentCourse.kind !== 'review',
+        })) return;
+        const located = findStageWithArea(state.currentCourse, stageId);
+        if (!located || located.stage.noSubPages || preset.frozen) return;
+        const stage = located.stage;
         const newSub = subPageFromPreset(preset, preset.defaultSubPageName ?? `小关卡 0-0`);
         markInternalPagesFeature(state.currentCourse, newSub);
         stage.subPages.push(newSub);
@@ -1271,7 +1411,8 @@ export const useEditorStore = create<EditorState>()(
         } else {
           state.selectedElementIds = [];
         }
-        renumberAll(state.currentCourse);
+        state.selectedStageTarget = located.area;
+        renumberStageArea(state.currentCourse, located.area);
       });
       get().saveHistory();
     },
@@ -1341,7 +1482,7 @@ export const useEditorStore = create<EditorState>()(
         }
         if (!stage) return;
         const sp = stage.subPages.find((s) => s.id === subPageId);
-        if (!sp) return;
+        if (!sp || sp.frozen || stage.noSubPages) return;
         const newSub = cloneSubPageWithNewIds(sp, genId);
         // 用合法默认格式占位，下面 renumberAll 会按位置正确编号；
         // 若原 sub 是用户自定义名，则保留“副本”格式不被自动重命名覆盖
@@ -1352,7 +1493,9 @@ export const useEditorStore = create<EditorState>()(
         state.currentSubPageId = newSub.id;
         state.currentInternalPageId = isInternalPagesSubPage(newSub) ? newSub.id : null;
         state.selectedElementIds = [];
-        renumberAll(state.currentCourse);
+        const area = state.currentCourse.previewStages?.some((item) => item.id === stageId) ? 'preview' : 'normal';
+        state.selectedStageTarget = area;
+        renumberStageArea(state.currentCourse, area);
         get().saveHistory();
       }),
 
@@ -1414,7 +1557,7 @@ export const useEditorStore = create<EditorState>()(
         }
       }),
 
-    addElement: (element) =>
+    addElement: (element, saveToHistory = true) =>
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
@@ -1430,7 +1573,7 @@ export const useEditorStore = create<EditorState>()(
           element.props.var = getUniqueElementName(baseVar, page.elements.map((e) => (e.props?.var as string) || ''));
         }
         page.elements.push(element);
-        get().saveHistory();
+        if (saveToHistory) get().saveHistory();
       }),
 
     updateElement: (id, updates) =>
@@ -1453,6 +1596,7 @@ export const useEditorStore = create<EditorState>()(
         const { props: _p, ...rest } = updates;
         const previousGroupId = element.groupId;
         Object.assign(element, rest);
+        if (isChoiceOption(element, page.elements)) element.height = 77;
         if ('parentId' in rest && element.groupId) {
           const editorGroup = page.editorLayerGroups?.find((group) => group.id === element.groupId);
           if (editorGroup && editorGroup.runtimeParentId !== element.parentId) delete element.groupId;
@@ -1463,6 +1607,21 @@ export const useEditorStore = create<EditorState>()(
           element.props.var = getUniqueElementName(updates.name, otherVars);
         }
       }),
+
+    mirrorElement: (id, axis) => {
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page) return;
+        const element = page.elements.find((item) => item.id === id);
+        if (!element || !elementMeta[element.type]?.mirrorable) return;
+        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
+        if (isElementLocked(element, elementMap)) return;
+        element.props = toggleImageMirrorProps(element.props, axis);
+        changed = true;
+      });
+      if (changed) get().saveHistory();
+    },
 
     setElementEditorHidden: (id, hidden) => {
       get().setElementsEditorHidden([id], hidden);
@@ -1749,7 +1908,9 @@ export const useEditorStore = create<EditorState>()(
       return result;
     },
 
-    deleteElement: (id) =>
+    deleteElement: (id) => {
+      let changed = false;
+      let removedChoiceAnswers = 0;
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
@@ -1764,21 +1925,33 @@ export const useEditorStore = create<EditorState>()(
         if (el?.groupId && !explicitGroupIds.has(el.groupId)) {
           page.elements.forEach((e) => { if (e.groupId === el.groupId) toDelete.add(e.id); });
         }
-        let changed = true;
-        while (changed) {
-          changed = false;
+        let expanded = true;
+        while (expanded) {
+          expanded = false;
           page.elements.forEach((e) => {
             if (e.parentId && toDelete.has(e.parentId) && !toDelete.has(e.id)) {
               toDelete.add(e.id);
-              changed = true;
+              expanded = true;
             }
           });
         }
+        removedChoiceAnswers = removeChoiceAnswerRefs(page.elements, toDelete);
         page.elements = page.elements.filter((e) => !toDelete.has(e.id));
         releaseEmptyEditorLayerGroup(page, el?.groupId);
         state.selectedElementIds = state.selectedElementIds.filter((eid) => !toDelete.has(eid));
-        get().saveHistory();
-      }),
+        changed = true;
+      });
+      if (!changed) return;
+      get().saveHistory();
+      if (removedChoiceAnswers > 0 && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('forge:toast', {
+          detail: {
+            message: '已删除正确选项，答案配置已同步更新，可撤销恢复',
+            type: 'warning',
+          },
+        }));
+      }
+    },
 
     reorderElement: (id, newIndex, saveToHistory = true) => {
       let changed = false;
@@ -1831,6 +2004,7 @@ export const useEditorStore = create<EditorState>()(
 
     setElementParent: (id, newParentId, saveToHistory = true) => {
       let changed = false;
+      let removedChoiceAnswers = 0;
       set((state) => {
         const page = findCurrentSubPage(state);
         if (!page) return;
@@ -1858,7 +2032,8 @@ export const useEditorStore = create<EditorState>()(
           }
           return { ax, ay };
         };
-        const oldOff = getAncestorOffset(element.parentId);
+        const previousParentId = element.parentId;
+        const oldOff = getAncestorOffset(previousParentId);
         const newOff = getAncestorOffset(newParentId);
         element.x += oldOff.ax - newOff.ax;
         element.y += oldOff.ay - newOff.ay;
@@ -1869,6 +2044,12 @@ export const useEditorStore = create<EditorState>()(
           if (editorGroup && editorGroup.runtimeParentId !== element.parentId) delete element.groupId;
         }
         releaseEmptyEditorLayerGroup(page, previousGroupId);
+        const previousParent = previousParentId
+          ? page.elements.find((candidate) => candidate.id === previousParentId)
+          : undefined;
+        if (element.type === 'SpeechSelectableObj' && previousParent?.type === 'ChoiceBox' && previousParentId !== newParentId) {
+          removedChoiceAnswers = removeChoiceAnswerRefs(page.elements, new Set([element.id]));
+        }
 
         // [新增] 调整数组位置：子元素排在父容器所有现有子元素之后
         if (newParentId) {
@@ -1902,13 +2083,22 @@ export const useEditorStore = create<EditorState>()(
         changed = true;
       });
       if (changed && saveToHistory) get().saveHistory();
+      if (removedChoiceAnswers > 0 && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('forge:toast', {
+          detail: {
+            message: '选项已移出原选择题，正确答案配置已同步更新，可撤销恢复',
+            type: 'warning',
+          },
+        }));
+      }
     },
 
-    selectElement: (id, multi = false) =>
+    selectElement: (id, multi = false, origin = 'other') =>
       set((state) => {
         const page = findCurrentSubPage(state);
         const el = page?.elements.find((e) => e.id === id);
         state.selectedEditorLayerGroupId = null;
+        state.selectionOrigin = origin;
 
         const explicitGroupIds = new Set(page?.editorLayerGroups?.map((group) => group.id) ?? []);
         const targetIds = el?.groupId && page && !explicitGroupIds.has(el.groupId)
@@ -1923,37 +2113,63 @@ export const useEditorStore = create<EditorState>()(
           const targetSet = new Set(targetIds);
           if (targetIds.every((targetId) => state.selectedElementIds.includes(targetId))) {
             state.selectedElementIds = state.selectedElementIds.filter((eid) => !targetSet.has(eid));
+            state.primarySelectedElementId = state.selectedElementIds.at(-1) ?? null;
           } else {
             state.selectedElementIds = [...new Set([...state.selectedElementIds, ...targetIds])];
+            state.primarySelectedElementId = id;
           }
         } else {
           state.selectedElementIds = targetIds;
+          state.primarySelectedElementId = targetIds.includes(id) ? id : (targetIds.at(-1) ?? null);
         }
       }),
 
-    selectElements: (ids) =>
+    selectElements: (ids, origin = 'other', primaryId) =>
       set((state) => {
         const page = findCurrentSubPage(state);
         if (page && 'frozen' in page && page.frozen) return;
         state.selectedEditorLayerGroupId = null;
         state.selectedElementIds = ids;
+        state.primarySelectedElementId = primaryId && ids.includes(primaryId) ? primaryId : (ids.at(-1) ?? null);
+        state.selectionOrigin = origin;
       }),
 
-    selectEditorLayerGroup: (groupId) =>
+    selectEditorLayerGroup: (groupId, multi = false, origin = 'other') =>
       set((state) => {
         const page = findCurrentSubPage(state);
         if (page && 'frozen' in page && page.frozen) return;
+        state.selectionOrigin = origin;
         if (!groupId) {
           state.selectedEditorLayerGroupId = null;
           state.selectedElementIds = [];
+          state.primarySelectedElementId = null;
           return;
         }
         const group = page
           ? resolveEditorLayerGroups(page).find((item) => item.id === groupId)
           : undefined;
         if (!group) return;
-        state.selectedEditorLayerGroupId = groupId;
-        state.selectedElementIds = group.memberIds;
+        if (!multi) {
+          state.selectedEditorLayerGroupId = groupId;
+          state.selectedElementIds = group.memberIds;
+          state.primarySelectedElementId = null;
+          return;
+        }
+        const groupMemberIds = new Set(group.memberIds);
+        const remove = group.memberIds.length > 0 && group.memberIds.every((id) => state.selectedElementIds.includes(id));
+        state.selectedElementIds = remove
+          ? state.selectedElementIds.filter((id) => !groupMemberIds.has(id))
+          : [...new Set([...state.selectedElementIds, ...group.memberIds])];
+        state.selectedEditorLayerGroupId = null;
+        state.primarySelectedElementId = remove
+          ? (state.selectedElementIds.at(-1) ?? null)
+          : (group.memberIds.at(-1) ?? state.selectedElementIds.at(-1) ?? null);
+      }),
+
+    setHoveredElementId: (id) =>
+      set((state) => {
+        if (state.hoveredElementId === id) return;
+        state.hoveredElementId = id;
       }),
 
     clearSelection: () =>
@@ -1963,6 +2179,8 @@ export const useEditorStore = create<EditorState>()(
         if (page && 'frozen' in page && page.frozen) return;
         state.selectedEditorLayerGroupId = null;
         state.selectedElementIds = [];
+        state.primarySelectedElementId = null;
+        state.selectionOrigin = 'other';
       }),
 
     selectAll: () =>
@@ -1971,6 +2189,8 @@ export const useEditorStore = create<EditorState>()(
         if (page) {
           state.selectedEditorLayerGroupId = null;
           state.selectedElementIds = page.elements.map((e) => e.id);
+          state.primarySelectedElementId = state.selectedElementIds.at(-1) ?? null;
+          state.selectionOrigin = 'other';
         }
       }),
 
@@ -2058,6 +2278,8 @@ export const useEditorStore = create<EditorState>()(
               if (a.branchId && branchIdMap.has(a.branchId)) a.branchId = branchIdMap.get(a.branchId);
             });
           }
+          remapInputRelationRefs(newEl, idMap, genId);
+          remapChoiceAnswerRefs(newEl, idMap);
 
           // 生成唯一的 name
           if (FIXED_NAME_TYPES.has(newEl.type)) {
@@ -2166,7 +2388,7 @@ export const useEditorStore = create<EditorState>()(
           element.x = update.x;
           element.y = update.y;
           element.width = update.width;
-          element.height = update.height;
+          element.height = isChoiceOption(element, page.elements) ? 77 : update.height;
           element.rotation = update.rotation;
         }
       }),
@@ -2187,74 +2409,61 @@ export const useEditorStore = create<EditorState>()(
         state.selectedElementIds = state.selectedElementIds.filter((id) => !removing.has(id));
       }),
 
-    alignElements: (direction) =>
+    updateSelectionSetGeometry: (change, saveToHistory = false) => {
+      let changed = false;
       set((state) => {
         const page = findCurrentSubPage(state);
-        if (!page) return;
-        const elementMap = new Map(page.elements.map((item) => [item.id, item]));
-        const els = page.elements.filter((e) => state.selectedElementIds.includes(e.id) && !isElementLocked(e, elementMap));
-        if (els.length < 2) return;
+        if (!page || ('frozen' in page && page.frozen)) return;
+        const updates = getSelectionGeometryUpdates(
+          page.elements,
+          state.selectedElementIds,
+          change,
+          page.editorLayerGroups?.map((group) => group.id),
+        );
+        const elementMap = new Map(page.elements.map((element) => [element.id, element]));
+        updates.forEach((update) => {
+          const element = elementMap.get(update.id);
+          if (!element || isElementLocked(element, elementMap)) return;
+          const nextHeight = isChoiceOption(element, page.elements) ? 77 : update.height;
+          if (
+            element.x === update.x
+            && element.y === update.y
+            && element.width === update.width
+            && element.height === nextHeight
+          ) return;
+          element.x = update.x;
+          element.y = update.y;
+          element.width = update.width;
+          element.height = nextHeight;
+          changed = true;
+        });
+      });
+      if (changed && saveToHistory) get().saveHistory();
+    },
 
-        switch (direction) {
-          case 'left': {
-            const minX = Math.min(...els.map((e) => e.x));
-            els.forEach((e) => { e.x = minX; });
-            break;
-          }
-          case 'right': {
-            const maxR = Math.max(...els.map((e) => e.x + e.width));
-            els.forEach((e) => { e.x = maxR - e.width; });
-            break;
-          }
-          case 'centerH': {
-            const minX = Math.min(...els.map((e) => e.x));
-            const maxR = Math.max(...els.map((e) => e.x + e.width));
-            const cx = (minX + maxR) / 2;
-            els.forEach((e) => { e.x = cx - e.width / 2; });
-            break;
-          }
-          case 'top': {
-            const minY = Math.min(...els.map((e) => e.y));
-            els.forEach((e) => { e.y = minY; });
-            break;
-          }
-          case 'bottom': {
-            const maxB = Math.max(...els.map((e) => e.y + e.height));
-            els.forEach((e) => { e.y = maxB - e.height; });
-            break;
-          }
-          case 'centerV': {
-            const minY = Math.min(...els.map((e) => e.y));
-            const maxB = Math.max(...els.map((e) => e.y + e.height));
-            const cy = (minY + maxB) / 2;
-            els.forEach((e) => { e.y = cy - e.height / 2; });
-            break;
-          }
-          case 'distributeH': {
-            if (els.length < 3) return;
-            const sorted = [...els].sort((a, b) => a.x - b.x);
-            const minX = sorted[0].x;
-            const maxR = sorted[sorted.length - 1].x + sorted[sorted.length - 1].width;
-            const totalW = sorted.reduce((s, e) => s + e.width, 0);
-            const gap = (maxR - minX - totalW) / (sorted.length - 1);
-            let cx = minX;
-            sorted.forEach((e) => { e.x = Math.round(cx); cx += e.width + gap; });
-            break;
-          }
-          case 'distributeV': {
-            if (els.length < 3) return;
-            const sorted = [...els].sort((a, b) => a.y - b.y);
-            const minY = sorted[0].y;
-            const maxB = sorted[sorted.length - 1].y + sorted[sorted.length - 1].height;
-            const totalH = sorted.reduce((s, e) => s + e.height, 0);
-            const gap = (maxB - minY - totalH) / (sorted.length - 1);
-            let cy = minY;
-            sorted.forEach((e) => { e.y = Math.round(cy); cy += e.height + gap; });
-            break;
-          }
-        }
-        get().saveHistory();
-      }),
+    alignElements: (direction) => {
+      let changed = false;
+      set((state) => {
+        const page = findCurrentSubPage(state);
+        if (!page || ('frozen' in page && page.frozen)) return;
+        const updates = getSelectionAlignmentUpdates(
+          page.elements,
+          state.selectedElementIds,
+          direction,
+          page.editorLayerGroups?.map((group) => group.id),
+        );
+        const elementMap = new Map(page.elements.map((element) => [element.id, element]));
+        updates.forEach((update) => {
+          const element = elementMap.get(update.id);
+          if (!element || isElementLocked(element, elementMap)) return;
+          if (element.x === update.x && element.y === update.y) return;
+          element.x = update.x;
+          element.y = update.y;
+          changed = true;
+        });
+      });
+      if (changed) get().saveHistory();
+    },
 
     groupElements: () => {
       let changed = false;
@@ -2742,6 +2951,16 @@ export const useEditorStore = create<EditorState>()(
         const newOpt = createDefaultElement('SpeechSelectableObj', subPageId ?? undefined);
         newOpt.name = nextName;
         newOpt.parentId = choiceBoxId;
+        newOpt.width = 237;
+        newOpt.height = 77;
+        newOpt.props = {
+          ...newOpt.props,
+          _foregroundSkin: assetExport('choiceOption.normal'),
+          _pressedSkin: assetExport('choiceOption.pressed'),
+          _bgSkin: assetExport('choiceOption.selected'),
+          _correctSkin: assetExport('choiceOption.correct'),
+          _wrongSkin: assetExport('choiceOption.wrong'),
+        };
         // 横向追加：上一个选项右侧 +10；与一键创建的横向布局一致
         newOpt.x = lastOpt ? lastOpt.x + lastOpt.width + 10 : 50;
         newOpt.y = lastOpt ? lastOpt.y : 50;
@@ -2753,6 +2972,7 @@ export const useEditorStore = create<EditorState>()(
         });
         const obj = createLayaComponent(newOpt, getObject(choiceBoxId));
         if (obj) registerObject(newOpt.id, obj);
+        get().saveHistory();
       },
 
       /** 口才课选择题：删除最后一个选项 */
@@ -2766,6 +2986,18 @@ export const useEditorStore = create<EditorState>()(
         if (existingOptions.length === 0) return;
         const lastOpt = existingOptions[existingOptions.length - 1];
         get().deleteElement(lastOpt.id);
+      },
+
+      setChoiceCorrectOptionIds: (choiceBoxId: string, optionIds: string[]) => {
+        let changed = false;
+        set((state) => {
+          const page = findCurrentSubPage(state);
+          const choiceBox = page?.elements.find((element) => element.id === choiceBoxId && element.type === 'ChoiceBox');
+          if (!choiceBox) return;
+          applyChoiceCorrectOptionIds(choiceBox, optionIds);
+          changed = true;
+        });
+        if (changed) get().saveHistory();
       },
 
       /** 填空题：添加输入格 */

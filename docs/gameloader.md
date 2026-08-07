@@ -3,7 +3,7 @@
 > 作者：Wills.Deng【微信：43592330】  
 > 第二作者：AI 助手 Kiro  
 > 来源：`GameLoaderProd/src/GameLoader.as` + `pageshare-laya-research/tasks/`  
-> 更新日期：2026-04-23
+> 更新日期：2026-07-22
 
 ---
 
@@ -98,18 +98,20 @@ mainJsPath: LessonZK.js
 
 ### 本次排查结论
 
-在 forge 预览环境里，`GameLoader` 默认选中了：
-
-- `share/sdk/sdk_baiya_base.js`
-
-这条路径会导致预览运行在一份更“基础”的 SDK 上，而不是 `share/sdk/sdk_baiya.js` 那份更完整的运行时。
-
-最终落地方案不是继续 patch `sdk_baiya_base.js`，而是在 forge 预览入口显式追加 `sdk=full`，再由 `GameLoader.max.js` 优先识别该参数并强制切到：
+forge 预览入口显式追加 `sdk=full`，由 `GameLoader.max.js` 优先识别该参数并强制切到：
 
 - `share/sdk/sdk_baiya.js`
 - 或 `share/sdk/sdk_baiya2.js`
 
-这样只影响 forge 预览，不影响默认运行时选择逻辑，也避免长期维护 base 版上的临时补丁。
+这条选择只影响 forge 预览，不改变 GameLoader 的默认学科选择逻辑。保留完整 SDK 的原因是预览鼠标同步依赖其中完整的 cursor 事务链路；改回 `sdk_baiya_base.js + sdk_baiya_math.js` 会重新缺少 `handleCursor` 接收事务。
+
+`sdk=full` 会把 `subSdkUrl` 设为 `null`，因此数学 SDK 中已经存在的学科行为不会自动叠加到完整 SDK。豌豆精灵通用反馈音效必须由完整 SDK 自身保持与 `sdk_baiya_math.js` 一致：
+
+- 胜利：`share/animation/yee_WAV.wav`
+- 失败：`share/animation/zaixiangxiang.wav`
+- 未完成 / 遗憾：`share/animation/taikexi.wav`
+
+完整 SDK 的 `FeedbackView.showAnswerFace()` 负责在 `feedback: spirit` 的豌豆分支中同时播放动画和上述绑定音效。动作导出层只负责触发 SDK 反馈，不得再重复硬编码正确或错误音效，否则会产生双音效。
 
 鼠标同步问题最终不是课件 JS 主链路造成的，而是这份 `sdk_baiya_base.js` 的 cursor 事务链路缺失：
 
@@ -117,10 +119,7 @@ mainJsPath: LessonZK.js
 2. `cursorData` 没有映射到 `handleCursor`
 3. `HandleCursorTrans` 没有进入初始化列表
 
-因此，后续如果要彻底收口，不应继续长期 patch `sdk_baiya_base.js`，而应优先确认：
-
-- 真实可用课件最终加载的是 `sdk_baiya.js` 还是 `sdk_baiya_base.js`
-- forge 预览是否应该走和真实课件一致的 SDK 选择路径
+因此，后续如果要彻底收口，不应继续长期 patch `sdk_baiya_base.js`，而应优先确认并统一真实课件与 forge 预览的 SDK 选择路径。在统一之前，修改完整 SDK 中同时存在于学科 SDK 的行为时，必须核对两条实现是否保持一致。
 
 ---
 

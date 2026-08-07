@@ -6,6 +6,8 @@ export type LayaAny = any;
 import type { Element } from '../../types';
 import { loadLibraryFont } from '../fontLoader';
 import { DEFAULT_FONT_ID } from '../../elements/fontLibrary';
+import { elementMeta } from '../../elements/elementMeta';
+import { getImageMirrorTransform } from '../imageMirror';
 
 const _objects = new Map<string, LayaObj>();
 
@@ -102,19 +104,30 @@ export function clearAllObjects(): void {
   } catch { /* ignore */ }
 }
 
-export function syncTransform(id: string, x: number, y: number, w: number, h: number) {
+export function applyElementTransform(obj: LayaObj, element: Element): void {
+  const mirrorable = elementMeta[element.type]?.mirrorable === true;
+  const mirror = mirrorable ? getImageMirrorTransform(element) : null;
+  obj.x = mirror?.x ?? element.x;
+  obj.y = mirror?.y ?? element.y;
+  obj.width = element.width;
+  obj.height = element.height;
+  obj.rotation = element.rotation;
+  if (mirrorable) {
+    obj.scaleX = mirror?.scaleX ?? 1;
+    obj.scaleY = mirror?.scaleY ?? 1;
+  }
+}
+
+export function syncTransform(id: string, element: Element) {
   const obj = _objects.get(id);
   if (!obj) return;
-  obj.x = x;
-  obj.y = y;
-  obj.width = w;
-  obj.height = h;
+  applyElementTransform(obj, element);
 }
 
 export function syncProps(id: string, element: Element, propsChanged = false) {
   const obj = _objects.get(id);
   if (!obj) return;
-  syncTransform(id, element.x, element.y, element.width, element.height);
+  syncTransform(id, element);
   if (propsChanged) {
     import('./components').then(({ applyKlProps }) => {
       applyKlProps(obj, element);

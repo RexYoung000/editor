@@ -154,6 +154,7 @@ export function findTopElementAtPoint(
   elements: Element[],
   point: CanvasPoint,
   selectedIds: string[],
+  options: { includeLocked?: boolean } = {},
 ): Element | null {
   const elementMap = new Map(elements.map((element) => [element.id, element]));
   const containerIds = getContainerIds(elements);
@@ -161,6 +162,7 @@ export function findTopElementAtPoint(
     !containerIds.has(element.id)
     && !isEditorCanvasHitThrough(element)
     && !isElementHidden(element, elementMap)
+    && (options.includeLocked === true || !isElementLocked(element, elementMap))
     && isPointInsideElement(point, element, elements)
   ));
   const chooseTop = (candidates: Element[]) => {
@@ -177,6 +179,27 @@ export function findTopElementAtPoint(
   const topHit = chooseTop(hits);
   if (topSelected && topHit && isAncestor(topSelected.id, topHit.id, elementMap)) return topHit;
   return topSelected ?? topHit;
+}
+
+export function findCanvasPointerTarget(
+  elements: Element[],
+  point: CanvasPoint,
+  selectedIds: string[],
+  containerHandleId?: string,
+): Element | null {
+  if (containerHandleId) {
+    const elementMap = new Map(elements.map((element) => [element.id, element]));
+    const handleElement = elementMap.get(containerHandleId);
+    if (
+      handleElement
+      && getContainerIds(elements).has(handleElement.id)
+      && !isElementHidden(handleElement, elementMap)
+      && !isElementLocked(handleElement, elementMap)
+    ) {
+      return handleElement;
+    }
+  }
+  return findTopElementAtPoint(elements, point, selectedIds);
 }
 
 export function getTransformRootIds(

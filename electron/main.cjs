@@ -2,6 +2,35 @@ const { app, BrowserWindow, ipcMain, shell, dialog, protocol, net: electronNet }
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
+const { Transform } = require('stream');
+const { pipeline } = require('stream/promises');
+const {
+  inspectCourseSaveTarget,
+  saveCourseAsTransaction,
+  serializeSaveAsError,
+} = require('./courseSaveAs.cjs');
+const {
+  cancelPreparedPublish,
+  commitPreparedPublish,
+  configureSvnRuntime,
+  getCoursePublishState,
+  hashDirectory,
+  hashText,
+  inspectPublishTarget,
+  inspectSvnCapability,
+  preparePublish,
+  serializePublishError,
+  setCoursePublishState,
+} = require('./coursePublish.cjs');
+
+configureSvnRuntime({
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  resourcesPath: process.resourcesPath,
+});
 
 // 本地定义工具函数（避免引入跨模块依赖）
 function lessonSuffix(kind) {
@@ -32,6 +61,7 @@ let mainWindow;
 let inputWindowRef = null; // 服务器输入窗口引用，用于延迟销毁
 let currentServerUrl = ''; // 供 IPC get-server-url 读取
 const courseDirMap = new Map(); // courseId → courseDir，供 forge-local:// 协议查询
+const preparedPublishes = new Map();
 
 // ─── 服务器连接配置 ───
 
@@ -273,6 +303,25 @@ ipcMain.handle('write-course-file', (_event, filePath, courseJson) => {
 
 ipcMain.handle('path-exists', (_event, filePath) => {
   return fs.existsSync(filePath);
+});
+
+ipcMain.handle('inspect-course-save-target', async (_event, params) => {
+  try {
+    return { ok: true, ...(await inspectCourseSaveTarget(params)) };
+  } catch (error) {
+    return serializeSaveAsError(error);
+  }
+});
+
+ipcMain.handle('save-course-as', async (_event, params) => {
+  try {
+    const result = await saveCourseAsTransaction(params);
+    courseDirMap.set(params.targetCourseId, result.targetDir);
+    return { ok: true, ...result };
+  } catch (error) {
+    console.error('save-course-as error:', error);
+    return serializeSaveAsError(error);
+  }
 });
 
 ipcMain.handle('ensure-dir', (_event, dirPath) => {
@@ -552,30 +601,6 @@ ipcMain.handle('get-subdirs', (_event, dirPath) => {
   }
 });
 
-ipcMain.handle('svn-commit', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('TortoiseProc.exe', ['/command:commit', `/path:${dirPath}`, '/closeonend:2'], (err) => {
-      resolve({ ok: !err || err.code === 0 });
-    });
-  });
-});
-
-ipcMain.handle('svn-get-url', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('svn', ['info', '--show-item', 'url', dirPath], (err, stdout) => {
-      resolve(err ? null : stdout.trim());
-    });
-  });
-});
-
-ipcMain.handle('svn-has-unversioned', (_event, dirPath) => {
-  return new Promise((resolve) => {
-    execFile('svn', ['status', dirPath], (err, stdout) => {
-      resolve(!err && stdout.trim().length > 0);
-    });
-  });
-});
-
 ipcMain.handle('is-svn-directory', (_event, dirPath) => {
   let current = dirPath;
   while (current) {
@@ -585,6 +610,126 @@ ipcMain.handle('is-svn-directory', (_event, dirPath) => {
     current = parent;
   }
   return false;
+});
+
+ipcMain.handle('publish-hash-directory', (_event, dirPath) => {
+  try {
+    return { ok: true, digest: hashDirectory(dirPath) };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-hash-text', (_event, value) => {
+  try {
+    return { ok: true, digest: hashText(value) };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-get-state', (_event, courseId) => {
+  return getCoursePublishState(app.getPath('userData'), String(courseId));
+});
+
+ipcMain.handle('publish-set-state', (_event, courseId, state) => {
+  try {
+    const serialized = JSON.stringify(state);
+    if (serialized.length > 1024 * 1024) throw new Error('发布状态数据过大');
+    return { ok: true, state: setCoursePublishState(app.getPath('userData'), String(courseId), JSON.parse(serialized)) };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-check-svn', async () => {
+  try {
+    return { ok: true, capability: await inspectSvnCapability() };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-inspect-target', async (_event, params) => {
+  try {
+    const courseDir = courseDirMap.get(String(params.courseId));
+    if (!courseDir) throw new Error('未找到当前课件目录，请重新打开课件');
+    return {
+      ok: true,
+      inspection: await inspectPublishTarget({
+        ...params,
+        courseFolderName: path.basename(courseDir),
+        sourceCourseDir: courseDir,
+        workspacePath: params.workspacePath,
+      }),
+    };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-prepare-svn', async (_event, params) => {
+  try {
+    const courseId = String(params.courseId);
+    const courseDir = courseDirMap.get(courseId);
+    if (!courseDir) throw new Error('未找到当前课件目录，请重新打开课件');
+    const courseFolderName = path.basename(courseDir);
+    const workspacePath = params.workspacePath;
+    if (!workspacePath) throw new Error('请选择一个已经拉取到电脑上的本地 SVN 文件夹');
+    const prepared = await preparePublish({
+      ...params,
+      courseId,
+      courseFolderName,
+      sourceRoot: path.join(courseDir, 'project', courseId),
+      sourceCourseDir: courseDir,
+      workspacePath,
+      workspaceKind: 'existing',
+    });
+    const token = crypto.randomUUID();
+    preparedPublishes.set(token, prepared);
+    return {
+      ok: true,
+      token,
+      summary: {
+        finalUrl: prepared.inspection.finalUrl,
+        identity: prepared.inspection.identity,
+        targetExists: prepared.inspection.targetExists,
+        publishExists: prepared.inspection.publishExists,
+        transferMode: prepared.inspection.transferMode,
+        missingParentSegments: prepared.inspection.missingParentSegments,
+        workspacePath: prepared.workspacePath,
+        projectDigests: prepared.projectDigests,
+        projectTreeDigest: prepared.sourceTreeDigest,
+        changes: prepared.changes.map((entry) => ({ code: entry.code, path: entry.path })),
+      },
+    };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-commit-svn', async (_event, token, message) => {
+  const prepared = preparedPublishes.get(String(token));
+  if (!prepared) return { ok: false, code: 'PREPARED_PUBLISH_MISSING', error: '待提交任务已失效，请重新准备发布' };
+  try {
+    const result = await commitPreparedPublish(prepared, String(message));
+    preparedPublishes.delete(String(token));
+    return { ok: true, result };
+  } catch (error) {
+    return serializePublishError(error);
+  }
+});
+
+ipcMain.handle('publish-cancel-prepared', async (_event, token) => {
+  const prepared = preparedPublishes.get(String(token));
+  if (!prepared) return { ok: true };
+  try {
+    await cancelPreparedPublish(prepared);
+    preparedPublishes.delete(String(token));
+    return { ok: true };
+  } catch (error) {
+    return serializePublishError(error);
+  }
 });
 
 // ─── forge-local:// 自定义协议 ───
@@ -613,6 +758,7 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Range',
   'Access-Control-Expose-Headers': 'Content-Range, Content-Length',
+  'Cache-Control': 'no-store',
 };
 
 function handleForgeLocalProtocol(request) {
@@ -626,7 +772,8 @@ function handleForgeLocalProtocol(request) {
     const afterScheme = request.url.replace(/^forge-local:\/\//, '');
     const slashIdx = afterScheme.indexOf('/');
     const courseId = slashIdx >= 0 ? afterScheme.slice(0, slashIdx) : afterScheme;
-    const relativePath = slashIdx >= 0 ? afterScheme.slice(slashIdx + 1) : '';
+    const resourcePath = slashIdx >= 0 ? afterScheme.slice(slashIdx + 1) : '';
+    const relativePath = resourcePath.split(/[?#]/, 1)[0];
     // Standard scheme 会把 hostname 小写化，需要大小写不敏感查找
     const courseDir = courseDirMap.get(courseId)
       || [...courseDirMap.entries()].find(([k]) => k.toLowerCase() === courseId.toLowerCase())?.[1];
@@ -709,12 +856,162 @@ ipcMain.handle('copy-local-file', (_event, srcAbsPath, destAbsPath) => {
   }
 });
 
+const VIDEO_FILE_LIMIT = 50 * 1024 * 1024;
+
+function hashFileStream(absPath) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('md5');
+    const stream = fs.createReadStream(absPath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
+
+async function promoteVideoTempFile(courseDir, tempPath, hash) {
+  const animationDir = path.join(courseDir, 'images', 'animation');
+  fs.mkdirSync(animationDir, { recursive: true });
+  const candidates = [`video_${hash.slice(0, 6)}.mp4`, `video_${hash}.mp4`];
+  for (const fileName of candidates) {
+    const destPath = path.join(animationDir, fileName);
+    if (!fs.existsSync(destPath)) {
+      fs.renameSync(tempPath, destPath);
+      return `images/animation/${fileName}`;
+    }
+    if (await hashFileStream(destPath) === hash) {
+      fs.rmSync(tempPath, { force: true });
+      return `images/animation/${fileName}`;
+    }
+  }
+  throw new Error('视频内容哈希冲突');
+}
+
+function validateRemoteVideoPath(remotePath) {
+  if (typeof remotePath !== 'string' || !remotePath.startsWith('/')) {
+    throw new Error('视频下载路径无效');
+  }
+  const decoded = decodeURIComponent(remotePath);
+  if (decoded.includes('..') || (
+    !decoded.startsWith('/builtin/runtime/video-stage/')
+    && !decoded.startsWith('/builtin/library/')
+  )) {
+    throw new Error('视频下载路径不在允许范围');
+  }
+  if (!/\.mp4$/i.test(decoded)) throw new Error('视频关卡只支持 MP4');
+}
+
+async function downloadVideoToTemp(remotePath, tempPath, expectedSize) {
+  validateRemoteVideoPath(remotePath);
+  if (!currentServerUrl) throw new Error('尚未连接资源服务器');
+  const server = new URL(currentServerUrl);
+  const target = new URL(remotePath, server.origin);
+  if (target.origin !== server.origin) throw new Error('视频下载地址与当前服务器不一致');
+  const transport = target.protocol === 'https:' ? https : http;
+
+  return new Promise((resolve, reject) => {
+    const request = transport.get(target, (response) => {
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`视频下载失败: HTTP ${response.statusCode}`));
+        return;
+      }
+      const contentLength = Number(response.headers['content-length'] || 0);
+      if (contentLength > VIDEO_FILE_LIMIT) {
+        response.resume();
+        reject(new Error('视频不能超过 50MB'));
+        return;
+      }
+      if (expectedSize && contentLength && contentLength !== expectedSize) {
+        response.resume();
+        reject(new Error('视频大小与注册信息不一致'));
+        return;
+      }
+
+      let size = 0;
+      const md5 = crypto.createHash('md5');
+      const sha256 = crypto.createHash('sha256');
+      const validator = new Transform({
+        transform(chunk, _encoding, callback) {
+          size += chunk.length;
+          if (size > VIDEO_FILE_LIMIT) {
+            callback(new Error('视频不能超过 50MB'));
+            return;
+          }
+          md5.update(chunk);
+          sha256.update(chunk);
+          callback(null, chunk);
+        },
+      });
+
+      pipeline(response, validator, fs.createWriteStream(tempPath, { flags: 'wx' }))
+        .then(() => {
+          if (expectedSize && size !== expectedSize) throw new Error('视频大小与注册信息不一致');
+          resolve({
+            md5: md5.digest('hex'),
+            sha256: sha256.digest('hex'),
+            size,
+          });
+        })
+        .catch(reject);
+    });
+    request.setTimeout(30000, () => request.destroy(new Error('视频下载超时')));
+    request.on('error', reject);
+  });
+}
+
+ipcMain.handle('materialize-video-to-course', async (_event, params) => {
+  const courseDir = params?.courseDir;
+  const source = params?.source;
+  if (!courseDir || !source) return { ok: false, error: '缺少视频落盘参数' };
+
+  const animationDir = path.join(courseDir, 'images', 'animation');
+  fs.mkdirSync(animationDir, { recursive: true });
+  const tempPath = path.join(animationDir, `.video-import-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.tmp`);
+
+  try {
+    let hash;
+    let size;
+    if (source.kind === 'local') {
+      if (path.extname(source.path || '').toLowerCase() !== '.mp4') throw new Error('视频关卡只支持 MP4');
+      const stat = fs.statSync(source.path);
+      if (!stat.isFile()) throw new Error('所选路径不是文件');
+      if (stat.size > VIDEO_FILE_LIMIT) throw new Error('视频不能超过 50MB');
+      size = stat.size;
+      hash = await hashFileStream(source.path);
+      await fs.promises.copyFile(source.path, tempPath);
+    } else if (source.kind === 'remote') {
+      const downloaded = await downloadVideoToTemp(source.path, tempPath, source.expectedSize);
+      hash = downloaded.md5;
+      size = downloaded.size;
+      if (source.expectedHash) {
+        const expectedHashAlgorithm = source.expectedHashAlgorithm || 'md5';
+        const actualHash = expectedHashAlgorithm === 'md5'
+          ? downloaded.md5
+          : expectedHashAlgorithm === 'sha256-8'
+            ? downloaded.sha256.slice(0, 8)
+            : null;
+        if (!actualHash) throw new Error('视频校验算法无效');
+        if (actualHash !== source.expectedHash) {
+          throw new Error('视频内容与注册信息不一致');
+        }
+      }
+    } else {
+      throw new Error('未知的视频来源');
+    }
+
+    const relativePath = await promoteVideoTempFile(courseDir, tempPath, hash);
+    return { ok: true, relativePath, hash, size };
+  } catch (error) {
+    try { fs.rmSync(tempPath, { force: true }); } catch { /* ignore cleanup failure */ }
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
 // ─── IPC: hash-file ───
 // 流式 MD5，支持大文件（视频等），不一次性读进内存
 ipcMain.handle('hash-file', (_event, absPath) => {
   return new Promise((resolve) => {
     try {
-      const crypto = require('crypto');
       const hash = crypto.createHash('md5');
       const stream = fs.createReadStream(absPath);
       stream.on('data', (chunk) => hash.update(chunk));

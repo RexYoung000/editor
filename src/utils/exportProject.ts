@@ -1,10 +1,9 @@
 import type { Action, Course, SubPage, Element } from '../types';
-import { elementMeta, type ExportChild } from '../elements/elementMeta';
-import { getKeyboardPreset } from '../elements/keyboardPresets';
+import { elementMeta, FRACTION_INPUT_SHEET, type ExportChild } from '../elements/elementMeta';
+import { getKeyboardChildren } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath, lookupBuiltinBySrcPath, assetSrc, assetExport } from '../elements/builtinAssets';
 import { renderTextToImage, type RenderTextProps } from './textToImage';
 import { getCourseDirPath } from './electronFs';
-import { sendCourseToServer, loadWsConfig } from './websocket';
 import JSZip from 'jszip';
 import { getApiBaseUrl } from './apiConfig';
 import { collectImageSizes, isLargeImage } from './imageSize';
@@ -16,18 +15,37 @@ import {
   compileInternalPagesCourse,
   internalPageActionBody,
 } from './internalPageCompiler';
-import { getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
+import { buildOrdinaryActionBindings, isSharedOrdinaryAction } from './ordinaryActionCompiler';
+import { collectCourseConfirmTargetIssues, getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
+import {
+  buildInputRuleConfirmInitCode,
+  buildInputRuleInitCode,
+  collectCourseInputRuleIssues,
+  findInputRuleHostAncestor,
+  getFillAnswerInputs,
+  getInputAnswerCandidates,
+  hasStructuredInputRules,
+  isInputRuleHost,
+} from './inputAnswerRules';
+import {
+  collectCourseChoiceAnswerIssues,
+  getChoiceRuntimeProps,
+  isChoiceOptionText,
+} from './choiceAnswerRules';
+import { collectCourseCustomAnswerKeyboardIssues } from './customAnswerKeyboardRules';
+import { bakeCustomAnswerKeyboardTextAssets } from './customAnswerKeyboardText';
+import { getImageMirrorTransform } from './imageMirror';
 
 // ─── Text 烘焙 ───
 
 /**
- * publish 前烘焙：把所有 NewTextArea 元素就地替换成 Image（skin 是渲染好的 PNG data URL）。
+ * publish 前烘焙：把 NewTextArea 和自定义答案键盘文字转换为 PNG 资源。
  * 后续 collectResources/elementToLayaNode/atlas 全流程对它一无所知，data URL 走现有的
  * `data:image` → `game/image/skin_<n>.png` 通道，零特殊处理。
  *
  * 副作用：返回的 Course 是深拷贝；调用方拿到的是新对象。
  */
-async function bakeTextElements(course: Course): Promise<Course> {
+async function bakeCourseAssets(course: Course): Promise<Course> {
   const cloned = structuredClone(course) as Course;
   const allStages = [...cloned.stages, ...(cloned.previewStages ?? [])];
   for (const stage of allStages) {
@@ -49,6 +67,7 @@ async function bakeTextElements(course: Course): Promise<Course> {
       }
     }
   }
+  await bakeCustomAnswerKeyboardTextAssets(cloned);
   return cloned;
 }
 
@@ -88,6 +107,14 @@ export function isBuiltinResourcePath(v: unknown): v is string {
   return typeof v === 'string' && lookupBuiltinByExportPath(v) !== undefined;
 }
 
+/** 返回图片所属的 atlas 目录，保留图片前缀后的全部目录层级。 */
+export function getImageAtlasDirectory(mapped: string, imagePrefix: string): string | undefined {
+  if (!mapped.startsWith(imagePrefix)) return undefined;
+  const relative = mapped.slice(imagePrefix.length);
+  const lastSlash = relative.lastIndexOf('/');
+  return lastSlash > 0 ? relative.slice(0, lastSlash) : undefined;
+}
+
 /** game/xxx/file.png → <viewDir>/image/xxx/file.png，game/image/file.png → <viewDir>/image/img/file.png */
 export function builtinExportToProjectPath(exportPath: string, viewDir = 'game_lt'): string {
   const parts = exportPath.split('/');
@@ -102,6 +129,10 @@ export function builtinExportToProjectPath(exportPath: string, viewDir = 'game_l
     // game/animation/xxx → <viewDir>/animation/xxx
     if (dir === 'animation') {
       return `${viewDir}/animation/${rest}`;
+    }
+    // 旧画笔资源已经带 game/image/img/ 前缀，规范化时不能再次补一层 img。
+    if (dir === 'image' && rest.startsWith('img/')) {
+      return `${viewDir}/image/${rest}`;
     }
     // game/image/xxx → <viewDir>/image/img/xxx（用户上传的按钮图等放 img 目录）
     // game/<其他>/xxx → <viewDir>/image/<其他>/xxx（内置皮肤目录按原目录名拷贝）
@@ -168,10 +199,24 @@ export function collectResources(
       map.set(value, `${viewDir}/image/img/skin_${skinCounter++}${ext}`);
     } else if (isBuiltinResourcePath(value)) {
       if (!map.has(value)) map.set(value, builtinExportToProjectPath(value as string, viewDir));
+      if (/\.sk$/i.test(value as string)) {
+        const pngPath = (value as string).replace(/\.sk$/i, '.png');
+        if (lookupBuiltinByExportPath(pngPath) && !map.has(pngPath)) {
+          map.set(pngPath, builtinExportToProjectPath(pngPath, viewDir));
+        }
+      }
     } else if (typeof value === 'string' && value.startsWith('/builtin/')) {
       if (map.has(value)) return;
       const asset = lookupBuiltinBySrcPath(value);
-      if (asset?.exportPath) map.set(value, builtinExportToProjectPath(asset.exportPath, viewDir));
+      if (asset?.exportPath) {
+        map.set(value, builtinExportToProjectPath(asset.exportPath, viewDir));
+        if (/\.sk$/i.test(asset.exportPath)) {
+          const pngExportPath = asset.exportPath.replace(/\.sk$/i, '.png');
+          if (lookupBuiltinByExportPath(pngExportPath) && !map.has(pngExportPath)) {
+            map.set(pngExportPath, builtinExportToProjectPath(pngExportPath, viewDir));
+          }
+        }
+      }
     }
   };
 
@@ -179,6 +224,7 @@ export function collectResources(
     if (!children) return;
     for (const c of children) {
       if (c.props) for (const v of Object.values(c.props)) collectValue(v);
+      if (c.resources) for (const resource of c.resources) collectValue(resource);
       if (c.child) scanFixed(c.child);
     }
   };
@@ -192,7 +238,7 @@ export function collectResources(
           // _ 前缀的编辑器专用属性默认不收集；以下例外字段需要参与资源收集和路径重写：
           // - SpeechSelectableObj: _foregroundSkin / _bgSkin / _wrongSkin（前后景皮肤）
           // - MatchingItem: _itemImage（导出时转为子 Image 节点的 skin）
-          if (!options.collectAllEditorProps && k.startsWith('_') && k !== '_foregroundSkin' && k !== '_bgSkin' && k !== '_wrongSkin' && k !== '_itemImage') continue;
+          if (!options.collectAllEditorProps && k.startsWith('_') && !['_foregroundSkin', '_pressedSkin', '_bgSkin', '_correctSkin', '_wrongSkin', '_itemImage'].includes(k)) continue;
           collectValue(v);
         }
         // playSound / stopSound 动作中的音频路径也需要收集
@@ -204,9 +250,7 @@ export function collectResources(
           }
         }
         scanFixed(meta?.exportChildren);
-        const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-        const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-        scanFixed(presetChildren);
+        scanFixed(getKeyboardChildren(el));
         // PageTurnBox 不携带额外资源，同 group ContainerBox 的资源由主循环收集
       }
     }
@@ -337,8 +381,45 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
     if (el.type === 'DragViewBox') needsVar.add(el.id);
     // MatchingGame：onClickInitGameConfirm* 时需要 var 引用（this.<var>.allRight）
     if (el.type === 'MatchingGame') needsVar.add(el.id);
+    // ChoiceBox：五态视觉初始化与作业提交判定会直接引用容器。
+    if (el.type === 'ChoiceBox') needsVar.add(el.id);
     // 画笔组合：NewBrushSprite Box（var 借调给注入的画板子节点）+ 画笔开关 + 清空按钮
     if (el.type === 'NewBrushSprite' || el.type === 'BrushDrawBtn' || el.type === 'BrushClearBtn') {
+      needsVar.add(el.id);
+    }
+  }
+
+  // 作业预设“完成”会直接读取配置了答案的独立输入控件。
+  for (const el of collectHomeworkStandaloneInputJudgeTargets(page)) {
+    needsVar.add(el.id);
+  }
+
+  // 结构化填空题判定会直接读取容器内每一个输入格。
+  for (const el of elements) {
+    if (!isInputRuleHost(el) || !hasStructuredInputRules(el, elements)) continue;
+    needsVar.add(el.id);
+    for (const input of getFillAnswerInputs(el, elements)) needsVar.add(input.id);
+  }
+
+  // 数学键盘初始化代码会直接引用这些组件，需要把对应 var 写入 scene。
+  const decimalCamps = new Set(elements.flatMap((el) => {
+    const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
+    return el.type === 'KlBaseKeyboard'
+      && props?._keyboardPreset?.id === 'decimal'
+      && typeof props.camp === 'string'
+      ? [props.camp]
+      : [];
+  }));
+  for (const el of elements) {
+    const props = el.props as Record<string, unknown> | undefined;
+    const presetId = (props?._keyboardPreset as { id?: string } | undefined)?.id;
+    if (el.type === 'KlInputImage' && decimalCamps.has(String(props?.camp ?? ''))) {
+      needsVar.add(el.id);
+    }
+    if (el.type === 'KlBaseKeyboard' && (presetId === 'decimal' || presetId === 'fraction') && props?.disabled === true) {
+      needsVar.add(el.id);
+    }
+    if (el.type === 'FractionInput' && (props?.canSelected === false || props?.canSelected === 'false')) {
       needsVar.add(el.id);
     }
   }
@@ -409,7 +490,15 @@ function buildSceneNode(
   const rawProps = { ...(element.props ?? {}) };
   // 旧数据兼容：_hidden → hidden
   if ('_hidden' in rawProps && !('hidden' in rawProps)) rawProps.hidden = rawProps._hidden;
+  // 旧版分数输入框只保存了 0-9，导出时补回与 img_w2Input.png 对应的完整字符表。
+  if (element.type === 'FractionInput' && rawProps.sheet === '0123456789') {
+    rawProps.sheet = FRACTION_INPUT_SHEET;
+  }
   const merged = { ...(meta?.defaultProps ?? {}), ...rawProps };
+  if (element.type === 'ChoiceBox') {
+    Object.assign(merged, getChoiceRuntimeProps(element, allElements));
+    delete merged._correctOptionIds;
+  }
   const rewritten = rewriteProps(merged, resourceMap);
 
   const props: Record<string, unknown> = { x: element.x, y: element.y, width: element.width, height: element.height };
@@ -420,11 +509,18 @@ function buildSceneNode(
     props.x = element.x + element.width / 2;
     props.y = element.y + element.height / 2;
   }
+  if (meta?.mirrorable) {
+    const mirror = getImageMirrorTransform(element);
+    props.x = mirror.x;
+    props.y = mirror.y;
+    if (mirror.scaleX === -1) props.scaleX = -1;
+    if (mirror.scaleY === -1) props.scaleY = -1;
+  }
   if (element.name) props.name = element.name;
   if (element.opacity !== 1) props.alpha = element.opacity;
   if (element.rotation !== 0) props.rotation = element.rotation;
   for (const [k, v] of Object.entries(rewritten)) {
-    if (k.startsWith('_')) continue;
+    if (k.startsWith('_') || k === 'mirrorX' || k === 'mirrorY') continue;
     // scene 里只有根节点有 runtime，子节点不注入
     if (k === 'runtime') continue;
     if (k === 'hidden') continue;
@@ -466,6 +562,10 @@ function buildSceneNode(
     props.mouseEnabled = true;
     props.mouseThrough = false;
   }
+  if (isChoiceOptionText(element, allElements)) {
+    props.mouseEnabled = false;
+    props.mouseThrough = true;
+  }
   // SoundButton 的 isNeedAni/showInStu 导出为字符串（sdk_baiya 要求字符串格式）
   if (element.layaType === 'SoundButton') {
     if ('isNeedAni' in props) props.isNeedAni = String(props.isNeedAni);
@@ -506,47 +606,73 @@ function buildSceneNode(
       props.isSelected = false;
     }
   }
-  // SelectableObj：将编辑器专用皮肤属性转换为子 Image 节点（与 export.ts 同逻辑）
+  // SelectableObj：将编辑器专用皮肤属性转换为互斥状态图层。
   let selectableObjChildren: Record<string, unknown>[] = []; // eslint-disable-line prefer-const
   if (element.layaType === 'SelectableObj') {
     const fgSkin = rewritten._foregroundSkin;
     if (typeof fgSkin === 'string' && fgSkin !== '') {
-      const fgId = nextId();
       selectableObjChildren.push({
         x: 15, type: 'Image', searchKey: 'Image', label: 'Image',
         isDirectory: false, isAniNode: true, hasChild: false,
-        compId: fgId, nodeParent: id,
-        props: { skin: fgSkin, left: 0, top: 0, right: 0, bottom: 0 },
+        compId: nextId(), nodeParent: id,
+        props: { skin: fgSkin, left: 0, top: 0, right: 0, bottom: 0, sizeGrid: '10,38,10,38', mouseEnabled: false },
         child: [],
       });
     }
-    // 选中态 / 错误态：图片原始尺寸居中显示（anchor 0.5 + 父中心坐标，不指定 width/height）
+    const pressedSkin = rewritten._pressedSkin;
+    if (typeof pressedSkin === 'string' && pressedSkin !== '') {
+      selectableObjChildren.push({
+        x: 15, type: 'Image', searchKey: 'Image,down', label: 'down',
+        isDirectory: false, isAniNode: true, hasChild: false,
+        compId: nextId(), nodeParent: id,
+        props: { name: 'down', skin: pressedSkin, visible: false, left: 0, top: 0, right: 0, bottom: 0, sizeGrid: '10,38,10,38', mouseEnabled: false },
+        child: [],
+      });
+    }
     const bgSkin = rewritten._bgSkin;
     if (typeof bgSkin === 'string' && bgSkin !== '') {
-      const bgId = nextId();
       selectableObjChildren.push({
         x: 15, type: 'Image', searchKey: 'Image,bg', label: 'bg',
         isDirectory: false, isAniNode: true, hasChild: false,
-        compId: bgId, nodeParent: id,
+        compId: nextId(), nodeParent: id,
         props: {
           name: 'bg', skin: bgSkin,
           anchorX: 0.5, anchorY: 0.5,
           x: element.width / 2, y: element.height / 2,
+          width: element.width + 22, height: 99,
+          sizeGrid: '12,49,12,49', mouseEnabled: false,
+        },
+        child: [],
+      });
+    }
+    const correctSkin = rewritten._correctSkin;
+    if (typeof correctSkin === 'string' && correctSkin !== '') {
+      selectableObjChildren.push({
+        x: 15, type: 'Image', searchKey: 'Image,right', label: 'right',
+        isDirectory: false, isAniNode: true, hasChild: false,
+        compId: nextId(), nodeParent: id,
+        props: {
+          name: 'right', skin: correctSkin, visible: false,
+          anchorX: 0.5, anchorY: 0.5,
+          x: element.width / 2, y: element.height / 2,
+          width: element.width + 14, height: 91,
+          sizeGrid: '12,45,12,45', mouseEnabled: false,
         },
         child: [],
       });
     }
     const wrongSkin = rewritten._wrongSkin;
     if (typeof wrongSkin === 'string' && wrongSkin !== '') {
-      const wrongId = nextId();
       selectableObjChildren.push({
         x: 15, type: 'Image', searchKey: 'Image,wrong', label: 'wrong',
         isDirectory: false, isAniNode: true, hasChild: false,
-        compId: wrongId, nodeParent: id,
+        compId: nextId(), nodeParent: id,
         props: {
           name: 'wrong', skin: wrongSkin, visible: false,
           anchorX: 0.5, anchorY: 0.5,
           x: element.width / 2, y: element.height / 2,
+          width: element.width + 14, height: 91,
+          sizeGrid: '12,45,12,45', mouseEnabled: false,
         },
         child: [],
       });
@@ -606,8 +732,7 @@ function buildSceneNode(
   }
 
   const directChildren = allElements.filter(e => e.parentId === element.id);
-  const presetId = (element.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-  const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
+  const presetChildren = getKeyboardChildren(element);
   const fixedSource: ExportChild[] = presetChildren ?? meta?.exportChildren ?? [];
 
   // 汇总被 inheritProps 声明要从外层 props 搬走的字段，最后统一从外层 props 剥掉
@@ -883,7 +1008,7 @@ export function buildScene(
 
 // ─── 动作 → 代码片段（模块级工厂，正课/作业共用） ───
 
-function makeActionBuilder(
+export function makeActionBuilder(
   varAssignment: Map<string, string>,
   resourceMap: Map<string, string>,
   uiNamespace: string,
@@ -1198,7 +1323,7 @@ export function buildSdkJudgeClickInitCode(
       };
 
       const rightCheck = capability.kind === 'inputImage'
-        ? `!${targetRef}.valueOrSkinIsNull && ${targetRef}.fontClipValue === ${JSON.stringify(String(target.props._judgeAnswer ?? ''))}`
+        ? `!${targetRef}.valueOrSkinIsNull && (${JSON.stringify(getInputAnswerCandidates(target))}).indexOf(String(${targetRef}.fontClipValue || "")) >= 0`
         : capability.kind === 'input'
         ? `${targetRef}.isRight()`
         : capability.kind === 'drag'
@@ -1223,6 +1348,156 @@ export function buildSdkJudgeClickInitCode(
   return code;
 }
 
+/**
+ * 作业预设“完成”自动判定的独立输入控件。
+ * 属于答题判定容器的输入格继续由最近的父容器负责，避免重复判定。
+ */
+export function collectHomeworkStandaloneInputJudgeTargets(page: SubPage): Element[] {
+  return page.elements.filter((element) => {
+    if (element.type !== 'KlInputImage' && element.type !== 'FractionInput') return false;
+    return getInputAnswerCandidates(element).length > 0
+      && !findInputRuleHostAncestor(element, page.elements);
+  });
+}
+
+/** 生成独立输入控件的三态结果，并写入作业页统一结果集合。 */
+export function buildHomeworkStandaloneInputJudgeCode(
+  page: SubPage,
+  getVar: (element: Element) => string,
+  resultCollection = '__forgeJudgeResults',
+): string {
+  let code = '';
+  for (const element of collectHomeworkStandaloneInputJudgeTargets(page)) {
+    const elementRef = `this.${getVar(element)}`;
+    const answers = JSON.stringify(getInputAnswerCandidates(element));
+    code += `        if (!${elementRef} || ${elementRef}.valueOrSkinIsNull) { ${resultCollection}.push(null); }\n`;
+    code += `        else if ((${answers}).indexOf(String(${elementRef}.fontClipValue || "")) >= 0) { ${resultCollection}.push(true); }\n`;
+    code += `        else { ${resultCollection}.push(false); }\n`;
+  }
+  return code;
+}
+
+export function buildMathKeyboardInitCode(page: SubPage, getVar: (element: Element) => string): string {
+  const decimalCamps = new Set(page.elements.flatMap((element) => {
+    const props = element.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
+    return element.type === 'KlBaseKeyboard'
+      && props?._keyboardPreset?.id === 'decimal'
+      && typeof props.camp === 'string'
+      ? [props.camp]
+      : [];
+  }));
+  let code = '';
+
+  for (const element of page.elements) {
+    const props = element.props as Record<string, unknown> | undefined;
+    const elementRef = `this.${getVar(element)}`;
+    if (element.type === 'KlInputImage' && decimalCamps.has(String(props?.camp ?? ''))) {
+      code += `        ${elementRef}.on(KlKeyboardEvent.INPUT_LATER, this, function(input: KlInputImage) {\n`;
+      code += `            var target: KlInputImage = input || ${elementRef};\n`;
+      code += `            var value = String(target.fontClipValue || "");\n`;
+      code += `            var firstDot = value.indexOf(".");\n`;
+      code += `            if (firstDot >= 0) value = value.substring(0, firstDot + 1) + value.substring(firstDot + 1).replace(/\\./g, "");\n`;
+      code += `            if (value.charAt(0) === ".") value = target.place >= 2 ? "0." : "";\n`;
+      code += `            if (value !== target.fontClipValue) target.fontClipValue = value;\n`;
+      code += `        });\n`;
+    }
+
+    const presetId = (props?._keyboardPreset as { id?: string } | undefined)?.id;
+    const isDisabledMathKeyboard = element.type === 'KlBaseKeyboard'
+      && (presetId === 'decimal' || presetId === 'fraction')
+      && props?.disabled === true;
+    const isDisabledFractionInput = element.type === 'FractionInput'
+      && (props?.canSelected === false || props?.canSelected === 'false');
+    if (isDisabledMathKeyboard || isDisabledFractionInput) {
+      code += `        ${elementRef}.alpha = 0.45;\n`;
+      code += `        ${elementRef}.gray = true;\n`;
+      code += `        ${elementRef}.mouseEnabled = false;\n`;
+    }
+  }
+
+  return code;
+}
+
+export function buildChoiceVisualInitCode(
+  page: SubPage,
+  getVar: (element: Element) => string,
+  bindConfirmResults = true,
+): string {
+  let code = '';
+  const confirmEvents = new Set([
+    'onClickInitConfirm',
+    'onClickInitConfirmWithLock',
+    'onClickInitConfirmCH',
+    'onClickInitConfirmCHWithLock',
+  ]);
+
+  for (const choiceBox of page.elements.filter((element) => element.type === 'ChoiceBox')) {
+    const choiceRef = `this.${getVar(choiceBox)}`;
+    const optionNames = page.elements
+      .filter((element) => element.parentId === choiceBox.id && element.type === 'SpeechSelectableObj')
+      .map((element) => JSON.stringify(element.name ?? element.id));
+    code += `        (function() {\n`;
+    code += `            var __choice: any = ${choiceRef};\n`;
+    code += `            if (!__choice) return;\n`;
+    code += `            var __items: any[] = [${optionNames.map((name) => `__choice.getChildByName(${name})`).join(', ')}].filter(function(item) { return !!item; });\n`;
+    code += `            if (__choice.__forgeChoiceVisualReady) { if (byReset && __choice.cancelAllSel) __choice.cancelAllSel(); __choice.__forgeApplyResult(null); return; }\n`;
+    code += `            var __setLayer = function(item: any, name: string, visible: boolean) { var layer = item.getChildByName(name); if (layer) layer.visible = visible; };\n`;
+    code += `            __choice.__forgeApplyResult = function(result: any) {\n`;
+    code += `                __choice.__forgeResult = result;\n`;
+    code += `                __choice.mouseChildren = result !== true;\n`;
+    code += `                for (var i = 0; i < __items.length; i++) {\n`;
+    code += `                    var item = __items[i]; var selected = !!item.isSelected;\n`;
+    code += `                    __setLayer(item, 'down', false);\n`;
+    code += `                    __setLayer(item, 'bg', result == null && selected);\n`;
+    code += `                    __setLayer(item, 'right', result === true && selected);\n`;
+    code += `                    __setLayer(item, 'wrong', result === false && selected);\n`;
+    code += `                    item.mouseEnabled = result !== true;\n`;
+    code += `                }\n`;
+    code += `            };\n`;
+    code += `            __choice.__forgeChoiceVisualReady = true;\n`;
+    code += `            __choice.__forgeResult = null;\n`;
+    code += `            for (let i = 0; i < __items.length; i++) {\n`;
+    code += `                let item: any = __items[i];\n`;
+    code += `                item.on(Laya.Event.MOUSE_DOWN, this, function() { item.__forgeWasSelected = !!item.isSelected; if (__choice.__forgeResult == null) __setLayer(item, 'down', true); });\n`;
+    code += `                item.on(Laya.Event.MOUSE_UP, this, function() { __setLayer(item, 'down', false); });\n`;
+    code += `                item.on(Laya.Event.MOUSE_OUT, this, function() { __setLayer(item, 'down', false); });\n`;
+    code += `                item.on(Laya.Event.CLICK, this, function() {\n`;
+    code += `                    if (__choice.upperLimit === 1 && item.__forgeWasSelected && item.isSelected && __choice.cancelAllSel) __choice.cancelAllSel();\n`;
+    code += `                    __choice.__forgeApplyResult(null);\n`;
+    code += `                });\n`;
+    code += `            }\n`;
+    code += `            __choice.__forgeApplyResult(null);\n`;
+    code += `        }).call(this);\n`;
+
+    if (!bindConfirmResults) continue;
+    for (const source of page.elements) {
+      const judgesChoice = (source.actions ?? []).some((action) => (
+        (confirmEvents.has(action.event) && action.targetId === choiceBox.id)
+        || (action.event === SDK_JUDGE_EVENT && action.judgeTargetId === choiceBox.id)
+      ));
+      if (!judgesChoice) continue;
+      code += `        (function() {\n`;
+      code += `            var source: any = this.${getVar(source)};\n`;
+      code += `            var choice: any = ${choiceRef};\n`;
+      code += `            if (!source || !choice || source.__forgeChoiceVisualTarget === choice) return;\n`;
+      code += `            source.__forgeChoiceVisualTarget = choice;\n`;
+      code += `            source.on(Laya.Event.CLICK, this, function() { Laya.timer.callLater(this, function() { if (choice.__forgeApplyResult) choice.__forgeApplyResult(choice.isNull ? null : choice.isRight === true); }); });\n`;
+      code += `        }).call(this);\n`;
+    }
+  }
+  return code;
+}
+
+function buildHomeworkChoiceResultCode(page: SubPage, getVar: (element: Element) => string): string {
+  let code = '';
+  for (const choiceBox of page.elements) {
+    if (choiceBox.type !== 'ChoiceBox') continue;
+    const choiceRef = `this.${getVar(choiceBox)}`;
+    code += `        if ((${choiceRef} as any).__forgeApplyResult) (${choiceRef} as any).__forgeApplyResult(${choiceRef}.isNull ? null : ${choiceRef}.isRight === true);\n`;
+  }
+  return code;
+}
+
 function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<string, string>, varAssignment: Map<string, string>, uiNamespace = 'game_lt'): string {
   /** 根据元素 ID 获取分配的 var 名（用于 this.xxx 引用） */
   const getVar = (el: Element): string => {
@@ -1231,6 +1506,8 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   const buildActionBody = makeActionBuilder(varAssignment, resourceMap, uiNamespace);
   let initCode = '';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildMathKeyboardInitCode(page, getVar);
+  initCode += buildInputRuleInitCode(page, getVar);
 
   // 口才反馈动画：如果有 onClickInitConfirmCH / *WithLock / onClickInitGameConfirmCH / *WithLock 或 playKcRightAni / playKcWrongAni，需要在类末尾追加 playRightAni/playWrongAni
   const hasCHConfirm = page.elements.some(el =>
@@ -1269,6 +1546,8 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   // ─── DragViewBox 统一处理（每个 DVB 一对 EVENT_SUCCESS/EVENT_FAILD，合并 dropSkin + onDragJudge）───
   initCode += buildDvbInitCode(page, getVar, buildActionBody as never, uiNamespace);
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
+  initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, uiNamespace);
+  initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, uiNamespace);
 
   // 用户绑定的动作（切换显隐、播放音效等）
   const eventMap: Record<string, string> = { onClick: 'click', onClickSound: 'click', onLoad: 'display', onChange: 'change' };
@@ -1340,7 +1619,14 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
           const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
           const btnVar = getVar(el);
           const lockArg = rawEvent === 'onClickInitConfirmWithLock' ? ', null, this._lockBox' : '';
-          if (targetEl && targetEl.type === 'KlInputBox') {
+          if (targetEl?.type === 'ContainerBox' && isInputRuleHost(targetEl)) {
+            initCode += buildInputRuleConfirmInitCode(
+              el,
+              targetEl,
+              getVar,
+              rawEvent === 'onClickInitConfirmWithLock',
+            );
+          } else if (targetEl?.type === 'KlInputBox') {
             const inputBoxVar = getVar(targetEl);
             initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
           } else if (targetEl && targetEl.layaType === 'ChoiceBox') {
@@ -1358,7 +1644,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
           const btnVar = getVar(el);
           const isLock = rawEvent === 'onClickInitConfirmCHWithLock';
           const lockArg = isLock ? 'this._lockBox' : 'null';
-          if (targetEl && targetEl.type === 'KlInputBox') {
+          if (isInputRuleHost(targetEl)) {
             const inputBoxVar = getVar(targetEl);
             initCode += `        GameUtils.initConfirmCH(this, this.${btnVar}, this.${inputBoxVar}, null, ${lockArg}, this.playRightAni, this.playWrongAni);\n`;
           } else if (targetEl && targetEl.layaType === 'ChoiceBox') {
@@ -1436,9 +1722,16 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
         continue;
       }
 
-      // onClickSound：在每个动作前自动播放点击音效
-      const clickSoundPrefix = rawEvent === 'onClickSound' ? `this.playSound("${uiNamespace}/sound/btn_click.wav"); ` : '';
-      for (const action of [...actions].sort((a, b) => Number(isPageAction(a)) - Number(isPageAction(b)))) {
+      const remainingActions = actions.filter((action) => (
+        !isSharedOrdinaryAction(action)
+        && !(page.editorModel === 'internal-pages' && isPageAction(action))
+      ));
+      const sortedRemainingActions = [...remainingActions].sort((a, b) => Number(isPageAction(a)) - Number(isPageAction(b)));
+      const sharedBindingHasClickSound = actions.some(isSharedOrdinaryAction);
+      for (const [index, action] of sortedRemainingActions.entries()) {
+        const clickSoundPrefix = rawEvent === 'onClickSound' && !sharedBindingHasClickSound && index === 0
+          ? `this.playSound("${uiNamespace}/sound/btn_click.wav"); `
+          : '';
         const body = buildActionBody(action, elRef, page, el);
         if (body) initCode += `        ${elRef}.on('${event}', this, function() { ${clickSoundPrefix}${body} });\n`;
       }
@@ -1477,8 +1770,8 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
       }
     }
 
-    // KlInputBox 自动判定：合并到一个 afterJudgeHandler
-    if (el.type === 'KlInputBox') {
+    // 答题判定容器自动判定：合并到一个 afterJudgeHandler
+    if (isInputRuleHost(el)) {
       const hasJudge = el.actions?.some(a => a.event === 'onInputJudge');
       if (hasJudge) {
         // 按 branchCondition 分流构建 right/wrong/null 三个分支的动作 body
@@ -1604,7 +1897,11 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
 import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
 `
     : '';
+  const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
+  const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
+  const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n\n' : '';
 
+  initCode += buildChoiceVisualInitCode(page, getVar);
   initCode += internalRuntime.initCode;
 
   return `import { ui } from "../../ui/layaMaxUI";
@@ -1616,11 +1913,11 @@ import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
 import KlKey = com.klzz.ui.custom.KeyBoard.KlKey;
 import KlBaseKeyboard = com.klzz.ui.custom.KeyBoard.KlBaseKeyboard;
 import SelectableObj = com.klzz.ui.custom.SelectableObj;
-${matchingImports}import { GameUtils } from "./GameUtils";
+${matchingImports}${fractionImport}import { GameUtils } from "./GameUtils";
 
 export default class ${sceneName} extends ui.${uiNamespace}.${sceneName}UI {
 
-    public initView(byReset: boolean) {
+${fractionReference}    public initView(byReset: boolean) {
         super.initView(byReset);
 
 ${initCode}        //add script
@@ -1641,21 +1938,21 @@ function generateHomeworkSceneTs(
   const buildActionBody = makeActionBuilder(varAssignment, resourceMap, 'game_hw');
 
   let initCode = '';
-  let checkResultCode = '';
+  let checkResultCode = '        var __forgeJudgeResults: any[] = [];\n';
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildMathKeyboardInitCode(page, getVar);
+  initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
+  initCode += buildChoiceVisualInitCode(page, getVar, false);
+  initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, 'game_hw');
 
-  // ChoiceBox 自动判定：clickHanler 绑到 checkResult；result 在 checkResult 内根据 isRight/isNull 写值
+  // 作业与测评由右上角通用提交读取 result；所有 ChoiceBox 都参与聚合判定。
   for (const el of page.elements) {
     if (el.layaType !== 'ChoiceBox') continue;
-    const hasJudge = el.actions?.some(a => a.event === 'onChoiceJudge');
-    if (!hasJudge) continue;
 
     const elVar = getVar(el);
     const elRef = `this.${elVar}`;
-
-    initCode += `        ${elRef}.clickHanler = Laya.Handler.create(this, this.checkResult, null, false);\n`;
 
     // 按 branchCondition 分流构建 right/wrong/null 三个分支的动作 body
     let rightBody = '', wrongBody = '', nullBody = '';
@@ -1680,15 +1977,14 @@ function generateHomeworkSceneTs(
     }
 
     checkResultCode +=
-      `        if (${elRef}.isRight) { ${rightBody ? rightBody + ' ' : ''}this.result = true; }\n` +
-      `        else if (${elRef}.isNull) { ${nullBody ? nullBody + ' ' : ''}this.result = null; }\n` +
-      `        else { ${wrongBody ? wrongBody + ' ' : ''}this.result = false; }\n` +
-      `        console.log("==========result:", this.result);\n`;
+      `        if (${elRef}.isRight) { ${rightBody ? rightBody + ' ' : ''}__forgeJudgeResults.push(true); }\n` +
+      `        else if (${elRef}.isNull) { ${nullBody ? nullBody + ' ' : ''}__forgeJudgeResults.push(null); }\n` +
+      `        else { ${wrongBody ? wrongBody + ' ' : ''}__forgeJudgeResults.push(false); }\n`;
   }
 
-  // KlInputBox 自动判定：afterJudgeHandler 绑到 checkResult；result 在 checkResult 内根据 isRight()/isNull() 写值
+  // 答题判定容器自动判定：afterJudgeHandler 绑到 checkResult；result 在 checkResult 内根据 isRight()/isNull() 写值
   for (const el of page.elements) {
-    if (el.type !== 'KlInputBox') continue;
+    if (!isInputRuleHost(el)) continue;
     const hasJudge = el.actions?.some(a => a.event === 'onInputJudge');
     if (!hasJudge) continue;
 
@@ -1720,10 +2016,9 @@ function generateHomeworkSceneTs(
     }
 
     checkResultCode +=
-      `        if (${elRef}.isRight()) { ${rightBody ? rightBody + ' ' : ''}this.result = true; }\n` +
-      `        else if (${elRef}.isNull()) { ${nullBody ? nullBody + ' ' : ''}this.result = null; }\n` +
-      `        else { ${wrongBody ? wrongBody + ' ' : ''}this.result = false; }\n` +
-      `        console.log("==========result:", this.result);\n`;
+      `        if (${elRef}.isRight()) { ${rightBody ? rightBody + ' ' : ''}__forgeJudgeResults.push(true); }\n` +
+      `        else if (${elRef}.isNull()) { ${nullBody ? nullBody + ' ' : ''}__forgeJudgeResults.push(null); }\n` +
+      `        else { ${wrongBody ? wrongBody + ' ' : ''}__forgeJudgeResults.push(false); }\n`;
   }
 
   // DragViewBox 自动判定：EVENT_SUCCESS/EVENT_FAILD 监听 + checkResult 内根据 dragsOnRightDrops() 写 result
@@ -1735,9 +2030,8 @@ function generateHomeworkSceneTs(
     if (!hasJudge) continue;
     const elRef = `this.${getVar(el)}`;
     checkResultCode +=
-      `        if (${elRef}.dragsOnRightDrops()) { this.result = true; }\n` +
-      `        else { this.result = false; }\n` +
-      `        console.log("==========result:", this.result);\n`;
+      `        if (${elRef}.dragsOnRightDrops()) { __forgeJudgeResults.push(true); }\n` +
+      `        else { __forgeJudgeResults.push(false); }\n`;
   }
 
   // MatchingGame 自动判定：监听 EVENT_CLICKLINE 触发 checkResult + checkResult 内根据 allRight/isNull() 写 result
@@ -1777,11 +2071,19 @@ function generateHomeworkSceneTs(
     }
 
     checkResultCode +=
-      `        if (${elRef}.allRight) { ${rightBody ? rightBody + ' ' : ''}this.result = true; }\n` +
-      `        else if (${elRef}.isNull()) { ${nullBody ? nullBody + ' ' : ''}this.result = null; }\n` +
-      `        else { ${wrongBody ? wrongBody + ' ' : ''}this.result = false; }\n` +
-      `        console.log("==========result:", this.result);\n`;
+      `        if (${elRef}.allRight) { ${rightBody ? rightBody + ' ' : ''}__forgeJudgeResults.push(true); }\n` +
+      `        else if (${elRef}.isNull()) { ${nullBody ? nullBody + ' ' : ''}__forgeJudgeResults.push(null); }\n` +
+      `        else { ${wrongBody ? wrongBody + ' ' : ''}__forgeJudgeResults.push(false); }\n`;
   }
+
+  checkResultCode += buildHomeworkStandaloneInputJudgeCode(page, getVar);
+  checkResultCode +=
+    `        if (__forgeJudgeResults.length > 0) {\n` +
+    `            this.result = __forgeJudgeResults.indexOf(null) >= 0\n` +
+    `                ? null\n` +
+    `                : __forgeJudgeResults.every(function(value) { return value === true; });\n` +
+    `            console.log("==========result:", this.result);\n` +
+    `        }\n`;
 
   // 画笔组合：只有 NewBrushSprite 自己配置了 onInitBrush 事件，才生成 GameUtils.initDraw 调用
   for (const el of page.elements) {
@@ -1808,24 +2110,26 @@ function generateHomeworkSceneTs(
 import MatchingItem = com.klzz.ui.custom.MatchingGame.MatchingItem;
 `
     : '';
+  const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
+  const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
+  const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n' : '';
 
   initCode += internalRuntime.initCode;
 
   return `import { ui } from "../../ui/layaMaxUI";
 import KlInputImage = com.klzz.ui.custom.KeyBoard.KlInputImage;
 import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
-${matchingImports}import { GameUtils } from "./GameUtils";
-import FractionInput from "./Components/FractionInput";
+${matchingImports}${fractionImport}import { GameUtils } from "./GameUtils";
 
 export default class ${sceneName} extends ui.game_hw.${sceneName}UI {
-    _ref = [FractionInput];
-    public initView(byReset: boolean) {
+${fractionReference}    public initView(byReset: boolean) {
         super.initView(byReset);
 ${initCode}        //add script
     }
     private _result: Boolean = null;
     public get result(): any {
         this.checkResult();
+${buildHomeworkChoiceResultCode(page, getVar)}
         return this._result;
     }
     public set result(v: any) {
@@ -1875,13 +2179,26 @@ function collectExportChildrenRes(
 ) {
   if (!children) return;
   for (const c of children) {
+    if (c.resources) {
+      for (const resource of c.resources) {
+        const mapped = resourceMap.get(resource);
+        if (!mapped || addedSingleFiles.has(mapped)) continue;
+        if (/\.ttf$/i.test(mapped)) {
+          resEntries.push({ url: mapped, type: 'ttf' });
+          addedSingleFiles.add(mapped);
+        }
+      }
+    }
     if (c.props) {
       for (const v of Object.values(c.props)) {
         const mapped = resourceMap.get(String(v));
         if (!mapped) continue;
-        if (mapped.startsWith(imagePrefix)) {
-          const parts = mapped.split('/');
-          if (parts.length >= 3) imageDirs.add(parts[2]);
+        if (/\.ttf$/i.test(mapped) && !addedSingleFiles.has(mapped)) {
+          resEntries.push({ url: mapped, type: 'ttf' });
+          addedSingleFiles.add(mapped);
+        } else if (mapped.startsWith(imagePrefix)) {
+          const dir = getImageAtlasDirectory(mapped, imagePrefix);
+          if (dir) imageDirs.add(dir);
         } else if (mapped.startsWith(soundPrefix) && !addedSingleFiles.has(mapped)) {
           resEntries.push({ url: mapped, type: 'sound' });
           addedSingleFiles.add(mapped);
@@ -1912,7 +2229,7 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
 
       // classType 规则：
       //   subPage 对应的 ts 中调用了以下任一函数 → 视为教学关：sj === 0 用 'lt'，其余用 'lx'
-      //     · GameUtils.initConfirm           ← onClickInitConfirm[WithLock] + targetEl.type === 'KlInputBox'
+      //     · GameUtils.initConfirm           ← onClickInitConfirm[WithLock] + 答题判定容器
       //     · GameUtils.initChoiceBoxConfirm  ← onClickInitConfirm[WithLock] + targetEl.layaType === 'ChoiceBox'
       //     · this.showAnswerFace(1)          ← showAnswerRight / showAnswerRightLock
       //                                       ← onClickInitGameConfirm[WithLock] + targetEl.type === 'DragViewBox' / 'MatchingGame'
@@ -1926,7 +2243,7 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
             }
             if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
               const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
-              if (targetEl && (targetEl.type === 'KlInputBox' || targetEl.layaType === 'ChoiceBox')) {
+              if (targetEl && (isInputRuleHost(targetEl) || targetEl.layaType === 'ChoiceBox')) {
                 return true;
               }
             }
@@ -1972,8 +2289,8 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
               }
               // 小图收集子目录用于 atlas
               if (!isLarge) {
-                const parts = mapped.split('/');
-                if (parts.length >= 3) imageDirs.add(parts[2]);
+                const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                if (dir) imageDirs.add(dir);
               }
             }
 
@@ -1994,10 +2311,10 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
               }
             }
           }
-          // 选项卡片：_foregroundSkin/_bgSkin/_wrongSkin 被主循环跳过，需显式收集
+          // 选项卡片状态皮肤被主循环跳过，需显式收集
           if (el.type === 'SpeechSelectableObj') {
-            const sMerged = merged as { _foregroundSkin?: string; _bgSkin?: string; _wrongSkin?: string };
-            for (const skinVal of [sMerged._foregroundSkin, sMerged._bgSkin, sMerged._wrongSkin]) {
+            const sMerged = merged as { _foregroundSkin?: string; _pressedSkin?: string; _bgSkin?: string; _correctSkin?: string; _wrongSkin?: string };
+            for (const skinVal of [sMerged._foregroundSkin, sMerged._pressedSkin, sMerged._bgSkin, sMerged._correctSkin, sMerged._wrongSkin]) {
               if (!skinVal) continue;
               const mapped = resourceMap.get(skinVal);
               if (!mapped) continue;
@@ -2008,8 +2325,8 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
@@ -2026,17 +2343,16 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_lt/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
           }
           // PageTurnBox 不携带 pages 数组，ContainerBox 子元素资源由主循环收集
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
-          const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-          const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-          collectExportChildrenRes(presetChildren, resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
+          collectExportChildrenRes(meta?.exportChildren, resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
+          collectExportChildrenRes(getKeyboardChildren(el), resourceMap, 'game_lt/image/', 'game_lt/sound/', imageDirs, resEntries, addedSingleFiles);
           // playSound / stopSound 动作中的音频资源也需要注册到 config.json
           if (el.actions) {
             for (const action of el.actions) {
@@ -2127,8 +2443,8 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                 addedSingleFiles.add(mapped);
               }
               if (!isLarge) {
-                const parts = mapped.split('/');
-                if (parts.length >= 3) imageDirs.add(parts[2]);
+                const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                if (dir) imageDirs.add(dir);
               }
             }
             if (mapped.startsWith('game_hw/sound/') && !addedSingleFiles.has(mapped)) {
@@ -2147,10 +2463,10 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
               }
             }
           }
-          // 选项卡片：_foregroundSkin/_bgSkin/_wrongSkin 被主循环跳过，需显式收集
+          // 选项卡片状态皮肤被主循环跳过，需显式收集
           if (el.type === 'SpeechSelectableObj') {
-            const sMerged = merged as { _foregroundSkin?: string; _bgSkin?: string; _wrongSkin?: string };
-            for (const skinVal of [sMerged._foregroundSkin, sMerged._bgSkin, sMerged._wrongSkin]) {
+            const sMerged = merged as { _foregroundSkin?: string; _pressedSkin?: string; _bgSkin?: string; _correctSkin?: string; _wrongSkin?: string };
+            for (const skinVal of [sMerged._foregroundSkin, sMerged._pressedSkin, sMerged._bgSkin, sMerged._correctSkin, sMerged._wrongSkin]) {
               if (!skinVal) continue;
               const mapped = resourceMap.get(skinVal);
               if (!mapped) continue;
@@ -2161,8 +2477,8 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
@@ -2179,16 +2495,15 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_hw/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
           }
           // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
-          const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-          const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-          collectExportChildrenRes(presetChildren, resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);
+          collectExportChildrenRes(meta?.exportChildren, resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);
+          collectExportChildrenRes(getKeyboardChildren(el), resourceMap, 'game_hw/image/', 'game_hw/sound/', imageDirs, resEntries, addedSingleFiles);
           // playSound / stopSound 动作中的音频资源也需要注册到 config.json
           if (el.actions) {
             for (const action of el.actions) {
@@ -2439,11 +2754,41 @@ export async function extractZipFromServer(
 
 // ─── 主入口 ───
 
-export async function exportProject(course: Course, options: { skipSvn?: boolean } = {}): Promise<{ svnSubmitted: boolean }> {
+export async function exportProject(course: Course, options: { cleanBuildOutput?: boolean } = {}): Promise<void> {
   const dirPath = getCourseDirPath(course.id);
   if (!dirPath) throw new Error('未找到课件目录，请先保存课件');
 
-  if (!options.skipSvn) {
+  const confirmTargetIssues = collectCourseConfirmTargetIssues(course);
+  if (confirmTargetIssues.length > 0) {
+    const details = confirmTargetIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = confirmTargetIssues.length > 8 ? `\n另有 ${confirmTargetIssues.length - 8} 项未显示` : '';
+    throw new Error(`确定按钮判定目标尚未完成，不能预览或发布：\n\n${details}${more}`);
+  }
+
+  const inputRuleIssues = collectCourseInputRuleIssues(course);
+  if (inputRuleIssues.length > 0) {
+    const details = inputRuleIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = inputRuleIssues.length > 8 ? `\n另有 ${inputRuleIssues.length - 8} 项未显示` : '';
+    throw new Error(`填空题判定规则尚未完成，不能预览或发布：\n\n${details}${more}`);
+  }
+
+  const choiceAnswerIssues = collectCourseChoiceAnswerIssues(course);
+  if (choiceAnswerIssues.length > 0) {
+    const details = choiceAnswerIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = choiceAnswerIssues.length > 8 ? `\n另有 ${choiceAnswerIssues.length - 8} 项未显示` : '';
+    throw new Error(`选择题配置尚未完成，不能预览或发布：\n\n${details}${more}`);
+  }
+
+  const customAnswerKeyboardIssues = collectCourseCustomAnswerKeyboardIssues(course);
+  if (customAnswerKeyboardIssues.length > 0) {
+    const details = customAnswerKeyboardIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = customAnswerKeyboardIssues.length > 8
+      ? `\n另有 ${customAnswerKeyboardIssues.length - 8} 项未显示`
+      : '';
+    throw new Error(`自定义答案键盘配置尚未完成，不能预览或发布：\n\n${details}${more}`);
+  }
+
+  if (options.cleanBuildOutput) {
     const blockingIssues = collectInternalPageIssues(course).filter((issue) => issue.severity === 'blocking');
     if (blockingIssues.length > 0) {
       const details = blockingIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
@@ -2471,11 +2816,11 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
   await eApi.removeDir(projectParent);
 
   // 发布工程时同步清理 esBuild/ 目录（编译产物），避免与新工程不一致
-  if (!options.skipSvn) {
+  if (options.cleanBuildOutput) {
     await eApi.removeDir(`${dirPath}/esBuild`);
   }
 
-  const baked = compileInternalPagesCourse(await bakeTextElements(course));
+  const baked = compileInternalPagesCourse(await bakeCourseAssets(course));
   const resourceMap = collectResources(baked, namespace(course.kind));
 
   // 补充 Spine 动画目录中的音频文件到 resourceMap
@@ -2522,7 +2867,7 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
       }
     }
 
-    return { svnSubmitted: false };
+    return;
   } else if (isFlat) {
     // ─── 作业/专题测评编辑器工程 ───
     const scenes = artifacts.scenes;
@@ -2708,40 +3053,4 @@ export async function exportProject(course: Course, options: { skipSvn?: boolean
   }
   } // end of else (normal mode)
 
-  if (options.skipSvn) return { svnSubmitted: false };
-
-  // ─── SVN 提交流程 ───
-  const isSvn = await eApi.isSvnDirectory(dirPath);
-  if (!isSvn) return { svnSubmitted: false };
-
-  const commitResult = await eApi.svnCommit(dirPath);
-  if (!commitResult.ok) throw new Error('已取消提交，发布中止');
-
-  const hasUnversioned = await eApi.svnHasUnversioned(dirPath);
-  if (hasUnversioned) throw new Error('检测到有还未提交的文件，请重新发布');
-
-  // 获取 project/<courseId>/ 下所有子目录的 SVN URL（对应 Game1_LT 等）
-  // 有预习关卡时，Game1_PREVIEW 排在第一位（打包机首位是项目根路径）
-  const projectDir = `${dirPath}/project/${course.id}`;
-  const subdirs = await eApi.getSubdirs(projectDir);
-  const svnPaths: string[] = [];
-  const hasPreview = (course.previewStages?.length ?? 0) > 0;
-  for (const subdir of subdirs) {
-    const url = await eApi.svnGetUrl(subdir);
-    if (url) {
-      // 预习路径优先插入首位
-      if (hasPreview && url.includes('Game1_PREVIEW')) {
-        svnPaths.unshift(url);
-      } else {
-        svnPaths.push(url);
-      }
-    }
-  }
-
-  if (svnPaths.length === 0) throw new Error('未找到 SVN 路径，请确保工程已提交到 SVN');
-
-  await loadWsConfig();
-  await sendCourseToServer(course.id, svnPaths, (msg) => console.log('[发布进度]', msg));
-
-  return { svnSubmitted: true };
 }

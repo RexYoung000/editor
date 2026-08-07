@@ -7,11 +7,13 @@ import FieldRenderer from './FieldRenderer';
 import SkinEditor from './SkinEditor';
 import ActionEditor from './ActionEditor';
 import BindKeyboardModal from './BindKeyboardModal';
+import { InputRuleEditor, InputRulesOverview } from './InputAnswerRulesEditor';
 import TabImgPicker from './TabImgPicker';
 import OkBtnPicker from './OkBtnPicker';
+import VideoSourceDialog from './VideoSourceDialog';
+import InputFontPreviewModal from './InputFontPreviewModal';
 import PageTurnPageList from './PageTurnPageList';
-import { KEYBOARD_PRESETS } from '../elements/keyboardPresets';
-import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock } from 'lucide-react';
+import { ArrowDown, ArrowUp, CornerDownLeft, Eye, EyeOff, FlipHorizontal2, FlipVertical2, FolderMinus, FolderOpen, Lock, Maximize2, Plus, Trash2, TriangleAlert, Unlock, Video } from 'lucide-react';
 import type { Action, Element } from '../types';
 import { useI18n } from '../i18n/context';
 import { getObject, syncProps } from '../utils/layaBridge';
@@ -24,9 +26,40 @@ import { getElementParentContainment } from '../utils/canvasGeometry';
 import { getExplicitLayerLabel, getLayerDisplayName, withLayerLabel } from '../utils/layerPresentation';
 import { createElementMap, getElementLayerState } from '../utils/layerState';
 import { resolveEditorLayerGroups, type ResolvedEditorLayerGroup } from '../utils/layerGroups';
+import {
+  applyKeyboardBindingProps,
+  keyboardBindingInfo,
+  keyboardCamp,
+  keyboardPresetId,
+  keyboardSupportsInput,
+  nextKeyboardCamp,
+} from '../utils/keyboardBinding';
+import { INPUT_RULE_ENABLED_KEY } from '../utils/inputAnswerRules';
+import {
+  getChoiceAnswerMode,
+  getChoiceCorrectOptionIds,
+  getChoiceOptions,
+  isChoiceOption,
+} from '../utils/choiceAnswerRules';
+import { isQuickTemplateConfirm } from '../utils/quickTemplateConfirm';
+import { layoutText, normalizeTextSizingMode } from '../utils/textLayout';
+import { createPropertyEditSession, parseFiniteNumberDraft } from '../utils/propertyEditSession';
+import { readCustomAnswerKeyboardConfig } from '../elements/keyboardPresets';
+import { getSelectionSetBounds, type SelectionGeometryKey } from '../utils/selectionSet';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
+
+function boundCustomAnswerOptions(input: Element, elements: Element[]): string[] | undefined {
+  const inputCamp = String(input.props?.camp ?? '').trim();
+  if (!inputCamp) return undefined;
+  const keyboard = elements.find((element) => (
+    element.type === 'KlBaseKeyboard'
+    && String(element.props?.camp ?? '').trim() === inputCamp
+    && keyboardPresetId(element, elements) === 'customAnswer'
+  ));
+  return keyboard ? readCustomAnswerKeyboardConfig(keyboard).answers : undefined;
+}
 
 interface EditorLayerGroupPropertiesProps {
   group: ResolvedEditorLayerGroup;
@@ -172,20 +205,25 @@ export default function PropertyPanel() {
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
   const currentInternalPageId = useEditorStore((s) => s.currentInternalPageId);
   const selectedElementIds = useEditorStore((s) => s.selectedElementIds);
+  const primarySelectedElementId = useEditorStore((s) => s.primarySelectedElementId);
   const selectedEditorLayerGroupId = useEditorStore((s) => s.selectedEditorLayerGroupId);
   const updateElement = useEditorStore((s) => s.updateElement);
+  const mirrorElement = useEditorStore((s) => s.mirrorElement);
+  const selectElement = useEditorStore((s) => s.selectElement);
   const deleteElement = useEditorStore((s) => s.deleteElement);
   const moveElementIntoParent = useEditorStore((s) => s.moveElementIntoParent);
   const fitContainerToChildren = useEditorStore((s) => s.fitContainerToChildren);
   const clearSelection = useEditorStore((s) => s.clearSelection);
   const setElementsEditorHidden = useEditorStore((s) => s.setElementsEditorHidden);
   const setElementsLocked = useEditorStore((s) => s.setElementsLocked);
+  const updateSelectionSetGeometry = useEditorStore((s) => s.updateSelectionSetGeometry);
   const selectEditorLayerGroup = useEditorStore((s) => s.selectEditorLayerGroup);
   const renameEditorLayerGroup = useEditorStore((s) => s.renameEditorLayerGroup);
   const deleteEditorLayerGroup = useEditorStore((s) => s.deleteEditorLayerGroup);
   const reorderEditorLayerGroup = useEditorStore((s) => s.reorderEditorLayerGroup);
   const addChoiceOption = useEditorStore((s) => s.addChoiceOption);
   const removeChoiceOption = useEditorStore((s) => s.removeChoiceOption);
+  const setChoiceCorrectOptionIds = useEditorStore((s) => s.setChoiceCorrectOptionIds);
   const addFillBlankInput = useEditorStore((s) => s.addFillBlankInput);
   const removeFillBlankInput = useEditorStore((s) => s.removeFillBlankInput);
   const addMatchingPair = useEditorStore((s) => s.addMatchingPair);
@@ -211,16 +249,28 @@ export default function PropertyPanel() {
   const [bindKeyboardOpen, setBindKeyboardOpen] = useState(false);
   const [tabImgPickerOpen, setTabImgPickerOpen] = useState(false);
   const [okBtnPickerOpen, setOkBtnPickerOpen] = useState(false);
+  const [videoSourceOpen, setVideoSourceOpen] = useState(false);
+  const [inputFontPreviewOpen, setInputFontPreviewOpen] = useState(false);
+  const [selectionAspectLocked, setSelectionAspectLocked] = useState(false);
+  const [propertyEditSession] = useState(() => createPropertyEditSession(
+    () => JSON.stringify(useEditorStore.getState().currentCourse),
+    () => useEditorStore.getState().saveHistory(),
+  ));
 
   useEffect(() => {
+    propertyEditSession.commit();
     queueMicrotask(() => {
       setEditingValues({});
       setSkinEditorOpen(false);
       setBindKeyboardOpen(false);
       setTabImgPickerOpen(false);
       setOkBtnPickerOpen(false);
+      setVideoSourceOpen(false);
+      setInputFontPreviewOpen(false);
     });
-  }, [selectedElementIds, selectedEditorLayerGroupId]);
+  }, [currentInternalPageId, currentSubPageId, propertyEditSession, selectedElementIds, selectedEditorLayerGroupId]);
+
+  useEffect(() => () => propertyEditSession.dispose(), [propertyEditSession]);
 
   const currentPage = findActiveElementPage(currentCourse, currentSubPageId, currentInternalPageId);
   const currentSubPage = findSubPage(currentCourse, currentSubPageId);
@@ -246,6 +296,23 @@ export default function PropertyPanel() {
     ? resolvedLayerGroups.findIndex((group) => group.id === selectedEditorLayerGroup.id)
     : -1;
   const selectedElements = elements.filter((e) => selectedElementIds.includes(e.id));
+  const selectionSetBounds = selectedElements.length > 1
+    ? getSelectionSetBounds(elements, selectedElementIds, currentPage?.editorLayerGroups?.map((group) => group.id))
+    : null;
+  const primarySelectedElement = selectedElements.find((element) => element.id === primarySelectedElementId)
+    ?? selectedElements.at(-1)
+    ?? null;
+  const editableSelectionElements = selectedElements.filter((element) => !getElementLayerState(element, elementMap).effectiveLocked);
+  const lockedSelectionCount = selectedElements.length - editableSelectionElements.length;
+  const allSelectionMembersHidden = selectedElements.length > 0
+    && selectedElements.every((element) => getElementLayerState(element, elementMap).effectiveHidden);
+  const allSelectionMembersLocked = selectedElements.length > 0
+    && selectedElements.every((element) => element.locked === true);
+  const selectionOpacityValues = selectedElements.map((element) => element.opacity);
+  const selectionOpacity = selectionOpacityValues.length > 0
+    && selectionOpacityValues.every((value) => value === selectionOpacityValues[0])
+    ? selectionOpacityValues[0]
+    : null;
   const selectedEditorLayerGroupMemberIds = (() => {
     if (!selectedEditorLayerGroup) return [];
     const ids = new Set<string>();
@@ -504,7 +571,7 @@ export default function PropertyPanel() {
       return;
     }
     selectedElements.forEach((el) => {
-      if (el.type === 'SpeechSelectableObj' && (key === '_foregroundSkin' || key === '_bgSkin')) {
+      if (el.type === 'SpeechSelectableObj' && ['_foregroundSkin', '_pressedSkin', '_bgSkin', '_correctSkin', '_wrongSkin'].includes(key)) {
         // 选项卡片：更新皮肤时同步画布 Laya 节点（通过 syncProps 触发 applyKlProps 含皮肤预加载）
         const newProps: Record<string, unknown> = { ...el.props, [key]: value };
         updateElement(el.id, { props: newProps } as Partial<Element>);
@@ -517,6 +584,16 @@ export default function PropertyPanel() {
       if (el.type === 'KlInputImage' && key === '_judgeAnswer') {
         newProps.place = String(value ?? '').length + 1;
       }
+      if (el.type === 'NewTextArea') {
+        const mode = normalizeTextSizingMode(newProps.textSizingMode);
+        const measured = layoutText(String(newProps.text ?? ''), el.width, el.height, newProps);
+        updateElement(el.id, {
+          props: newProps,
+          ...(mode === 'auto' ? { width: measured.width, height: measured.height } : {}),
+          ...(mode === 'fixed-width' ? { height: measured.height } : {}),
+        } as Partial<Element>);
+        return;
+      }
       updateElement(el.id, { props: newProps } as Partial<Element>);
     });
   };
@@ -524,6 +601,16 @@ export default function PropertyPanel() {
   const handleTransformChange = (key: string, value: unknown) => {
     selectedElements.forEach((el) => {
       if (getElementLayerState(el, elementMap).effectiveLocked) return;
+      if (el.type === 'NewTextArea' && (key === 'width' || key === 'height')) {
+        const mode = normalizeTextSizingMode(el.props.textSizingMode);
+        if (mode === 'auto' || (mode === 'fixed-width' && key === 'height')) return;
+        if (mode === 'fixed-width' && key === 'width') {
+          const width = Math.max(1, Number(value) || 1);
+          const measured = layoutText(String(el.props.text ?? ''), width, el.height, el.props);
+          updateElement(el.id, { width, height: measured.height });
+          return;
+        }
+      }
       updateElement(el.id, { [key]: value } as Partial<Element>);
     });
     // MatchingItem 宽高变化时，需要从 store 读取最新状态后同步图片子节点尺寸
@@ -573,6 +660,17 @@ export default function PropertyPanel() {
     if (single && !singleLayerState?.effectiveLocked) updateElement(single.id, { actions });
   };
 
+  const handleSelectionGeometryChange = (key: SelectionGeometryKey, value: number) => {
+    updateSelectionSetGeometry({ key, value, lockAspectRatio: selectionAspectLocked });
+  };
+
+  const handleSelectionOpacityChange = (value: number) => {
+    selectedElements.forEach((element) => {
+      if (getElementLayerState(element, elementMap).effectiveLocked) return;
+      updateElement(element.id, { opacity: value });
+    });
+  };
+
   const handleDelete = () => {
     if (!window.confirm(t('deleteElementConfirm'))) return;
     selectedElements.forEach((el) => deleteElement(el.id));
@@ -592,7 +690,11 @@ export default function PropertyPanel() {
   };
 
   const meta = single ? elementMeta[single.type] : null;
-  const properties: PropertyDef[] = meta?.properties ?? [];
+  // 文本尺寸模式在变换区域提供专用分段入口，避免在属性分组中重复出现。
+  const properties: PropertyDef[] = (meta?.properties ?? []).filter((field) => (
+    !(single?.type === 'NewTextArea' && field.key === 'textSizingMode')
+    && !(single?.type === 'Video' && singleLayerState?.effectiveLocked && field.key === 'videoUrl')
+  ));
 
   // 通用变换属性（locked 元素不显示）
   const isDragSlotBox = single && (single.type === 'DragDropBox' || single.type === 'DragDragBox');
@@ -668,6 +770,22 @@ export default function PropertyPanel() {
     : selectedEditorLayerGroup?.memberIds.length
       ? '页面顶层'
       : '首次拖入成员后确定';
+  const selectionGeometryFields: Array<{ key: SelectionGeometryKey; label: string }> = [
+    { key: 'x', label: 'X' },
+    { key: 'y', label: 'Y' },
+    { key: 'width', label: '宽' },
+    { key: 'height', label: '高' },
+  ];
+  const selectionControlsDisabled = Boolean(
+    workbenchReadonly
+      || (currentPage && 'frozen' in currentPage && currentPage.frozen)
+      || editableSelectionElements.length === 0
+      || !selectionSetBounds,
+  );
+  const selectionStatusDisabled = Boolean(
+    workbenchReadonly
+      || (currentPage && 'frozen' in currentPage && currentPage.frozen),
+  );
 
   return (
     <>
@@ -746,6 +864,133 @@ export default function PropertyPanel() {
           ) : (
             <div className="flex items-center justify-center h-full"><span className="text-xs text-slate-500">{t('noSelection')}</span></div>
           )
+        ) : selectedElements.length > 1 ? (
+          <div data-selection-set className="space-y-3" aria-label="选择集属性">
+            <div className="border-b border-slate-700 pb-2">
+              <div className="text-sm font-medium text-slate-100">选择集属性</div>
+              <div className="mt-1 text-[11px] text-slate-400">已选 {selectedElements.length} 个图层</div>
+              <div className="mt-1 truncate text-[11px] text-slate-500" title={primarySelectedElement ? getLayerDisplayName(primarySelectedElement, elementMeta[primarySelectedElement.type]?.label) : undefined}>
+                主选中项：<span className="text-slate-300">{primarySelectedElement ? getLayerDisplayName(primarySelectedElement, elementMeta[primarySelectedElement.type]?.label) : '无'}</span>
+              </div>
+            </div>
+
+            {lockedSelectionCount > 0 && (
+              <div className="border border-amber-500/40 bg-amber-950/30 p-2 text-[10px] leading-relaxed text-amber-200" role="status">
+                {lockedSelectionCount} 个锁定图层不会参与几何和透明度批量修改。
+              </div>
+            )}
+
+            <fieldset disabled={selectionControlsDisabled} className="space-y-3 disabled:cursor-not-allowed disabled:opacity-50">
+              <div>
+                <div className="mb-1.5 text-xs text-slate-500">整体几何（画布坐标）</div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {selectionGeometryFields.map((field) => {
+                    const rawValue = selectionSetBounds?.[field.key];
+                    const editKey = `selection.${field.key}`;
+                    return (
+                      <label key={field.key} className="flex items-center gap-1">
+                        <span className="w-7 shrink-0 text-[10px] text-slate-500">{field.label}</span>
+                        <input
+                          type="number"
+                          value={editingValues[editKey] ?? (rawValue === undefined ? '' : String(Math.round(rawValue)))}
+                          onFocus={() => propertyEditSession.begin()}
+                          onChange={(event) => {
+                            const draft = event.target.value;
+                            setEditingValues((previous) => ({ ...previous, [editKey]: draft }));
+                            const parsed = parseFiniteNumberDraft(draft);
+                            if (parsed !== null) {
+                              propertyEditSession.change(() => handleSelectionGeometryChange(field.key, parsed));
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') event.currentTarget.blur();
+                          }}
+                          onBlur={() => {
+                            setEditingValues((previous) => {
+                              const next = { ...previous };
+                              delete next[editKey];
+                              return next;
+                            });
+                            propertyEditSession.commit();
+                          }}
+                          className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-700 px-1.5 py-1 text-xs text-white focus:border-blue-500 focus:outline-none"
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={selectionAspectLocked}
+                    onChange={(event) => setSelectionAspectLocked(event.target.checked)}
+                  />
+                  锁定宽高比
+                </label>
+                <div className="mt-1 text-[10px] leading-relaxed text-slate-500">
+                  {selectionSetBounds
+                    ? `包围框 ${Math.round(selectionSetBounds.width)} × ${Math.round(selectionSetBounds.height)}`
+                    : '没有可编辑的选择集几何'}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700 pt-2">
+                <div className="mb-1.5 text-xs text-slate-500">透明度</div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={Math.round((selectionOpacity ?? 1) * 100)}
+                    onFocus={() => propertyEditSession.begin()}
+                    onChange={(event) => {
+                      const value = Number(event.target.value) / 100;
+                      propertyEditSession.change(() => handleSelectionOpacityChange(value));
+                    }}
+                    onMouseUp={() => propertyEditSession.commit()}
+                    onTouchEnd={() => propertyEditSession.commit()}
+                    className="min-w-0 flex-1 accent-blue-500"
+                  />
+                  <span className="w-12 text-right text-[10px] text-slate-400">
+                    {selectionOpacity === null ? '混合' : `${Math.round(selectionOpacity * 100)}%`}
+                  </span>
+                </div>
+              </div>
+            </fieldset>
+
+            <div className="border-t border-slate-700 pt-2">
+              <div className="mb-1.5 text-xs text-slate-500">选择集状态</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  disabled={selectionStatusDisabled}
+                  onClick={() => {
+                    propertyEditSession.commit();
+                    setElementsEditorHidden(selectedElementIds, !allSelectionMembersHidden);
+                  }}
+                  className="flex items-center justify-center gap-1 rounded bg-slate-700 px-1.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={allSelectionMembersHidden ? '显示选择集' : '隐藏选择集'}
+                >
+                  {allSelectionMembersHidden ? <Eye size={12} /> : <EyeOff size={12} />}
+                  {allSelectionMembersHidden ? '显示' : '隐藏'}
+                </button>
+                <button
+                  type="button"
+                  disabled={selectionStatusDisabled}
+                  onClick={() => {
+                    propertyEditSession.commit();
+                    setElementsLocked(selectedElementIds, !allSelectionMembersLocked);
+                  }}
+                  className="flex items-center justify-center gap-1 rounded bg-slate-700 px-1.5 py-1.5 text-[10px] text-slate-200 hover:bg-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={allSelectionMembersLocked ? '解锁选择集' : '锁定选择集'}
+                >
+                  {allSelectionMembersLocked ? <Unlock size={12} /> : <Lock size={12} />}
+                  {allSelectionMembersLocked ? '解锁' : '锁定'}
+                </button>
+              </div>
+            </div>
+          </div>
         ) : (
             <>
               {single && (
@@ -759,7 +1004,25 @@ export default function PropertyPanel() {
                 <div className="mb-3 border border-amber-500/40 bg-amber-950/30 p-2 text-[10px] leading-relaxed text-amber-200" role="status">
                   {singleLayerState.lockedById && lockedSource
                     ? `受父级锁定：${getLayerDisplayName(lockedSource, elementMeta[lockedSource.type]?.label)}。请先解锁“${getLayerDisplayName(lockedSource, elementMeta[lockedSource.type]?.label)}”。`
-                    : '当前图层已锁定，仅可查看属性。'}
+                    : single?.type === 'Video'
+                      ? '视频关卡结构已锁定，仍可更换视频资源。'
+                      : '当前图层已锁定，仅可查看属性。'}
+                </div>
+              )}
+
+              {single?.type === 'Video' && singleLayerState?.effectiveLocked && (
+                <div className="mb-3 rounded border border-slate-700 bg-slate-800 p-2">
+                  <div className="mb-2 truncate text-[10px] text-slate-500" title={String(single.props.videoUrl ?? '')}>
+                    {single.props.videoUrl ? String(single.props.videoUrl).split('/').pop() : '尚未选择视频'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setVideoSourceOpen(true)}
+                    className="flex h-8 w-full items-center justify-center gap-2 rounded bg-blue-600 text-xs text-white hover:bg-blue-500"
+                  >
+                    <Video size={14} />
+                    {single.props.videoUrl ? '更换视频' : '选择视频'}
+                  </button>
                 </div>
               )}
 
@@ -845,12 +1108,19 @@ export default function PropertyPanel() {
               )}
 
               {/* 确定按钮：替换资源按钮 */}
+              {single && isQuickTemplateConfirm(single) && (
+                <FieldRenderer
+                  field={{ key: 'skin', label: '按钮图片', type: 'file', fileType: 'image', group: '外观' }}
+                  elements={selectedElements}
+                  onChange={handleChange}
+                />
+              )}
               {single && single.type === 'ConfirmButton' && (
                 <button
                   onClick={() => setOkBtnPickerOpen(true)}
                   className="w-full mb-2 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors"
                 >
-                  {t('replaceResource')}
+                  {isQuickTemplateConfirm(single) ? '预设资源' : t('replaceResource')}
                 </button>
               )}
 
@@ -861,23 +1131,80 @@ export default function PropertyPanel() {
 
               {/* 口才课选择题：选项管理 */}
               {single && single.type === 'ChoiceBox' && (() => {
-                const hasOptionChildren = currentPage?.elements.some(e => e.parentId === single.id && e.type === 'SpeechSelectableObj');
+                const choiceOptions = getChoiceOptions(single, elements);
+                const correctOptionIds = getChoiceCorrectOptionIds(single);
+                const selectedAnswers = new Set(correctOptionIds);
+                const mode = getChoiceAnswerMode(single);
+                const modeLabel = mode === 'single' ? '单选题' : mode === 'multiple' ? '多选题' : '尚未配置';
+                const updateAnswers = (optionIds: string[]) => {
+                  setChoiceCorrectOptionIds(single.id, optionIds);
+                };
                 return (
                   <div className="mb-2 pb-2 border-b border-slate-700">
-                    <div className="text-xs text-slate-500 mb-1.5">{t('optionManagement') || '选项管理'}</div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs text-slate-500">正确答案</div>
+                      <span className={`text-[10px] ${mode === 'unconfigured' ? 'text-amber-300' : 'text-emerald-300'}`}>{modeLabel}</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {correctOptionIds.map((optionId, index) => {
+                        const selectableOptions = choiceOptions.filter((option) => option.id === optionId || !selectedAnswers.has(option.id));
+                        return (
+                          <div key={`${optionId}-${index}`} className="flex items-center gap-1.5">
+                            <select
+                              value={optionId}
+                              onChange={(event) => {
+                                const next = [...correctOptionIds];
+                                next[index] = event.target.value;
+                                updateAnswers(next);
+                              }}
+                              className="min-w-0 flex-1 border border-slate-600 bg-slate-700 px-1.5 py-1 text-xs text-white focus:border-blue-500 focus:outline-none"
+                            >
+                              {selectableOptions.map((option) => (
+                                <option key={option.id} value={option.id}>{getLayerDisplayName(option, elementMeta[option.type]?.label)}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => updateAnswers(correctOptionIds.filter((_, answerIndex) => answerIndex !== index))}
+                              className="p-1 text-red-400 hover:bg-red-900/50 hover:text-red-200"
+                              title="删除正确答案"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {correctOptionIds.length === 0 && (
+                        <div className="text-[10px] text-amber-300">尚未配置正确答案</div>
+                      )}
+                    </div>
                     <div className="flex gap-1">
+                      <button
+                        type="button"
+                        disabled={choiceOptions.every((option) => selectedAnswers.has(option.id))}
+                        onClick={() => {
+                          const nextOption = choiceOptions.find((option) => !selectedAnswers.has(option.id));
+                          if (nextOption) updateAnswers([...correctOptionIds, nextOption.id]);
+                        }}
+                        className="mt-2 flex flex-1 items-center justify-center gap-1 border border-slate-600 bg-slate-700 py-1.5 text-xs text-slate-300 hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Plus size={12} /> 添加答案
+                      </button>
+                    </div>
+                    <div className="mt-3 text-xs text-slate-500">选项</div>
+                    <div className="mt-1.5 flex gap-1">
                       <button onClick={() => addChoiceOption(single.id)} className="flex items-center gap-1 flex-1 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
                         <Plus size={12} /> {t('addOption') || '添加选项'}
                       </button>
                       <button
-                        disabled={!hasOptionChildren}
+                        disabled={choiceOptions.length === 0}
                         onClick={() => removeChoiceOption(single.id)}
                         className={`flex items-center gap-1 py-1.5 px-2 text-xs border rounded transition-colors ${
-                          hasOptionChildren
+                          choiceOptions.length > 0
                             ? 'bg-red-900/40 hover:bg-red-900/70 border-red-800/50 text-red-400 cursor-pointer'
                             : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
                         }`}
-                        title={hasOptionChildren ? '删除最后一个选项' : '没有可删除的选项'}
+                        title={choiceOptions.length > 0 ? '删除最后一个选项' : '没有可删除的选项'}
                       >
                         <Trash2 size={12} />
                       </button>
@@ -890,28 +1217,54 @@ export default function PropertyPanel() {
               {single && single.type === 'KlInputBox' && (() => {
                 const hasInputChildren = currentPage?.elements.some(e => e.parentId === single.id && e.type === 'KlInputImage');
                 return (
-                  <div className="mb-2 pb-2 border-b border-slate-700">
-                    <div className="text-xs text-slate-500 mb-1.5">填空管理</div>
-                    <div className="flex gap-1">
-                      <button onClick={() => addFillBlankInput(single.id)} className="flex items-center gap-1 flex-1 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
-                        <Plus size={12} /> 添加选项
-                      </button>
-                      <button
-                        disabled={!hasInputChildren}
-                        onClick={() => removeFillBlankInput(single.id)}
-                        className={`flex items-center gap-1 py-1.5 px-2 text-xs border rounded transition-colors ${
-                          hasInputChildren
-                            ? 'bg-red-900/40 hover:bg-red-900/70 border-red-800/50 text-red-400 cursor-pointer'
-                            : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
-                        }`}
-                        title={hasInputChildren ? '删除最后一个输入框' : '没有可删除的输入框'}
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                  <>
+                    <div className="mb-2 pb-2 border-b border-slate-700">
+                      <div className="text-xs text-slate-500 mb-1.5">填空管理</div>
+                      <div className="flex gap-1">
+                        <button onClick={() => addFillBlankInput(single.id)} className="flex items-center gap-1 flex-1 py-1.5 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
+                          <Plus size={12} /> 添加普通空位
+                        </button>
+                        <button
+                          disabled={!hasInputChildren}
+                          onClick={() => removeFillBlankInput(single.id)}
+                          className={`flex items-center gap-1 py-1.5 px-2 text-xs border rounded transition-colors ${
+                            hasInputChildren
+                              ? 'bg-red-900/40 hover:bg-red-900/70 border-red-800/50 text-red-400 cursor-pointer'
+                              : 'bg-slate-800 border-slate-700 text-slate-600 cursor-not-allowed'
+                          }`}
+                          title={hasInputChildren ? '删除最后一个普通输入框' : '没有可删除的普通输入框'}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                      <div className="mt-1 text-[10px] text-slate-500">分数输入框可从组件栏添加后，将父容器设为当前填空题。</div>
                     </div>
-                  </div>
+                    <InputRulesOverview
+                      target={single}
+                      elements={currentPage?.elements ?? []}
+                      disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                      onUpdateProps={(elementId, props) => updateElement(elementId, { props })}
+                      onCommit={saveHistory}
+                      onSelectElement={(elementId) => selectElement(elementId, false)}
+                    />
+                  </>
                 );
               })()}
+
+              {/* 通用容器：显式开启后作为答题判定容器 */}
+              {single
+                && single.type === 'ContainerBox'
+                && single.props?.[INPUT_RULE_ENABLED_KEY] === true
+                && (
+                  <InputRulesOverview
+                    target={single}
+                    elements={currentPage?.elements ?? []}
+                    disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                    onUpdateProps={(elementId, props) => updateElement(elementId, { props })}
+                    onCommit={saveHistory}
+                    onSelectElement={(elementId) => selectElement(elementId, false)}
+                  />
+                )}
 
               {/* 连线题：连线项管理（一次添加/删除一对：左 camp1 + 右 camp2） */}
               {single && single.type === 'MatchingGame' && (() => {
@@ -1049,7 +1402,9 @@ export default function PropertyPanel() {
               <div className="mb-2 pb-2 border-b border-slate-700">
                 <div className="text-xs text-slate-500 mb-1.5">{t('transform')}</div>
                 <div className="grid grid-cols-2 gap-1">
-                  {transformFields.slice(0, 4).map((f) => {
+                  {transformFields.slice(0, 4).filter((field) => !(
+                    field.key === 'height' && single && isChoiceOption(single, elements)
+                  )).map((f) => {
                     const val = single ? (single as unknown as Record<string, unknown>)[f.key] : undefined;
                     const isSize = f.key === 'width' || f.key === 'height';
                     const defaultSizeVal = single && isSize ? elementMeta[single.type]?.defaultSize?.[f.key as 'width' | 'height'] : undefined;
@@ -1059,48 +1414,76 @@ export default function PropertyPanel() {
                       : undefined;
                     const effectiveDefault = naturalSize !== undefined && naturalSize !== null ? Number(naturalSize) : (defaultSizeVal ?? 0);
                     const displayVal = editingValues[f.key] ?? (val !== undefined && val !== null ? String(val) : '');
+                    const textMode = single?.type === 'NewTextArea' ? normalizeTextSizingMode(single.props.textSizingMode) : null;
+                    const sizeDisabled = single?.type === 'NewTextArea' && (
+                      (f.key === 'width' && textMode === 'auto')
+                      || (f.key === 'height' && (textMode === 'auto' || textMode === 'fixed-width'))
+                    );
                     return (
                       <div key={f.key} className="flex items-center gap-1">
                         <span className="text-[10px] text-slate-500 w-4">{f.label}</span>
-                        <input type="number" className={`flex-1 min-w-0 px-1 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500`}
+                        <input type="number" disabled={sizeDisabled} title={sizeDisabled ? '请先切换尺寸模式' : undefined} className={`flex-1 min-w-0 px-1 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50`}
                           value={displayVal}
                           placeholder={String(effectiveDefault)}
+                          onFocus={() => propertyEditSession.begin()}
                           onChange={(e) => {
-                            setEditingValues(prev => ({ ...prev, [f.key]: e.target.value }));
+                            const draft = e.target.value;
+                            setEditingValues(prev => ({ ...prev, [f.key]: draft }));
+                            const parsed = parseFiniteNumberDraft(draft);
+                            if (parsed !== null) {
+                              propertyEditSession.change(() => handleTransformChange(f.key, parsed));
+                            }
                           }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
-                              const raw = editingValues[f.key];
-                              if (raw === '' || raw === '-' || raw === undefined) {
-                                handleTransformChange(f.key, effectiveDefault);
-                              } else {
-                                const n = Number(raw);
-                                if (!isNaN(n)) handleTransformChange(f.key, n);
-                              }
+                              e.currentTarget.blur();
                             }
                           }}
                           onBlur={() => {
-                            const raw = editingValues[f.key];
-                            if (raw !== undefined) {
-                              if (raw === '' || raw === '-') {
-                                handleTransformChange(f.key, effectiveDefault);
-                              } else {
-                                const n = Number(raw);
-                                if (!isNaN(n)) handleTransformChange(f.key, n);
-                              }
-                            }
                             setEditingValues(prev => {
                               const next = { ...prev };
                               delete next[f.key];
                               return next;
                             });
+                            propertyEditSession.commit();
                           }}
                         />
                       </div>
                     );
                   })}
                 </div>
+                {single?.type === 'NewTextArea' && !singleLayerState?.effectiveLocked && (
+                  <div className="mt-2">
+                    <div className="text-[10px] text-slate-500 mb-1">尺寸模式</div>
+                    <div className="grid grid-cols-3 gap-1" role="group" aria-label="尺寸模式">
+                      {[
+                        { value: 'auto', label: '自动宽高', title: '宽高随文本内容调整' },
+                        { value: 'fixed-width', label: '固定宽度', title: '宽度固定，高度随文本内容调整' },
+                        { value: 'fixed', label: '固定宽高', title: '宽高保持当前尺寸' },
+                      ].map((option) => {
+                        const active = normalizeTextSizingMode(single.props.textSizingMode) === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            title={option.title}
+                            aria-pressed={active}
+                            onClick={() => {
+                              handleChange('textSizingMode', option.value);
+                              saveHistory();
+                            }}
+                            className={`min-w-0 border px-1 py-1.5 text-[10px] transition-colors ${active
+                              ? 'border-blue-400 bg-blue-600/80 text-white'
+                              : 'border-slate-600 bg-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-600'}`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {single && single.type === 'NewImage' && (
                   <button onClick={() => { handleTransformChange('x', 0); handleTransformChange('y', 0); handleTransformChange('width', 1920); handleTransformChange('height', 1080); }}
                     className="w-full mt-1 py-1 text-xs bg-slate-700 hover:bg-blue-600 border border-slate-600 rounded text-slate-300 hover:text-white transition-colors">
@@ -1145,49 +1528,100 @@ export default function PropertyPanel() {
                       <input type="number" className="flex-1 px-1.5 py-1 bg-slate-700 border border-slate-600 rounded text-xs text-white focus:outline-none focus:border-blue-500"
                         value={editingValues[f.key] ?? (raw !== undefined && raw !== null ? String(raw) : '')}
                         placeholder="0"
-                        onChange={(e) => { setEditingValues(prev => ({ ...prev, [f.key]: e.target.value })); }}
+                        onFocus={() => propertyEditSession.begin()}
+                        onChange={(e) => {
+                          const draft = e.target.value;
+                          setEditingValues(prev => ({ ...prev, [f.key]: draft }));
+                          const parsed = parseFiniteNumberDraft(draft);
+                          if (parsed !== null) {
+                            propertyEditSession.change(() => handleTransformChange(f.key, parsed));
+                          }
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            const r = editingValues[f.key];
-                            if (r === '' || r === '-' || r === undefined) {
-                              handleTransformChange(f.key, 0);
-                            } else {
-                              const n = Number(r);
-                              if (!isNaN(n)) handleTransformChange(f.key, n);
-                            }
-                            setEditingValues(prev => { const next = { ...prev }; delete next[f.key]; return next; });
-                            (e.target as HTMLInputElement).blur();
+                            e.currentTarget.blur();
                           }
                         }}
                         onBlur={() => {
-                          const r = editingValues[f.key];
-                          if (r !== undefined && r !== '' && r !== '-') {
-                            const n = Number(r);
-                            if (!isNaN(n)) handleTransformChange(f.key, n);
-                          }
                           setEditingValues(prev => { const next = { ...prev }; delete next[f.key]; return next; });
+                          propertyEditSession.commit();
                         }} />
                     </div>
                   );
                 })}
+                {single && meta?.mirrorable && (
+                  <div className="mt-2 grid grid-cols-2 gap-1" role="group" aria-label="图片镜像">
+                    <button
+                      type="button"
+                      disabled={Boolean(singleLayerState?.effectiveLocked)}
+                      onClick={() => mirrorElement(single.id, 'horizontal')}
+                      title="沿图片自身方向左右镜像"
+                      aria-label="左右镜像"
+                      className="flex min-w-0 items-center justify-center gap-1 border border-slate-600 bg-slate-700 px-1.5 py-1.5 text-[10px] text-slate-200 transition-colors hover:border-blue-500 hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <FlipHorizontal2 size={13} aria-hidden="true" />
+                      <span>左右镜像</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(singleLayerState?.effectiveLocked)}
+                      onClick={() => mirrorElement(single.id, 'vertical')}
+                      title="沿图片自身方向上下镜像"
+                      aria-label="上下镜像"
+                      className="flex min-w-0 items-center justify-center gap-1 border border-slate-600 bg-slate-700 px-1.5 py-1.5 text-[10px] text-slate-200 transition-colors hover:border-blue-500 hover:bg-blue-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <FlipVertical2 size={13} aria-hidden="true" />
+                      <span>上下镜像</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* 组件属性（按 group 分组，advanced 字段单独折叠） */}
               {properties.length > 0 && (() => {
-                const normalProps = properties.filter(p => !p.advanced);
-                const advancedProps = properties.filter(p => p.advanced);
+                const customAnswerKeyboard = single?.type === 'KlBaseKeyboard'
+                  && (single.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id === 'customAnswer';
+                const applicableProperties = customAnswerKeyboard
+                  ? properties.filter((property) => !['camp', 'sheet', 'pattern'].includes(property.key))
+                  : properties;
+                const normalProps = applicableProperties.filter(p => !p.advanced);
+                const advancedProps = applicableProperties.filter(p => p.advanced);
                 const groups = new Map<string, typeof properties>();
                 normalProps.forEach((f) => {
                   const g = f.group || t('properties');
                   if (!groups.has(g)) groups.set(g, []);
                   groups.get(g)!.push(f);
                 });
-                const isInputImage = meta?.layaType === 'KlInputImage';
-                if (isInputImage && !groups.has('交互')) groups.set('交互', []);
+                const isKeyboardInput = meta?.layaType === 'KlInputImage' || meta?.layaType === 'FractionInput';
+                if (isKeyboardInput && !groups.has('交互')) groups.set('交互', []);
                 const renderField = (field: PropertyDef) => {
                   const propDefault = single ? (elementMeta[single.type]?.defaultProps as Record<string, unknown> | undefined)?.[field.key] : undefined;
                   const numDefault = typeof propDefault === 'number' ? propDefault : undefined;
-                  const fieldEl = <FieldRenderer key={field.key} field={field} elements={selectedElements} onChange={handleChange} propDefault={numDefault} />;
+                  if ((single?.type === 'KlInputImage' || single?.type === 'FractionInput') && field.key === '_judgeAnswer') {
+                    return (
+                      <InputRuleEditor
+                        key={field.key}
+                        input={single}
+                        elements={currentPage?.elements ?? []}
+                        disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                        onUpdateProps={(elementId, props) => updateElement(elementId, { props })}
+                        onCommit={saveHistory}
+                        onSelectElement={(elementId) => selectElement(elementId, false)}
+                      />
+                    );
+                  }
+                  const fieldEl = (
+                    <FieldRenderer
+                      key={field.key}
+                      field={field}
+                      elements={selectedElements}
+                      onChange={handleChange}
+                      propDefault={numDefault}
+                      onEditStart={() => propertyEditSession.begin()}
+                      onEditChange={(applyChange) => propertyEditSession.change(applyChange)}
+                      onEditCommit={() => propertyEditSession.commit()}
+                    />
+                  );
                   // DropObj 的 skin/tipSkin 字段：追加「对齐」按钮
                   if (single && single.type === 'DropObj' && (field.key === 'skin' || field.key === 'tipSkin')) {
                     const alignDropObjToSkin = useEditorStore.getState().alignDropObjToSkin;
@@ -1209,13 +1643,32 @@ export default function PropertyPanel() {
                       <div key={groupName} className="mb-2 pb-2 border-b border-slate-700">
                         <div className="text-xs text-slate-500 mb-1.5">{groupName}</div>
                         {fields.map(renderField)}
-                        {isInputImage && groupName === '交互' && (
+                        {isKeyboardInput && groupName === '外观' && (
                           <button
-                            onClick={() => setBindKeyboardOpen(true)}
-                            className="w-full mt-1.5 py-1.5 text-xs bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 rounded text-blue-200"
+                            type="button"
+                            disabled={workbenchReadonly || Boolean(singleLayerState?.effectiveLocked)}
+                            onClick={() => setInputFontPreviewOpen(true)}
+                            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded border border-blue-500/50 bg-blue-600/30 py-1.5 text-xs text-blue-200 hover:bg-blue-600/50 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            绑定键盘
+                            <Maximize2 size={13} aria-hidden="true" />
+                            调整字号与间距
                           </button>
+                        )}
+                        {isKeyboardInput && groupName === '交互' && (
+                          <>
+                            {single?.type === 'FractionInput' && !(single.props as Record<string, unknown> | undefined)?.camp && (
+                              <div className="mt-1.5 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-[10px] text-amber-300">
+                                未绑定键盘，预览和导出课件中无法输入
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setBindKeyboardOpen(true)}
+                              className="w-full mt-1.5 py-1.5 text-xs bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 rounded text-blue-200"
+                            >
+                              绑定键盘
+                            </button>
+                          </>
                         )}
                       </div>
                     ))}
@@ -1276,25 +1729,55 @@ export default function PropertyPanel() {
       />
     )}
 
+    {inputFontPreviewOpen && single && (single.type === 'KlInputImage' || single.type === 'FractionInput') && (
+      <InputFontPreviewModal
+        element={single}
+        customAnswerOptions={boundCustomAnswerOptions(single, currentPage?.elements ?? [])}
+        onApply={(props) => {
+          updateElement(single.id, { props: { ...single.props, ...props } });
+          saveHistory();
+          setInputFontPreviewOpen(false);
+        }}
+        onClose={() => setInputFontPreviewOpen(false)}
+      />
+    )}
+
     {/* 绑定键盘弹窗 */}
     {bindKeyboardOpen && single && (
       <BindKeyboardModal
         keyboards={(currentPage?.elements ?? [])
           .filter((el) => el.type === 'KlBaseKeyboard')
+          .filter((el) => keyboardSupportsInput(el, single.type, currentPage?.elements ?? []))
           .map((el) => {
-            const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-            const presetId = props?._keyboardPreset?.id;
-            const preset = KEYBOARD_PRESETS.find((p) => p.id === presetId);
-            const thumbnail = preset?.thumbnail ?? elementMeta[el.type]?.placeholderImage;
+            const info = keyboardBindingInfo(el, currentPage?.elements ?? []);
             return {
               element: el,
-              camp: String(props?.camp ?? ''),
-              thumbnail,
+              camp: keyboardCamp(el),
+              thumbnail: info.preset?.thumbnail ?? elementMeta[el.type]?.placeholderImage,
+              label: info.label,
+              legacy: info.legacy,
             };
           })}
         currentCamp={String((single.props as Record<string, unknown> | undefined)?.camp ?? '')}
-        onSelect={(camp) => {
-          handleChange('camp', camp);
+        onSelect={(keyboard) => {
+          const pageElements = currentPage?.elements ?? [];
+          const camp = keyboard.camp || nextKeyboardCamp(pageElements);
+          const presetId = keyboardPresetId(keyboard.element, pageElements);
+          const keyboardProps: Record<string, unknown> = { ...keyboard.element.props, camp };
+          // 仅为没有子节点的旧键盘补上可复用预设；保留已有历史按键结构，避免导出时被替换。
+          const hasChildren = pageElements.some((element) => element.parentId === keyboard.element.id);
+          if (presetId && !keyboard.element.props._keyboardPreset && !hasChildren) {
+            keyboardProps._keyboardPreset = { id: presetId };
+          }
+          updateElement(keyboard.element.id, { props: keyboardProps });
+          updateElement(single.id, {
+            props: applyKeyboardBindingProps(
+              single.props as Record<string, unknown> | undefined,
+              camp,
+              presetId,
+            ),
+          });
+          saveHistory();
           setBindKeyboardOpen(false);
         }}
         onClose={() => setBindKeyboardOpen(false)}
@@ -1343,6 +1826,19 @@ export default function PropertyPanel() {
           }
         }}
         onClose={() => setOkBtnPickerOpen(false)}
+      />
+    )}
+    {videoSourceOpen && single?.type === 'Video' && currentCourse && (
+      <VideoSourceDialog
+        courseId={currentCourse.id}
+        courseKind={currentCourse.kind ?? 'normal'}
+        mode="replace"
+        onCancel={() => setVideoSourceOpen(false)}
+        onConfirm={(relativePath) => {
+          updateElement(single.id, { props: { videoUrl: relativePath } });
+          saveHistory();
+          setVideoSourceOpen(false);
+        }}
       />
     )}
     </>

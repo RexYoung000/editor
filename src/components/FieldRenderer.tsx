@@ -1,6 +1,14 @@
 import { useRef, useState, useEffect } from 'react';
+import { ArrowDown, ArrowUp, Play, Plus, Trash2 } from 'lucide-react';
 import type { Element } from '../types';
 import type { PropertyDef } from '../elements/elementMeta';
+import {
+  isMathKeyboardPresetId,
+  readCustomAnswerKeyboardConfig,
+  readMathKeyboardTheme,
+  type CustomAnswerKeyboardConfig,
+} from '../elements/keyboardPresets';
+import { readInputTextTheme } from '../utils/inputFont';
 import { useEditorStore, findSubPage } from '../store/editorStore';
 import { showToast } from '../utils/toast';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
@@ -9,9 +17,12 @@ import { getObject } from '../utils/laya/core';
 import { ColorPicker } from './ColorPicker';
 import { useI18n } from '../i18n/context';
 import { translateLabel } from '../elements/elementMetaI18n';
-import { FONT_LIBRARY, FONT_CATEGORIES, lookupFont } from '../elements/fontLibrary';
+import { FONT_LIBRARY, lookupFont, normalizeFontLibraryId } from '../elements/fontLibrary';
 import { loadLocalFont } from '../utils/fontLoader';
 import LibraryBrowser, { LibraryErrorDialog, type SelectResult } from './LibraryBrowser';
+import { parseFiniteNumberDraft } from '../utils/propertyEditSession';
+import ThemeSwatches from './ThemeSwatches';
+import { pauseSpineAtFirstFrame, playSpineOnce, resolveSpineAnimationIndex } from '../utils/spinePreview';
 
 function getVal(elements: Element[], key: string): unknown {
   if (elements.length === 0) return '';
@@ -260,7 +271,6 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
     elements.forEach((el) => updateElement(el.id, {
       props: { url, _animationList: target.animations, currAniName: defaultName },
     }));
-    setPaused(false);
   };
 
   const onChangeAnim = (name: string) => {
@@ -270,35 +280,19 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
     if (el) {
       const obj = getObject(el.id);
       if (obj) {
-        const idx = animationList.indexOf(name);
         try {
-          obj.play(idx >= 0 ? idx : 0, true);
-          obj.paused();
-          obj._spinePaused = true;
+          pauseSpineAtFirstFrame(obj, resolveSpineAnimationIndex(props, name));
         } catch { /* ignore */ }
       }
     }
-    setPaused(true);
   };
 
-  const [paused, setPaused] = useState(false);
-  const onTogglePlay = () => {
+  const onPreviewPlay = () => {
     const el = elements[0];
     if (!el) return;
     const obj = getObject(el.id);
     if (!obj) return;
-    if (paused) {
-      try { obj.resume(); obj._spinePaused = false; } catch { /* ignore */ }
-      setPaused(false);
-    } else {
-      const idx = animationList.indexOf(animationName);
-      try {
-        obj.play(idx >= 0 ? idx : 0, true);
-        obj.paused();
-        obj._spinePaused = true;
-      } catch { /* ignore */ }
-      setPaused(true);
-    }
+    try { playSpineOnce(obj, resolveSpineAnimationIndex(props, animationName)); } catch { /* ignore */ }
   };
 
   const skLabel = (url: string) => url.split('/').pop()?.replace(/\.sk$/i, '') ?? url;
@@ -344,7 +338,7 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
       )}
       {animationList.length > 0 && !isMulti && (
         <div className="mt-1">
-          <div className="text-xs text-slate-400 mb-1">播放动画</div>
+          <div className="text-xs text-slate-400 mb-1">动画</div>
           <div className="flex gap-1">
             <select className={`${inputCls} flex-1`} value={animationName}
               onChange={(e) => onChangeAnim(e.target.value)}>
@@ -352,9 +346,9 @@ function SpineFolderField({ field, elements, val, isMulti }: SpineFolderFieldPro
                 <option key={n} value={n}>{n}</option>
               ))}
             </select>
-            <button onClick={onTogglePlay}
-              className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-slate-300 cursor-pointer shrink-0">
-              {paused ? '▶' : '⏸'}
+            <button onClick={onPreviewPlay} title="播放一次" aria-label="播放当前 Spine 动画一次"
+              className="flex h-7 w-8 items-center justify-center rounded border border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white cursor-pointer shrink-0">
+              <Play size={14} />
             </button>
           </div>
         </div>
@@ -393,15 +387,212 @@ interface Props {
   elements: Element[];
   onChange: (key: string, value: unknown) => void;
   propDefault?: number;
+  onEditStart?: () => void;
+  onEditChange?: (applyChange: () => void) => void;
+  onEditCommit?: () => void;
 }
 
-export default function FieldRenderer({ field, elements, onChange, propDefault }: Props) {
+function MathKeyboardThemeField({
+  field,
+  elements,
+  onChange,
+}: {
+  field: PropertyDef;
+  elements: Element[];
+  onChange: (key: string, value: unknown) => void;
+}) {
+  const element = elements.length === 1 ? elements[0] : null;
+  const presetId = (element?.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (!element || !isMathKeyboardPresetId(presetId)) return null;
+  return (
+    <Row label={field.label} tooltip={field.tooltip} stacked>
+      <ThemeSwatches
+        value={readMathKeyboardTheme(element)}
+        onChange={(theme) => onChange(field.key, theme)}
+      />
+    </Row>
+  );
+}
+
+function InputTextThemeField({
+  field,
+  elements,
+  onChange,
+}: {
+  field: PropertyDef;
+  elements: Element[];
+  onChange: (key: string, value: unknown) => void;
+}) {
+  const element = elements.length === 1 ? elements[0] : null;
+  if (!element || (element.type !== 'KlInputImage' && element.type !== 'FractionInput')) return null;
+  const theme = readInputTextTheme(element);
+  return (
+    <Row label={field.label} tooltip={field.tooltip} stacked>
+      <ThemeSwatches
+        value={theme}
+        labelSuffix="文字"
+        onChange={(nextTheme) => onChange(field.key, nextTheme)}
+      />
+      {!theme && <div className="mt-1 text-[10px] text-slate-500">沿用历史字体图</div>}
+    </Row>
+  );
+}
+
+function AnswerKeyboardField({
+  field,
+  elements,
+  onChange,
+}: {
+  field: PropertyDef;
+  elements: Element[];
+  onChange: (key: string, value: unknown) => void;
+}) {
+  const element = elements.length === 1 ? elements[0] : null;
+  const presetId = (element?.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id;
+  if (!element || presetId !== 'customAnswer') return null;
+
+  const config = readCustomAnswerKeyboardConfig(element);
+  const update = (next: CustomAnswerKeyboardConfig) => onChange(field.key, next);
+  const trimmed = config.answers.map((answer) => answer.trim());
+  const duplicateValues = new Set(trimmed.filter((answer, index) => (
+    answer !== '' && trimmed.indexOf(answer) !== index
+  )));
+  const hasEmpty = trimmed.some((answer) => answer === '');
+  const hasLong = config.answers.some((answer) => Array.from(answer).length > 4);
+
+  const move = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= config.answers.length) return;
+    const answers = [...config.answers];
+    [answers[index], answers[target]] = [answers[target], answers[index]];
+    update({ ...config, answers });
+  };
+
+  return (
+    <Row label={field.label} tooltip={field.tooltip} stacked>
+      <div className="mb-2">
+        <div className="text-[10px] text-slate-500 mb-1">键盘皮肤</div>
+        <ThemeSwatches
+          value={config.theme}
+          onChange={(theme) => update({ ...config, theme })}
+        />
+      </div>
+
+      <div className="space-y-1">
+        {config.answers.map((answer, index) => {
+          const normalized = answer.trim();
+          const invalid = normalized === '' || duplicateValues.has(normalized) || Array.from(answer).length > 4;
+          return (
+            <div
+              key={index}
+              className="grid grid-cols-[1rem_minmax(0,1fr)_1.75rem_1.75rem_1.75rem] items-center gap-1"
+            >
+              <label
+                data-answer-focus-area={index + 1}
+                className="col-span-2 grid min-h-7 grid-cols-[1rem_minmax(0,1fr)] items-center gap-1 cursor-text"
+              >
+                <span className="w-4 text-right text-[10px] text-slate-500">{index + 1}</span>
+                <input
+                  data-answer-input={index + 1}
+                  value={answer}
+                  maxLength={4}
+                  aria-label={`答案 ${index + 1}`}
+                  onChange={(event) => {
+                    const answers = [...config.answers];
+                    answers[index] = event.target.value;
+                    update({ ...config, answers });
+                  }}
+                  className={`${inputCls} h-7 min-w-0 cursor-text ${invalid ? 'border-red-500 focus:border-red-400' : ''}`}
+                />
+              </label>
+              <button
+                type="button"
+                title="上移"
+                aria-label={`上移答案 ${index + 1}`}
+                disabled={index === 0}
+                onClick={() => move(index, -1)}
+                className="h-7 w-7 flex shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-25"
+              >
+                <ArrowUp size={13} />
+              </button>
+              <button
+                type="button"
+                title="下移"
+                aria-label={`下移答案 ${index + 1}`}
+                disabled={index === config.answers.length - 1}
+                onClick={() => move(index, 1)}
+                className="h-7 w-7 flex shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white disabled:cursor-default disabled:opacity-25"
+              >
+                <ArrowDown size={13} />
+              </button>
+              <button
+                type="button"
+                title="删除答案"
+                aria-label={`删除答案 ${index + 1}`}
+                disabled={config.answers.length <= 2}
+                onClick={() => update({
+                  ...config,
+                  answers: config.answers.filter((_, answerIndex) => answerIndex !== index),
+                })}
+                className="h-7 w-7 flex shrink-0 cursor-pointer items-center justify-center rounded text-slate-400 hover:bg-red-900/60 hover:text-red-300 disabled:cursor-default disabled:opacity-25"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => update({ ...config, answers: [...config.answers, ''] })}
+        className="mt-1.5 w-full flex items-center justify-center gap-1 py-1.5 rounded border border-slate-600 bg-slate-700 text-xs text-slate-200 hover:bg-slate-600"
+      >
+        <Plus size={13} />
+        新增答案
+      </button>
+
+      {(hasEmpty || duplicateValues.size > 0 || hasLong) && (
+        <div className="mt-1.5 text-[10px] leading-4 text-red-300">
+          {hasEmpty && <div>答案不能为空。</div>}
+          {duplicateValues.size > 0 && <div>答案不能重复。</div>}
+          {hasLong && <div>每项答案最多 4 个字符。</div>}
+        </div>
+      )}
+      <div className="mt-1 text-[10px] text-slate-500">{config.answers.length} 项</div>
+    </Row>
+  );
+}
+
+export default function FieldRenderer({
+  field,
+  elements,
+  onChange,
+  propDefault,
+  onEditStart,
+  onEditChange,
+  onEditCommit,
+}: Props) {
   const { t, language } = useI18n();
   const val = getVal(elements, field.key);
   const isMulti = val === '__MULTI__';
   const [editingNum, setEditingNum] = useState<string | undefined>(undefined);
+  const applyDirectChange = (value: unknown) => {
+    const applyChange = () => onChange(field.key, value);
+    if (onEditChange) onEditChange(applyChange);
+    else applyChange();
+  };
 
   switch (field.type) {
+    case 'mathKeyboardTheme':
+      return <MathKeyboardThemeField field={field} elements={elements} onChange={onChange} />;
+
+    case 'inputTextTheme':
+      return <InputTextThemeField field={field} elements={elements} onChange={onChange} />;
+
+    case 'answerKeyboard':
+      return <AnswerKeyboardField field={field} elements={elements} onChange={onChange} />;
+
     case 'number': {
       const storedVal = isMulti ? '' : (val !== undefined && val !== null ? String(val) : '');
       const displayVal = editingNum ?? storedVal;
@@ -411,30 +602,22 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
           <input type="number" className={inputCls} min={field.min} max={field.max} step={field.step}
             value={displayVal}
             placeholder={isMulti ? t('multipleValues') : String(numDefault)}
+            onFocus={onEditStart}
             onChange={(e) => {
-              setEditingNum(e.target.value);
+              const draft = e.target.value;
+              setEditingNum(draft);
+              const parsed = parseFiniteNumberDraft(draft);
+              if (parsed !== null) applyDirectChange(parsed);
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                if (editingNum === '' || editingNum === '-' || editingNum === undefined) {
-                  onChange(field.key, numDefault);
-                } else {
-                  const n = Number(editingNum);
-                  if (!isNaN(n)) onChange(field.key, n);
-                }
+                e.currentTarget.blur();
               }
             }}
             onBlur={() => {
-              if (editingNum !== undefined) {
-                if (editingNum === '' || editingNum === '-') {
-                  onChange(field.key, numDefault);
-                } else {
-                  const n = Number(editingNum);
-                  if (!isNaN(n)) onChange(field.key, n);
-                }
-                setEditingNum(undefined);
-              }
+              setEditingNum(undefined);
+              onEditCommit?.();
             }}
           />
         </Row>
@@ -446,7 +629,12 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
         <input className={inputCls}
           value={isMulti ? '' : ((val as string) ?? '')}
           placeholder={isMulti ? t('multipleValues') : ''}
-          onChange={(e) => onChange(field.key, e.target.value)}
+          onFocus={onEditStart}
+          onChange={(e) => applyDirectChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+          }}
+          onBlur={onEditCommit}
         />
       </Row>
     );
@@ -456,7 +644,9 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
         <textarea className={`${inputCls} resize-y`} rows={3}
           value={isMulti ? '' : ((val as string) ?? '')}
           placeholder={isMulti ? t('multipleValues') : ''}
-          onChange={(e) => onChange(field.key, e.target.value)}
+          onFocus={onEditStart}
+          onChange={(e) => applyDirectChange(e.target.value)}
+          onBlur={onEditCommit}
         />
       </Row>
     );
@@ -635,9 +825,9 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
       return <SpineFolderField field={field} elements={elements} val={val} isMulti={isMulti} />;
 
     case 'fontLibrary': {
-      const currentId = isMulti ? '' : ((val as string) ?? '');
+      const currentId = isMulti ? '' : normalizeFontLibraryId(val);
       const entry = currentId ? lookupFont(currentId) : undefined;
-      const displayLabel = entry ? `${entry.category} / ${entry.label}` : '';
+      const displayLabel = entry?.label ?? '';
       return (
         <Row label={field.label} tooltip={field.tooltip}>
           <select
@@ -653,16 +843,9 @@ export default function FieldRenderer({ field, elements, onChange, propDefault }
             }}
           >
             {isMulti && <option value="" disabled>{t('multipleValues')}</option>}
-            {FONT_CATEGORIES.map((cat) => {
-              const list = FONT_LIBRARY.filter((f) => f.category === cat);
-              return (
-                <optgroup key={cat} label={cat}>
-                  {list.length === 0
-                    ? <option value="" disabled>(暂无字体)</option>
-                    : list.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-                </optgroup>
-              );
-            })}
+            {FONT_LIBRARY.map((font) => (
+              <option key={font.id} value={font.id}>{font.label}</option>
+            ))}
           </select>
         </Row>
       );

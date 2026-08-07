@@ -1,11 +1,22 @@
 import type { Course, Stage } from '../types';
-
+import type { CourseSaveAsErrorCode, CourseSaveTargetResult } from '../types/electron';
 const api = () => window.electronAPI;
+
+const dataUrlCache = new Map<string, string>();
+const resourceVersionByCourse = new Map<string, number>();
+const CACHE_MAX = 200;
+
+function markCourseResourcePathChanged(courseId: string): void {
+  resourceVersionByCourse.set(courseId, (resourceVersionByCourse.get(courseId) ?? 0) + 1);
+  dataUrlCache.clear();
+}
 
 // ─── 路径存储（localStorage） ───
 
 function storeDir(courseId: string, dirPath: string) {
+  const previousDir = localStorage.getItem(`forge_course_dir_${courseId}`);
   localStorage.setItem(`forge_course_dir_${courseId}`, dirPath);
+  if (previousDir !== dirPath) markCourseResourcePathChanged(courseId);
 }
 
 function storeFile(courseId: string, filePath: string) {
@@ -55,51 +66,55 @@ export async function createProjectInDirectory(
 
 // ─── 另存为课件 ───
 
-/**
- * 把当前课件整目录拷到 <parentPath>/<newId>/，删旧产物，重命名 JSON 并改 id 字段。
- * 任一步失败都会回滚（删除已创建的新目录），错误抛 Error，由调用方决定文案。
- */
+export class ProjectSaveAsError extends Error {
+  readonly code: CourseSaveAsErrorCode;
+
+  constructor(code: CourseSaveAsErrorCode) {
+    super(code);
+    this.name = 'ProjectSaveAsError';
+    this.code = code;
+  }
+}
+
+export function getProjectSaveAsErrorCode(error: unknown): CourseSaveAsErrorCode {
+  return error instanceof ProjectSaveAsError ? error.code : 'SAVE_AS_FAILED';
+}
+
+export async function inspectProjectSaveAs(
+  courseId: string,
+  targetCourseId: string,
+  parentPath: string,
+): Promise<CourseSaveTargetResult> {
+  const sourceDir = getDir(courseId);
+  if (!sourceDir) return { ok: false, code: 'SOURCE_NOT_FOUND' };
+  return api().inspectCourseSaveTarget({ sourceDir, parentPath, targetCourseId });
+}
+
 export async function saveProjectAs(
   course: Course,
   newId: string,
   parentPath: string,
+  overwrite: boolean,
 ): Promise<{ course: Course; filePath: string }> {
   const sourceDir = getDir(course.id);
-  if (!sourceDir) throw new Error('NO_SOURCE_DIR');
+  if (!sourceDir) throw new ProjectSaveAsError('SOURCE_NOT_FOUND');
 
-  const targetDir = `${parentPath}/${newId}`;
-  if (await api().pathExists(targetDir)) throw new Error('DIR_ALREADY_EXISTS');
+  // Store 中的课程会被 Immer 冻结；另存后的编辑对象不能继续引用原课程的嵌套数据。
+  const newCourse: Course = JSON.parse(JSON.stringify({ ...course, id: newId }));
+  const result = await api().saveCourseAs({
+    sourceDir,
+    sourceCourseId: course.id,
+    targetCourseId: newId,
+    parentPath,
+    courseJson: JSON.stringify(newCourse, null, 2),
+    overwrite,
+  });
+  if (!result.ok) throw new ProjectSaveAsError(result.code);
 
-  // 整目录拷贝
-  const copied = await api().copyDir(sourceDir, targetDir);
-  if (!copied) throw new Error('COPY_FAILED');
-
-  // 后续任一失败都回滚
-  try {
-    // 删旧产物（不存在不会报错）
-    await api().removeDir(`${targetDir}/project`);
-    await api().removeDir(`${targetDir}/esBuild`);
-
-    // 重命名 JSON 文件
-    const oldJsonPath = `${targetDir}/${course.id}.json`;
-    const newJsonPath = `${targetDir}/${newId}.json`;
-    const renamed = await api().renameFile(oldJsonPath, newJsonPath);
-    if (!renamed) throw new Error('RENAME_FAILED');
-
-    // 改 JSON 内容里的 id 并写回
-    const newCourse: Course = { ...course, id: newId };
-    await api().writeCourseFile(newJsonPath, JSON.stringify(newCourse, null, 2));
-
-    // 登记新课件路径
-    storeDir(newId, targetDir);
-    storeFile(newId, newJsonPath);
-
-    return { course: newCourse, filePath: newJsonPath };
-  } catch (e) {
-    // 回滚：删除已创建的新目录
-    try { await api().removeDir(targetDir); } catch { /* 回滚失败不掩盖原错 */ }
-    throw e;
-  }
+  storeDir(newId, result.targetDir);
+  storeFile(newId, result.filePath);
+  clearCourseResourceCache();
+  return { course: newCourse, filePath: result.filePath };
 }
 
 // ─── 打开课件 ───
@@ -177,8 +192,19 @@ export async function openFolder(folderPath: string): Promise<boolean> {
 
 // ─── 图片操作 ───
 
-const dataUrlCache = new Map<string, string>();
-const CACHE_MAX = 200;
+export function clearCourseResourceCache(): void {
+  dataUrlCache.clear();
+}
+
+export function getCourseResourceVersion(courseId: string): number {
+  return resourceVersionByCourse.get(courseId) ?? 0;
+}
+
+export function getCourseResourceUrl(courseId: string, relativePath: string): string {
+  const normalizedPath = relativePath.replace(/^\/+/, '');
+  const separator = normalizedPath.includes('?') ? '&' : '?';
+  return `forge-local://${courseId}/${normalizedPath}${separator}forgePath=${getCourseResourceVersion(courseId)}`;
+}
 
 export async function copyImageToCourse(courseId: string, srcPath: string): Promise<string> {
   const courseDir = getDir(courseId);
@@ -187,17 +213,18 @@ export async function copyImageToCourse(courseId: string, srcPath: string): Prom
 }
 
 export async function readFileAsDataUrl(courseId: string, relativePath: string): Promise<string | null> {
-  const cached = dataUrlCache.get(relativePath);
-  if (cached) return cached;
   const courseDir = getDir(courseId);
   if (!courseDir) return null;
+  const cacheKey = `${courseDir}\0${relativePath}`;
+  const cached = dataUrlCache.get(cacheKey);
+  if (cached) return cached;
   const dataUrl = await api().readFileAsDataUrl(courseDir, relativePath);
   if (dataUrl) {
     if (dataUrlCache.size >= CACHE_MAX) {
       const oldest = dataUrlCache.keys().next().value!;
       dataUrlCache.delete(oldest);
     }
-    dataUrlCache.set(relativePath, dataUrl);
+    dataUrlCache.set(cacheKey, dataUrl);
   }
   return dataUrl;
 }

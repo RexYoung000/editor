@@ -37,7 +37,8 @@ forge 没有独立的 Node 服务，所有"后端"能力都由 [vite.config.ts](
 | 接口 | 用途 |
 |---|---|
 | `GET /api/ws-config` | 返回打包机 WebSocket 配置 `{ wsServer, wsHost }`，由跑 vite 的机器通过 `WS_SERVER` / `WS_HOST` 环境变量设定。`src/utils/websocket.ts` 在用 |
-| `POST /api/upload-compiled-zip` | 接收 Electron 的编译产物 zip（`compileBuild` + `zipDirectory`），**300MB 上限**，**内存解压**到 `preview-server/lessons/<projName>/`（先 `rmSync` 清空旧目录再重建），zip 不落盘，最后把 `regKey → lessonDir` 写进 `courseOutputDirs` |
+| `GET /api/publish-config` | 返回正课、作业、专题测评和复习课的只读 SVN 基础地址及当前模板/运行资源版本；通过 `SVN_BASE_NORMAL`、`SVN_BASE_HOMEWORK`、`SVN_BASE_EVALUATION`、`SVN_BASE_REVIEW` 覆盖部署默认值。 |
+| `POST /api/upload-compiled-zip` | 接收 Electron 的编译产物 zip（`compileBuild` + `zipDirectory`），**300MB 上限**，**内存解压**到 `preview-server/lessons/<projName>/`；先验证课件目录和全部文件条目，再替换旧目录，zip 不落盘，最后把 `regKey → lessonDir` 写进 `courseOutputDirs` |
 | `POST /api/upload-resource` | multipart 上传，**100MB 上限**，让远程 Electron 把视频等大文件直接写进对应 lesson 目录的 `destPath`，要求 lesson 目录已存在（即先发布过） |
 | `POST /api/save-preset-thumbnail` | 把 canvas 截图（`{ name, dataUrl }`）写到 `public/builtin/editor/<name>.png`，预设缩略图用 |
 | `GET /api/library/list?path=<rel>` | 列出 `public/builtin/library/<rel>` 目录条目，目录会判 Spine 工程，文件返回 size/mtime；路径过 `sanitizeLibraryPath` 防越界 |
@@ -46,6 +47,18 @@ forge 没有独立的 Node 服务，所有"后端"能力都由 [vite.config.ts](
 | `GET /api/library/spine-files?path=<rel>` | 传入 Spine 工程目录，递归列出 `.json/.atlas/.png/.mp3/.wav/.ogg` 文件 |
 | `GET /api/library/quick-presets?kind=<kind>` | 递归扫描 `public/builtin/library/通用素材/控件/`，返回快捷组件候选图片及系列、颜色、语言标签；`kind` 首批支持 `confirm/previous/next/audio/brush/clear` |
 | `GET /api/download-vcredist` | 流式下载 `installers/vc_redist.x64.exe`，给 Electron 安装器引导 Windows VC++ Redistributable 用 |
+
+### 文件路径安全边界
+
+Vite 服务会监听局域网地址，所有来自 URL、multipart 字段或 ZIP 条目的路径都视为不可信输入。预览读取和文件写入必须遵守以下统一边界：
+
+- `/preview-server/*` 和 GameLoader 公共资源代理只能读取 `preview-server/`。
+- 课件路由、编译 ZIP 和资源上传只能访问 `preview-server/lessons/<projName>/`。
+- `/preview-game/*.html` 只能读取 `public/preview-game/`。
+- 预设缩略图只能写入 `public/builtin/editor/`。
+- URL 路径先解码，所有路径统一 `/`、`\` 两种分隔符后再解析；包含父目录跳转、绝对路径、Windows 盘符、UNC、空字节、非法 URL 编码，或最终落点离开目标根目录时返回 HTTP 400。multipart 和 ZIP 文件名不做 URL 解码，合法的 `%` 文件名保持不变。
+- 编译 ZIP 必须先验证课件目录和全部文件条目，确认安全后才能删除并替换旧课件目录；失败请求不能破坏已有预览结果。
+- 路径隔离不替代网络鉴权。当前服务仍只允许部署在受控公司网络，不能直接暴露到公网。
 
 ### 通用素材与快捷组件
 
@@ -63,7 +76,7 @@ public/builtin/library/
 
 - 资源库是 Vite 服务器的内容目录，已被 Git 忽略，不随 Electron 安装包发布；部署资源服务器时需要单独同步。
 - PSD 是美术源文件，不进入资源库；浏览和课件下载只使用 PNG/JPG 等可直接使用的图片。
-- 资源库搜索跨全部目录，目录路径只用于结果展示和同名资源区分，不参与关键词命中；清空关键词与筛选后恢复原有三级目录浏览。
+- 当前 1.1.x 资源库搜索跨全部目录，目录路径只用于结果展示和同名资源区分，不参与关键词命中；清空关键词与筛选后恢复原有三级目录浏览。v1.2.0 已确认把目录改为独立兜底窗口，搜索与左侧快捷筛选保持同级独立，实施范围见 [v1.2.0 需求基线](./roadmap/v1.2.0-requirements.md#二资源库检索) 和 [Issue #73](https://github.com/RexYoung000/editor/issues/73)。
 - 用途快捷标签由服务端维护同义词匹配规则，标签内部是 OR、标签与其他搜索条件之间是 AND；自由搜索不扩展同义词。
 - 语言筛选统一素材中的同义命名：`国内/简体/簡體` 归为“简体”，`英语/英文` 归为“英文”，`繁体/繁體` 归为“繁体”。
 - 搜索索引按短周期自动刷新，不依赖平台文件监听；资源新增、删除或替换后无需重启 Vite 服务。

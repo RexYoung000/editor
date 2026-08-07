@@ -63,6 +63,12 @@ s9_v8_89_LessonZK/
 }
 ```
 
+当内置资源存在多级目录时，atlas 路径必须保留完整目录层级。例如
+`game_lt/image/mathKeyboard/yellow/img_jpk.png` 对应
+`res/atlas/game_lt/image/mathKeyboard/yellow.atlas`，不能截断为
+`mathKeyboard.atlas`。`config.json` 中的 atlas URL 必须与
+`fileconfig.json` 的 key 和目录前缀一一对应。
+
 **version.json** — 文件名 hash 映射（缓存控制）：
 ```json
 {
@@ -100,6 +106,32 @@ forge 第一版不做 atlas 打包和 hash 版本控制。原因：
 
 ### 资源目录结构
 
+内置字体是受版本管理的运行时资源，统一保存在
+`public/builtin/runtime/fonts/` 并通过字体库元数据引用。字体资源不进入业务代码硬编码，
+也不依赖播放电脑安装；完整注册、默认字体和历史兼容规则见
+[字体库与历史兼容](font-library.md)。
+
+内置预设模板资源同样使用受版本管理的运行时快照。资源来源可以是本机
+`public/builtin/library/`，但正式模板必须复制到稳定的 ASCII 目录并通过
+`src/elements/builtinAssets.ts` 注册；模板母版只保存 `assetExport(id)`，
+编辑器模板卡片通过注册表把发布路径反查为编辑器资源 URL，并直接按母版元素生成结构预览；
+内置模板不再单独注册或维护缩略图。业务代码不得保存素材库路径。资源视觉发生明显变化时新增
+模板 ID 和资源目录，不能覆盖历史模板仍引用的版本。
+
+Issue #131 的木纹卷轴快照位于
+`public/builtin/runtime/game/preset/lesson-layout-wood-scroll-01/`，包含页面背景、
+标题框和声音按钮皮肤。修改该目录后必须执行 `pnpm pack-game`，并检查
+`public/builtin/runtime/game.zip` 中三项资源完整存在。
+
+Issue #157 的数学键盘百分号位于
+`public/builtin/runtime/game/mathKeyboard/<theme>/percent.png`，其中 `theme` 为
+`yellow`、`blue`、`green`；手指点击 Spine 位于
+`public/builtin/runtime/game/animation/hand-click/`。两类资源都由
+`src/elements/builtinAssets.ts` 注册，业务代码只保存稳定的发布路径。手指预设缩略图位于
+`public/builtin/editor/`，分别对应 `game_an1` 与 `game_an2`，只用于选择器，不进入课件包。
+绿色百分号必须与绿色主题字形保持同色，不能直接沿用黄色主体的验收前原图。修改上述运行资源后同样必须执行
+`pnpm pack-game`，并核对 ZIP 中三张百分号图片及手指 `.sk/.png`。
+
 ```
 编辑器 public/uploads/          → 用户上传的资源暂存
     ↓ 导出时
@@ -120,6 +152,7 @@ forge 第一版不做 atlas 打包和 hash 版本控制。原因：
 | 场景 | 编辑器中的路径 | 导出后的路径 | config.json 中的声明 |
 |------|--------------|-------------|-------------------|
 | 共享皮肤 | `share/comp/button.png` | 不打包（GameLoader 自带） | 不需要声明 |
+| 内置模板资源 | `/builtin/runtime/game/preset/...` | `game/preset/...` | 按实际图片或音频类型声明 |
 | 用户上传 | `/uploads/btn_start.png` | `game/image/btn_start.png` | `{ "url": "game/image/btn_start.png", "type": "image" }` |
 | 用户上传音频 | `/uploads/click.wav` | `game/sound/click.wav` | `{ "url": "game/sound/click.wav", "type": "sound" }` |
 
@@ -232,6 +265,8 @@ forge 第一版不做 atlas 打包和 hash 版本控制。原因：
 
 ### 4.1 音频/视频资源
 
+视频关卡的预设、本地上传、资源库选择、50MB 限制、流式落盘和内容哈希去重遵循 [视频关卡来源选择](video-stage-selection.md)。视频关卡三种来源统一只接受 MP4；旧通用视频字段对其他格式的兼容不用于视频关卡选择弹窗。
+
 | 资源类型 | 格式 | 编辑器路径 | 导出路径 | config.json type |
 |---------|------|-----------|---------|-----------------|
 | 图片 | PNG/JPG | `/uploads/xxx.png` | `game/image/xxx.png` | `"image"` |
@@ -271,6 +306,7 @@ forge 第一版不做 atlas 打包和 hash 版本控制。原因：
 | 限制项 | 建议值 | 原因 |
 |-------|-------|------|
 | 单文件上传 | ≤ 5MB | 避免过大的图片影响加载速度 |
+| 视频关卡单个 MP4 | ≤ 50MB | 保持课件迁移和运行时加载边界 |
 | 课件包总大小 | ≤ 50MB | iPad 端内存限制 |
 | 图片分辨率 | ≤ 1920×1080 | 匹配设计稿尺寸 |
 | 音频时长 | ≤ 60s | 课件音效通常很短 |

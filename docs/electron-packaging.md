@@ -115,3 +115,24 @@ electron-builder 的 `app-builder.exe` 默认会尝试从网络（GitHub release
 - `LayaAirCmdTool.max.js` 内部 `console.log("All Work complete")` 后还有 `exportFileConfig` 等异步 fork 在写文件，**不能立即 kill**——`compile-build` 检测到 "All Work complete" 后**轮询 `bin/fileconfig.json` 大小稳定**（每 500ms 检查一次，连续 2 次大小不变即认为写完）再 kill；30 秒兜底超时。固定 sleep 时间在慢路径（如 NSIS 安装到 Program Files、被 Defender 扫描）下不够用
 - jszip 不要 `require('jszip')`——pnpm 下 jszip 的依赖（lie/pako/readable-stream/setimmediate）在虚拟目录里，extraResources 拷不全。直接 require `electron/vendor/jszip.bundle.cjs`（用 `npx esbuild --bundle --platform=node` 预打的自包含 CJS）
 - **诊断打包后行为差异的方法**：在 `compile-build` 里写日志到 `os.tmpdir()/forge_layaair_*.log`，记录 `process.execPath`、tool 路径、子进程 stdout/stderr、产物文件大小。`win-unpacked` 能跑 ≠ NSIS 安装版能跑，前者会向上找到项目 `node_modules`，后者完全独立
+
+### 内置 SVN CLI
+
+课件发布的本地工作副本检查不能依赖老师电脑的 `PATH` 或 TortoiseSVN 是否额外安装命令行组件。Windows 安装包通过 `extraResources` 携带经过版本和哈希锁定的 Apache Subversion Windows 命令行发行包：
+
+- 当前版本为 VisualSVN 提供的 Apache Subversion 1.14.5-4，可再分发原包 SHA-256 为 `1801dc76910bf196948eaf4b4a9a8e0178e39da6a5339c11413b5e6dcb32e39d`，来源记录见 `electron/vendor/svn-cli/windows-x64/SOURCE.md`。
+- 主进程只调用 `process.resourcesPath/svn-cli/bin/svn.exe`，不调用裸命令 `svn`；该 CLI 只允许执行本地 `info/status/add/delete/revert`，不得用于远程地址探测、update 或 commit。
+- 必须连同发行包中的依赖 DLL、许可证和来源说明一起分发，不能只复制 `svn.exe`。
+- 开发模式没有内置目录时允许使用 `FORGE_SVN_BINARY` 指定测试路径，或回退到系统 `svn`；正式打包模式缺少内置文件时应明确报告客户端组件损坏。
+- 升级 CLI 时必须同步版本、下载来源、SHA-256、许可证文件和真实 Windows 安装包验收记录。
+
+### TortoiseSVN 提交
+
+公司 SVN 使用 SASL，内置 VisualSVN CLI 不能替代公司现有客户端完成远程认证。正式提交通过 `TortoiseProc.exe /command:commit` 打开老师熟悉的确认窗口：
+
+- 定位顺序为 `FORGE_TORTOISE_PROC`（开发与测试注入）、系统 `PATH`、TortoiseSVN 注册表安装目录和标准安装路径。
+- Windows 正式包找不到 `TortoiseProc.exe` 时阻止发布，不回退到内置 CLI commit。
+- 同步发布向 TortoiseSVN 传入课件目录范围；课件源目录与最终目录相同时，原地发布只传入 `forge-publish.json` 和受管 `Game1_*`，不得让源课件修改混入提交窗口。
+- TortoiseSVN 关闭后必须再次用内置 CLI 检查本次受管发布范围；仍有修改、取消或提交失败均不通知打包机。原地发布中的课件 JSON、`images/`、`project/` 等源文件状态不参与该判断。
+- 只有本地状态干净，并能从身份文件与各工程目录读取实际 revision、URL 时，才把这些真实结果交给现有 `integrationRequest`。
+- 自动测试可以注入假的提交执行器；真实 Windows 验收必须使用公司 TortoiseSVN、公司 SASL 账号和实际网络完成。

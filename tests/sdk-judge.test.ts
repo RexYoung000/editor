@@ -3,16 +3,20 @@ import test from 'node:test';
 import type { Action, Course, Element, SubPage } from '../src/types';
 import {
   buildExportRegressionArtifacts,
+  buildHomeworkStandaloneInputJudgeCode,
   buildSdkJudgeClickInitCode,
   collectElementsNeedingVar,
+  collectHomeworkStandaloneInputJudgeTargets,
 } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
 import {
+  collectConfirmTargetIssues,
   getSdkJudgeCapability,
   isSdkJudgeTarget,
   SDK_JUDGE_EVENT,
 } from '../src/utils/sdkJudge';
 import {
+  evaluationCourseFixture,
   homeworkCourseFixture,
   normalCourseFixture,
   previewCourseFixture,
@@ -85,20 +89,49 @@ test('SDK 判定目标矩阵只接受现有题型组件并返回真实结果能�
   const drag = element('drag', 'DragViewBox');
   const matching = element('matching', 'MatchingGame');
   const image = element('image', 'Image');
+  const answerContainer = element('answer-container', 'ContainerBox', { props: { _inputRuleEnabled: true } });
+  const layoutContainer = element('layout-container', 'ContainerBox', { props: { _inputRuleEnabled: false } });
 
   assert.deepEqual(getSdkJudgeCapability(inputImage)?.conditions, ['right', 'wrong', 'null']);
   assert.equal(getSdkJudgeCapability(inputImage)?.answerKey, '_judgeAnswer');
   assert.deepEqual(getSdkJudgeCapability(input)?.conditions, ['right', 'wrong', 'null']);
   assert.equal(getSdkJudgeCapability(input)?.answerKey, 'answer');
   assert.deepEqual(getSdkJudgeCapability(choice)?.conditions, ['right', 'wrong', 'null']);
-  assert.equal(getSdkJudgeCapability(choice)?.answerKey, 'rightItemNames');
+  assert.equal(getSdkJudgeCapability(choice)?.answerKey, undefined);
   assert.deepEqual(getSdkJudgeCapability(drag)?.conditions, ['right', 'wrong']);
   assert.deepEqual(getSdkJudgeCapability(matching)?.conditions, ['right', 'wrong', 'null']);
+  assert.equal(getSdkJudgeCapability(answerContainer)?.kind, 'input');
+  assert.equal(isSdkJudgeTarget(layoutContainer), false);
   assert.equal(isSdkJudgeTarget(image), false);
 });
 
-test('独立输入格使用编辑器答案生成正确、错误和未完成判定', () => {
-  const input = element('single-input', 'KlInputImage', { props: { _judgeAnswer: '8' } });
+test('确定按钮目标失效或停用时明确阻止判定而不静默回退', () => {
+  const target = element('answer-container', 'ContainerBox', { props: { _inputRuleEnabled: true } });
+  const button = element('confirm', 'ConfirmButton', {
+    actions: [{
+      id: 'confirm-action',
+      event: 'onClickInitConfirmWithLock',
+      targetId: target.id,
+      targetNameSnapshot: '原答题容器',
+      actionType: 'toggleVisible',
+    }],
+  });
+  const page: SubPage = { id: 'page', name: '页面', elements: [target, button] };
+  assert.deepEqual(collectConfirmTargetIssues(page), []);
+
+  target.props._inputRuleEnabled = false;
+  assert.equal(collectConfirmTargetIssues(page)[0]?.code, 'invalid-target');
+
+  page.elements = [button];
+  const issue = collectConfirmTargetIssues(page)[0];
+  assert.equal(issue?.code, 'missing-target');
+  assert.match(issue?.message ?? '', /原答题容器.*已失效/);
+});
+
+test('独立输入格使用多个候选答案生成正确、错误和未完成判定', () => {
+  const input = element('single-input', 'KlInputImage', {
+    props: { _judgeAnswer: '8', _judgeAnswers: ['8', '9'] },
+  });
   const trigger = element('single-trigger', 'Image', { actions: judgeActions(input) });
   const page: SubPage = { id: 'page', name: '页面', elements: [trigger, input] };
   const code = buildSdkJudgeClickInitCode(
@@ -109,12 +142,95 @@ test('独立输入格使用编辑器答案生成正确、错误和未完成判�
   );
 
   assert.match(code, /!this\.single_input\.valueOrSkinIsNull/);
-  assert.match(code, /this\.single_input\.fontClipValue === "8"/);
+  assert.match(code, /\(\["8","9"\]\)\.indexOf\(String\(this\.single_input\.fontClipValue \|\| ""\)\) >= 0/);
   assert.match(code, /else if \(this\.single_input\.valueOrSkinIsNull\)/);
   assert.match(code, /this\.result = true/);
   assert.match(code, /this\.result = false/);
   assert.match(code, /this\.result = null/);
   assert.doesNotMatch(code, /\.isRight\(\)/);
+});
+
+test('作业预设完成只收集配置答案的独立输入控件', () => {
+  const inputBox = element('input-box', 'KlInputBox');
+  const standaloneInput = element('standalone-input', 'KlInputImage', {
+    props: { _judgeAnswer: '12.5' },
+  });
+  const standaloneFraction = element('standalone-fraction', 'FractionInput', {
+    props: { _judgeAnswer: '12<3_4>' },
+  });
+  const plainInput = element('plain-input', 'KlInputImage', {
+    props: { _judgeAnswer: '' },
+  });
+  const nestedInput = element('nested-input', 'KlInputImage', {
+    parentId: inputBox.id,
+    props: { _judgeAnswer: '8' },
+  });
+  const answerContainer = element('answer-container', 'ContainerBox', {
+    props: { _inputRuleEnabled: true },
+  });
+  const containerInput = element('container-input', 'KlInputImage', {
+    parentId: answerContainer.id,
+    props: { _judgeAnswer: '4' },
+  });
+  const page: SubPage = {
+    id: 'page',
+    name: '页面',
+    elements: [inputBox, answerContainer, standaloneInput, standaloneFraction, plainInput, nestedInput, containerInput],
+  };
+
+  assert.deepEqual(
+    collectHomeworkStandaloneInputJudgeTargets(page).map((item) => item.id),
+    ['standalone-input', 'standalone-fraction'],
+  );
+
+  const code = buildHomeworkStandaloneInputJudgeCode(
+    page,
+    (item) => item.name ?? item.id,
+  );
+  assert.match(code, /this\.standalone_input\.valueOrSkinIsNull/);
+  assert.match(code, /\(\["12\.5"\]\)\.indexOf\(String\(this\.standalone_input\.fontClipValue \|\| ""\)\) >= 0/);
+  assert.match(code, /this\.standalone_fraction\.valueOrSkinIsNull/);
+  assert.match(code, /\(\["12<3_4>"\]\)\.indexOf\(String\(this\.standalone_fraction\.fontClipValue \|\| ""\)\) >= 0/);
+  assert.doesNotMatch(code, /plain_input/);
+  assert.doesNotMatch(code, /nested_input/);
+  assert.doesNotMatch(code, /container_input/);
+
+  const vars = collectElementsNeedingVar(page);
+  assert.equal(vars.has(standaloneInput.id), true);
+  assert.equal(vars.has(standaloneFraction.id), true);
+  assert.equal(vars.has(plainInput.id), false);
+  assert.equal(vars.has(nestedInput.id), false);
+  assert.equal(vars.has(containerInput.id), true);
+});
+
+test('作业与专题测评预设完成聚合多个独立输入答案', () => {
+  for (const course of [homeworkCourseFixture(), evaluationCourseFixture()]) {
+    const page = activePage(course);
+    page.elements.push(
+      element(`${course.kind}-answer-input`, 'KlInputImage', {
+        props: { _judgeAnswer: '12.5' },
+      }),
+      element(`${course.kind}-answer-fraction`, 'FractionInput', {
+        props: { _judgeAnswer: '12<3_4>' },
+      }),
+      element(`${course.kind}-plain-input`, 'KlInputImage', {
+        props: { _judgeAnswer: '' },
+      }),
+    );
+
+    const artifact = buildExportRegressionArtifacts(course).scenes[0];
+    const source = artifact.source;
+    const inputVar = `${course.kind}_answer_input`;
+    const fractionVar = `${course.kind}_answer_fraction`;
+
+    assert.match(source, new RegExp(`this\\.${inputVar}\\.valueOrSkinIsNull`));
+    assert.match(source, new RegExp(`this\\.${fractionVar}\\.valueOrSkinIsNull`));
+    assert.match(source, /__forgeJudgeResults\.indexOf\(null\) >= 0/);
+    assert.match(source, /__forgeJudgeResults\.every\(function\(value\) \{ return value === true; \}\)/);
+    assert.equal((source.match(/this\.result = __forgeJudgeResults/g) ?? []).length, 1);
+    assert.doesNotMatch(source, new RegExp(`${course.kind}_plain_input\\.fontClipValue`));
+    assert.doesNotMatch(JSON.stringify(artifact.scene), /_judgeAnswer/);
+  }
 });
 
 test('通用点击判定分离判定目标与结果动作目标', () => {
@@ -182,7 +298,7 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   const normalSource = normalArtifacts.scenes[0].source;
   assert.match(normalSource, /this\.normal_judge_trigger\.on\(Laya\.Event\.CLICK/);
   assert.match(normalSource, /!this\.normal_judge_input\.valueOrSkinIsNull/);
-  assert.match(normalSource, /this\.normal_judge_input\.fontClipValue === "8"/);
+  assert.match(normalSource, /\(\["8"\]\)\.indexOf\(String\(this\.normal_judge_input\.fontClipValue \|\| ""\)\) >= 0/);
   assert.match(normalSource, /this\.normal_judge_feedback/);
   assert.doesNotMatch(JSON.stringify(normalArtifacts.scenes[0].scene), /_judgeAnswer/);
 
@@ -199,7 +315,7 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   assert.match(homeworkSource, /this\.homework_trigger\.on\(Laya\.Event\.CLICK/);
   assert.match(homeworkSource, /this\.homework_choice\.isNull/);
   assert.match(homeworkSource, /this\.result = null/);
-  assert.match(homeworkSource, /this\.homework_input\.fontClipValue === "B"/);
+  assert.match(homeworkSource, /\(\["B"\]\)\.indexOf\(String\(this\.homework_input\.fontClipValue \|\| ""\)\) >= 0/);
 
   const preview = previewCourseFixture();
   const previewMatching = element('preview-matching', 'MatchingGame');
@@ -219,5 +335,5 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   assert.match(previewSource, /this\.preview_trigger\.on\(Laya\.Event\.CLICK/);
   assert.match(previewSource, /this\.preview_matching\.allRight/);
   assert.match(previewSource, /this\.preview_matching\.isNull\(\)/);
-  assert.match(previewSource, /this\.preview_input\.fontClipValue === "A"/);
+  assert.match(previewSource, /\(\["A"\]\)\.indexOf\(String\(this\.preview_input\.fontClipValue \|\| ""\)\) >= 0/);
 });

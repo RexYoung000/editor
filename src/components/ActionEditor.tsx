@@ -7,6 +7,7 @@ import { useEditorStore } from '../store/editorStore';
 import { getElementPages, isInternalPagesSubPage, isPageAction } from '../utils/internalPages';
 import { findSubPage } from '../utils/findSubPage';
 import { createElementMap, isElementLocked } from '../utils/layerState';
+import { getLayerDisplayName } from '../utils/layerPresentation';
 import {
   getSdkJudgeCapability,
   getSdkJudgeConditionLabel,
@@ -14,6 +15,7 @@ import {
   SDK_JUDGE_EVENT,
   type JudgeCondition,
 } from '../utils/sdkJudge';
+import { isInputRuleHost } from '../utils/inputAnswerRules';
 
 function generateId(): string {
   return crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -30,6 +32,10 @@ const ELEMENT_TARGET_ACTIONS = new Set([
   'pageTurnNextLoop',
   'pageTurnGoTo',
 ]);
+
+function getActionElementLabel(element: Element): string {
+  return getLayerDisplayName(element, elementMeta[element.type]?.label);
+}
 
 interface Props {
   element: Element;
@@ -65,7 +71,7 @@ export default function ActionEditor({
   const isImage = element.type === 'NewImage';
   const isConfirmButton = element.type === 'ConfirmButton';
   const isChoiceBox = element.layaType === 'ChoiceBox';
-  const isKlInputBox = element.type === 'KlInputBox';
+  const isInputRuleTarget = isInputRuleHost(element);
   const isMatchingGame = element.layaType === 'MatchingGame';
   const isNewBrushSprite = element.type === 'NewBrushSprite';
   const hideAddButton = element.type === 'DropObj' || element.type === 'DragObj';
@@ -94,8 +100,8 @@ export default function ActionEditor({
 
   // 画布上是否存在 DragViewBox / MatchingGame（决定 ConfirmButton 的"点击+游戏判断"事件是否可见）
   const hasGameTarget = allElements.some((e) => e.type === 'DragViewBox' || e.type === 'MatchingGame');
-  // 画布上是否存在 ChoiceBox 或 KlInputBox（决定 ConfirmButton 的"点击+SDK通用判断"事件是否可见）
-  const hasChoiceOrInput = allElements.some((e) => e.type === 'KlInputBox' || e.layaType === 'ChoiceBox');
+  // 画布上是否存在选择题或答题判定容器（决定 ConfirmButton 的“点击+SDK通用判断”事件是否可见）
+  const hasChoiceOrInput = allElements.some((e) => isInputRuleHost(e) || e.layaType === 'ChoiceBox');
 
   const EVENT_OPTS = [
     ...(isImage ? [
@@ -134,7 +140,7 @@ export default function ActionEditor({
     ...(isChoiceBox ? [
       { value: 'onChoiceJudge', label: '自动判定是否全对' },
     ] : []),
-    ...(isKlInputBox ? [
+    ...(isInputRuleTarget ? [
       { value: 'onInputJudge', label: '自动判定是否全对' },
     ] : []),
     ...(isMatchingGame ? [
@@ -200,14 +206,16 @@ export default function ActionEditor({
     groupId?: string,
     judgeTarget?: Element,
   ): Action {
+    const target = targetId ? allElements.find((item) => item.id === targetId) : undefined;
     return {
       id: generateId(),
       event,
       targetId,
+      targetNameSnapshot: target ? getActionElementLabel(target) : undefined,
       actionType: 'toggleVisible',
       groupId: groupId ?? generateId(),
       judgeTargetId: judgeTarget?.id,
-      judgeTargetNameSnapshot: judgeTarget?.name,
+      judgeTargetNameSnapshot: judgeTarget ? getActionElementLabel(judgeTarget) : undefined,
     };
   }
 
@@ -215,6 +223,7 @@ export default function ActionEditor({
   type Group = {
     event: string;
     targetId: string | undefined;
+    targetNameSnapshot: string | undefined;
     judgeTargetId: string | undefined;
     judgeTargetNameSnapshot: string | undefined;
     indices: number[];
@@ -232,6 +241,7 @@ export default function ActionEditor({
         groups.push({
           event: a.event,
           targetId: a.targetId,
+          targetNameSnapshot: a.targetNameSnapshot,
           judgeTargetId: a.judgeTargetId,
           judgeTargetNameSnapshot: a.judgeTargetNameSnapshot,
           indices: [],
@@ -295,7 +305,7 @@ export default function ActionEditor({
       branchId,
       branchCondition: condition,
       judgeTargetId: judgeTarget?.id,
-      judgeTargetNameSnapshot: judgeTarget?.name,
+      judgeTargetNameSnapshot: judgeTarget ? getActionElementLabel(judgeTarget) : undefined,
     };
   }
 
@@ -358,7 +368,7 @@ export default function ActionEditor({
       ? {
           ...action,
           judgeTargetId: judgeTarget?.id,
-          judgeTargetNameSnapshot: judgeTarget?.name,
+          judgeTargetNameSnapshot: judgeTarget ? getActionElementLabel(judgeTarget) : undefined,
         }
       : action,
     );
@@ -406,7 +416,7 @@ export default function ActionEditor({
                 onClick={() => selectElement(source.id, false)}
                 className="border border-slate-600 bg-slate-800 px-1.5 py-0.5 text-slate-300 hover:bg-slate-700"
               >
-                {source.name ?? source.id}
+                {getActionElementLabel(source)}
               </button>
             ))}
           </div>
@@ -469,13 +479,14 @@ export default function ActionEditor({
                   return;
                 }
                 const patch: Partial<Action> = { event: nextEvent };
-                // 切到 onClickInitConfirm*：如果当前 target 不是 KlInputBox / ChoiceBox，默认选画布上第一个 ChoiceBox 或 KlInputBox
+                // 切到 onClickInitConfirm*：如果当前 target 不是答题判定容器 / ChoiceBox，默认选择第一个有效目标
                 if (nextEvent === 'onClickInitConfirm' || nextEvent === 'onClickInitConfirmWithLock') {
                   const currentTarget = group.targetId ? allElements.find((el) => el.id === group.targetId) : null;
-                  const isValid = currentTarget && (currentTarget.type === 'KlInputBox' || currentTarget.layaType === 'ChoiceBox');
+                  const isValid = currentTarget && (isInputRuleHost(currentTarget) || currentTarget.layaType === 'ChoiceBox');
                   if (!isValid) {
-                    const firstValid = allElements.find((el) => el.type === 'KlInputBox' || el.layaType === 'ChoiceBox');
+                    const firstValid = allElements.find((el) => isInputRuleHost(el) || el.layaType === 'ChoiceBox');
                     patch.targetId = firstValid?.id;
+                    patch.targetNameSnapshot = firstValid ? getActionElementLabel(firstValid) : undefined;
                   }
                 }
                 // 切到 onClickInitGameConfirm*：如果当前 target 不是 DragViewBox 或 MatchingGame，默认选画布上第一个
@@ -486,6 +497,7 @@ export default function ActionEditor({
                   if (!isValid) {
                     const firstValid = allElements.find((el) => el.type === 'DragViewBox' || el.type === 'MatchingGame');
                     patch.targetId = firstValid?.id;
+                    patch.targetNameSnapshot = firstValid ? getActionElementLabel(firstValid) : undefined;
                   }
                 }
                 updateGroup(group, patch);
@@ -552,7 +564,7 @@ export default function ActionEditor({
                     )}
                     {sdkJudgeTargets.map((item) => (
                       <option key={item.id} value={item.id}>
-                        {item.name ?? item.id} ({elementMeta[item.type]?.label ?? item.type})
+                        {getActionElementLabel(item)} ({elementMeta[item.type]?.label ?? item.type})
                       </option>
                     ))}
                   </select>
@@ -574,7 +586,15 @@ export default function ActionEditor({
                         <Crosshair size={11} /> 编辑目标
                       </button>
                     </div>
-                    {capability.answerKey ? (
+                    {capability.kind === 'input' || capability.kind === 'inputImage' || capability.kind === 'choice' ? (
+                      <div className="text-[10px] text-slate-500">
+                        {capability.kind === 'input'
+                          ? '请进入目标组件配置空位候选答案或两框算式关系。'
+                          : capability.kind === 'choice'
+                          ? '请进入目标组件，通过选项列表配置正确答案。'
+                          : '请进入目标组件配置候选正确答案。'}
+                      </div>
+                    ) : capability.answerKey ? (
                       <label className="flex items-center gap-1 text-[10px] text-slate-400">
                         <span className="w-14 shrink-0">{capability.answerLabel}</span>
                         <input
@@ -608,12 +628,18 @@ export default function ActionEditor({
               <span className="text-slate-500 w-7 shrink-0">{t('target')}</span>
               <select
                 value={group.targetId ?? ''}
-                onChange={(e) => updateGroup(group, { targetId: e.target.value || undefined })}
+                onChange={(e) => {
+                  const nextTarget = allElements.find((item) => item.id === e.target.value);
+                  updateGroup(group, {
+                    targetId: nextTarget?.id,
+                    targetNameSnapshot: nextTarget ? getActionElementLabel(nextTarget) : undefined,
+                  });
+                }}
                 className="flex-1 min-w-0 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
               >
                 {!group.targetId && <option value="">请选择画笔</option>}
                 {allElements.filter((el) => el.type === 'NewBrushSprite').map((el) => (
-                  <option key={el.id} value={el.id}>{el.name ?? el.id} (画笔)</option>
+                  <option key={el.id} value={el.id}>{getActionElementLabel(el)} (画笔)</option>
                 ))}
               </select>
             </div>
@@ -622,27 +648,44 @@ export default function ActionEditor({
             const isInitConfirm = group.event === 'onClickInitConfirm' || group.event === 'onClickInitConfirmWithLock';
             const isInitGameConfirm = group.event === 'onClickInitGameConfirm' || group.event === 'onClickInitGameConfirmWithLock'
               || group.event === 'onClickInitGameConfirmCH' || group.event === 'onClickInitGameConfirmCHWithLock';
+            const currentTarget = group.targetId ? allElements.find((item) => item.id === group.targetId) : undefined;
+            const targetMissing = Boolean(group.targetId && (
+              (isInitConfirm && (!currentTarget || (!isInputRuleHost(currentTarget) && currentTarget.layaType !== 'ChoiceBox')))
+              || (isInitGameConfirm && (!currentTarget || (currentTarget.type !== 'DragViewBox' && currentTarget.type !== 'MatchingGame')))
+            ));
             return (
-              <div className="flex items-center gap-1 mb-1">
-                <span className="text-slate-500 w-7 shrink-0">{t('target')}</span>
-                <select
-                  value={group.targetId ?? ''}
-                  onChange={(e) => updateGroup(group, { targetId: e.target.value || undefined })}
-                  className="flex-1 min-w-0 bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-200"
-                >
-                  {/* onClickInitConfirm* / onClickInitGameConfirm* 事件不允许指向自身 */}
-                  {!isInitConfirm && !isInitGameConfirm && <option value="">{t('self')}</option>}
-                  {isInitConfirm && !group.targetId && <option value="">请选择输入框容器或选择题容器</option>}
-                  {isInitGameConfirm && !group.targetId && <option value="">请选择拖拽容器或连线游戏</option>}
-                  {allElements.filter((el) => {
-                    if (el.id === element.id) return false;
-                    if (isInitConfirm) return el.type === 'KlInputBox' || el.layaType === 'ChoiceBox';
-                    if (isInitGameConfirm) return el.type === 'DragViewBox' || el.type === 'MatchingGame';
-                    return true;
-                  }).map((el) => (
-                    <option key={el.id} value={el.id}>{el.name ?? el.id} ({elementMeta[el.type]?.label ?? el.type})</option>
-                  ))}
-                </select>
+              <div className="mb-1 space-y-1">
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-500 w-7 shrink-0">{t('target')}</span>
+                  <select
+                    value={group.targetId ?? ''}
+                    onChange={(e) => {
+                      const nextTarget = allElements.find((item) => item.id === e.target.value);
+                      updateGroup(group, {
+                        targetId: nextTarget?.id,
+                        targetNameSnapshot: nextTarget ? getActionElementLabel(nextTarget) : undefined,
+                      });
+                    }}
+                    className={`flex-1 min-w-0 border rounded px-1 py-0.5 ${targetMissing ? 'bg-red-950/50 border-red-700 text-red-200' : 'bg-slate-700 border-slate-600 text-slate-200'}`}
+                  >
+                    {/* onClickInitConfirm* / onClickInitGameConfirm* 事件不允许指向自身 */}
+                    {!isInitConfirm && !isInitGameConfirm && <option value="">{t('self')}</option>}
+                    {isInitConfirm && !group.targetId && <option value="">请选择输入框容器或选择题容器</option>}
+                    {isInitGameConfirm && !group.targetId && <option value="">请选择拖拽容器或连线游戏</option>}
+                    {targetMissing && (
+                      <option value={group.targetId}>目标已失效：{group.targetNameSnapshot ?? group.targetId}</option>
+                    )}
+                    {allElements.filter((el) => {
+                      if (el.id === element.id) return false;
+                      if (isInitConfirm) return isInputRuleHost(el) || el.layaType === 'ChoiceBox';
+                      if (isInitGameConfirm) return el.type === 'DragViewBox' || el.type === 'MatchingGame';
+                      return true;
+                    }).map((el) => (
+                      <option key={el.id} value={el.id}>{getActionElementLabel(el)} ({elementMeta[el.type]?.label ?? el.type})</option>
+                    ))}
+                  </select>
+                </div>
+                {targetMissing && <div className="pl-8 text-[10px] text-red-300">判定目标已删除或不再兼容，请重新选择。</div>}
               </div>
             );
           })()}
@@ -724,13 +767,19 @@ export default function ActionEditor({
                       <span className="w-12 shrink-0 text-slate-500">动作目标</span>
                       <select
                         value={action.targetId ?? ''}
-                        onChange={(event) => update(i, { targetId: event.target.value || undefined })}
+                        onChange={(event) => {
+                          const nextTarget = allElements.find((item) => item.id === event.target.value);
+                          update(i, {
+                            targetId: nextTarget?.id,
+                            targetNameSnapshot: nextTarget ? getActionElementLabel(nextTarget) : undefined,
+                          });
+                        }}
                         className="min-w-0 flex-1 rounded border border-slate-600 bg-slate-700 px-1 py-0.5 text-slate-200"
                       >
-                        <option value="">当前触发元素（{element.name ?? element.id}）</option>
+                        <option value="">当前触发元素（{getActionElementLabel(element)}）</option>
                         {allElements.filter((item) => item.id !== element.id).map((item) => (
                           <option key={item.id} value={item.id}>
-                            {item.name ?? item.id} ({elementMeta[item.type]?.label ?? item.type})
+                            {getActionElementLabel(item)} ({elementMeta[item.type]?.label ?? item.type})
                           </option>
                         ))}
                       </select>
@@ -855,7 +904,7 @@ export default function ActionEditor({
                             <option value="0">无可用页面</option>
                           ) : (
                             containerBoxes.map((box, idx) => (
-                              <option key={box.id} value={idx}>{box.name}</option>
+                              <option key={box.id} value={idx}>{getActionElementLabel(box)}</option>
                             ))
                           )}
                         </select>

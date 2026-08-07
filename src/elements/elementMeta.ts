@@ -1,11 +1,13 @@
 import { assetExport, assetSrc } from './builtinAssets';
-import { DEFAULT_FONT_ID } from './fontLibrary';
+import { DEFAULT_FONT_ID, normalizeFontLibraryId } from './fontLibrary';
 import type { Element, SubPage } from '../types';
+
+export const NEW_TEXT_DEFAULT_CONTENT = '双击编辑文本';
 
 export interface PropertyDef {
   key: string;
   label: string;
-  type: 'number' | 'text' | 'textarea' | 'color' | 'select' | 'slider' | 'boolean' | 'file' | 'elementRef' | 'spineFolder' | 'fontLibrary' | 'fontLocal' | 'matchingItemRef';
+  type: 'number' | 'text' | 'textarea' | 'color' | 'select' | 'slider' | 'boolean' | 'file' | 'elementRef' | 'spineFolder' | 'fontLibrary' | 'fontLocal' | 'matchingItemRef' | 'answerKeyboard' | 'mathKeyboardTheme' | 'inputTextTheme';
   /** 仅 type:'file' 时生效；undefined 时按 'image' 处理 */
   fileType?: 'image' | 'audio' | 'video';
   group?: string;
@@ -26,6 +28,8 @@ export interface ExportChild {
   type: string;
   props: Record<string, unknown>;
   child?: ExportChild[];
+  /** 该节点依赖但不直接出现在 props 中的运行时资源（如 Label 使用的 TTF）。 */
+  resources?: string[];
   /** 注入子节点导出时把外层 element 的 width/height 写到 props（用于画板节点宽高跟随 Box） */
   inheritSize?: boolean;
   /** 注入子节点导出时从外层 element.props 搬运的字段名列表（搬过来后外层 props 会剥掉这些字段） */
@@ -42,6 +46,8 @@ export interface Meta {
   defaultPosition?: { x: number; y: number };
   defaultProps: Record<string, unknown>;
   properties: PropertyDef[];
+  /** 普通图片可在属性面板执行左右/上下镜像；状态保存在 Element.props。 */
+  mirrorable?: boolean;
   /** 编辑模式下用 Laya Image 替代真实组件渲染时使用的占位图 URL（仅编辑模式生效，不影响导出） */
   placeholderImage?: string;
   /** 导出时强制注入的 runtime 属性（Laya UI 解析器据此实例化对应运行时类） */
@@ -78,6 +84,9 @@ const COMMON_STATE_PROPS: PropertyDef[] = [
   { key: 'hidden', label: '隐藏', type: 'boolean', group: '状态' },
   { key: 'blockThrough', label: '阻止穿透', type: 'boolean', group: '状态' },
 ];
+
+/** FractionInput 的位图字体切片表，顺序必须与 img_w2Input.png 的 29 个格子一致。 */
+export const FRACTION_INPUT_SHEET = '0123456789+-×÷=()><.tabcdxyπ²';
 
 // ─── 常用属性模板 ───
 const P_TEXT: PropertyDef[] = [
@@ -140,6 +149,12 @@ const KL_INPUT_IMAGE_CONFIG = {
   defaultProps: {
     anchorX: 0, anchorY: 0,
     _judgeAnswer: '',
+    _inputTextTheme: 'blue',
+    _inputFontSize: 36,
+    _inputLetterSpacing: 0,
+    _inputFontReferenceWidth: 120,
+    _inputFontReferenceHeight: 60,
+    _inputFontPreview: '1234',
     place: 4,
     sheet: '0123456789°+-*/=().',
     fontClipSkin: assetExport('klInput.font'),
@@ -155,7 +170,8 @@ const KL_INPUT_IMAGE_CONFIG = {
     { key: '_judgeAnswer',  label: '正确答案',  type: 'text', group: '交互' },
     { key: 'place',         label: '输入位数',  type: 'number', min: 1 },
     { key: 'sheet',         label: '可输入字符', type: 'text' },
-    { key: 'fontClipSkin',  label: '字体图皮肤', type: 'file', group: '外观' },
+    { key: '_inputTextTheme', label: '文本颜色', type: 'inputTextTheme', group: '外观' },
+    { key: 'fontClipSkin',  label: '字体图皮肤', type: 'file', group: '外观', advanced: true },
     { key: 'camp',          label: '阵营',     type: 'text', group: '交互' },
     { key: 'canSelected',   label: '可选中',    type: 'boolean', group: '交互' },
     { key: 'keyBoradID',    label: '键盘ID',   type: 'number', group: '交互' },
@@ -167,7 +183,7 @@ export const elementMeta: Record<string, Meta> = {
   Label:        { layaType: 'Label',       label: '文本',     category: 'basic', defaultSize: { width: 200, height: 40 },  defaultProps: { text: '新文本', fontSize: 16, color: '#333333', bold: false, wordWrap: true }, properties: [...COMMON_STATE_PROPS, ...P_TEXT] },
   ScaleButton:  { layaType: 'ScaleButton', label: '按钮',     category: 'basic', defaultSize: { width: 120, height: 40 },  runtime: 'com.klzz.ui.custom.ScaleButton', defaultProps: { anchorX: 0.5, anchorY: 0.5, label: '按钮', fontSize: 14, skin: 'share/comp/button.png', stateNum: 3, sizeGrid: '5,5,5,5', _bgColor: '#4A90D9', _hoverColor: '#5BA0E9', _pressColor: '#3A7BC8', _borderRadius: 8 }, properties: [...COMMON_STATE_PROPS, ...P_LABEL, ...P_SKIN, { key: 'stateNum', label: '状态数', type: 'select', group: '外观', options: [{ label: '1态(无变化)', value: 1 }, { label: '2态(正常/按下)', value: 2 }, { label: '3态(正常/悬停/按下)', value: 3 }] }, { key: 'labelColors', label: '文字颜色(4态)', type: 'text', group: '文本' }, ...P_DISABLED, ...P_SKIN_EDIT_BTN] },
   SoundButton:  { layaType: 'SoundButton', label: '音频', category: 'commonComponents', defaultSize: { width: 105, height: 106 }, placeholderImage: assetSrc('soundPlaceholder'), runtime: 'com.klzz.ui.custom.SoundButton', defaultProps: { anchorX: 0.5, anchorY: 0.5, skin: assetExport('soundPlaceholder'), soundPath: '', stateNum: 1, isNeedAni: false, showInStu: true }, properties: [...COMMON_STATE_PROPS, { key: 'skin', label: '图片', type: 'file', group: '外观' }, { key: 'soundPath', label: '音频路径', type: 'file', fileType: 'audio', group: '交互' }, { key: 'stateNum', label: '状态数', type: 'select', group: '外观', options: [{ label: '1态(无变化)', value: 1 }, { label: '2态(正常/按下)', value: 2 }, { label: '3态(正常/悬停/按下)', value: 3 }] }, { key: 'isNeedAni', label: '播放动画', type: 'boolean', group: '交互' }, { key: 'showInStu', label: '学生端显示', type: 'boolean', group: '交互' }] },
-  Image:        { layaType: 'Image',       label: '图片',     category: 'basic', defaultSize: { width: 200, height: 200 }, defaultProps: { skin: '' }, properties: [...COMMON_STATE_PROPS, { key: 'skin', label: '图片', type: 'file', group: '外观' }, { key: 'sizeGrid', label: '九宫格', type: 'text', group: '外观' }, { key: 'anchorX', label: '锚点X', type: 'slider', min: 0, max: 1, step: 0.1, group: '外观' }, { key: 'anchorY', label: '锚点Y', type: 'slider', min: 0, max: 1, step: 0.1, group: '外观' }, ...P_DISABLED] },
+  Image:        { layaType: 'Image',       label: '图片',     category: 'basic', mirrorable: true, defaultSize: { width: 200, height: 200 }, defaultProps: { skin: '' }, properties: [...COMMON_STATE_PROPS, { key: 'skin', label: '图片', type: 'file', group: '外观' }, { key: 'sizeGrid', label: '九宫格', type: 'text', group: '外观' }, { key: 'anchorX', label: '锚点X', type: 'slider', min: 0, max: 1, step: 0.1, group: '外观' }, { key: 'anchorY', label: '锚点Y', type: 'slider', min: 0, max: 1, step: 0.1, group: '外观' }, ...P_DISABLED] },
   TextInput:    { layaType: 'TextInput',   label: '输入框',   category: 'basic', defaultSize: { width: 200, height: 40 },  defaultProps: { prompt: '请输入...', fontSize: 14, skin: 'share/comp/textinput.png', sizeGrid: '4,4,4,4', _bgColor: '#ffffff', _borderColor: '#d9d9d9', _borderRadius: 4 }, properties: [...COMMON_STATE_PROPS, { key: 'prompt', label: '占位文字', type: 'text', group: '文本' }, { key: 'fontSize', label: '字号', type: 'number', min: 8, max: 200, group: '文本' }, { key: 'color', label: '文字颜色', type: 'color', group: '文本' }, { key: 'maxChars', label: '最大字数', type: 'number', min: 0, group: '交互' }, { key: 'restrict', label: '输入限制', type: 'text', group: '交互' }, { key: 'editable', label: '可编辑', type: 'boolean', group: '交互' }, { key: 'multiline', label: '多行', type: 'boolean', group: '交互' }, ...P_SKIN, ...P_SKIN_EDIT_INPUT] },
   CheckBox:     { layaType: 'CheckBox',    label: '复选框',   category: 'basic', defaultSize: { width: 100, height: 40 },  defaultProps: { label: '选项', skin: 'share/comp/checkbox.png', _bgColor: '#4A90D9', _borderColor: '#999999' }, properties: [...COMMON_STATE_PROPS, { key: 'label', label: '标签', type: 'text', group: '文本' }, { key: 'labelSize', label: '字号', type: 'number', min: 8, max: 200, group: '文本' }, { key: 'labelColors', label: '文字颜色', type: 'color', group: '文本' }, { key: 'selected', label: '选中', type: 'boolean' }, ...P_SKIN, ...P_SKIN_EDIT_CHECK] },
   Radio:        { layaType: 'Radio',       label: '单选框',   category: 'basic', defaultSize: { width: 100, height: 40 },  defaultProps: { label: '选项', skin: 'share/comp/radio.png', _bgColor: '#4A90D9', _borderColor: '#999999' }, properties: [...COMMON_STATE_PROPS, { key: 'label', label: '标签', type: 'text', group: '文本' }, { key: 'labelSize', label: '字号', type: 'number', min: 8, max: 200, group: '文本' }, { key: 'labelColors', label: '文字颜色', type: 'color', group: '文本' }, { key: 'value', label: '值', type: 'text' }, ...P_SKIN, ...P_SKIN_EDIT_CHECK] },
@@ -182,8 +198,8 @@ export const elementMeta: Record<string, Meta> = {
   Panel:        { layaType: 'Panel',       label: '面板',     category: 'container', defaultSize: { width: 300, height: 200 }, defaultProps: {}, properties: [...COMMON_STATE_PROPS] },
   List:         { layaType: 'List',        label: '列表',     category: 'container', defaultSize: { width: 300, height: 200 }, defaultProps: {}, properties: [...COMMON_STATE_PROPS, { key: 'repeatX', label: '水平重复', type: 'number', min: 0 }, { key: 'repeatY', label: '垂直重复', type: 'number', min: 0 }] },
   ViewStack:    { layaType: 'ViewStack',   label: '视图堆栈', category: 'container', defaultSize: { width: 300, height: 200 }, defaultProps: {}, properties: [...COMMON_STATE_PROPS, { key: 'selectedIndex', label: '当前索引', type: 'number', min: 0 }] },
-  ChoiceBox:    { layaType: 'ChoiceBox',    label: '选择容器', category: 'choice', defaultSize: { width: 200, height: 200 }, defaultPosition: { x: 0, y: 0 }, placeholderImage: assetSrc('choiceBox.placeholder'), runtime: 'com.klzz.ui.custom.ChoiceBox', varFromName: true, defaultProps: { upperLimit: 1, filterColor: '#ffff00', filterBlur: 6 }, properties: [...COMMON_STATE_PROPS, { key: 'rightItemNames', label: '正确选项', type: 'text', group: '交互' }, { key: 'upperLimit', label: '最多选几个', type: 'number', min: 0, group: '交互' }, ...P_FILTER] },
-  KlInputBox:   { layaType: 'KlInputBox',  label: '输入框容器', category: 'choice', defaultSize: { width: 1920, height: 1080 }, defaultPosition: { x: 0, y: 0 }, defaultProps: {}, properties: [...COMMON_STATE_PROPS, { key: 'answer', label: '正确答案', type: 'text' }] },
+  ChoiceBox:    { layaType: 'ChoiceBox',    label: '选择容器', category: 'choice', defaultSize: { width: 200, height: 200 }, defaultPosition: { x: 0, y: 0 }, placeholderImage: assetSrc('choiceBox.placeholder'), runtime: 'com.klzz.ui.custom.ChoiceBox', varFromName: true, defaultProps: { _correctOptionIds: [], filterColor: '#ffff00', filterBlur: 6 }, properties: [...COMMON_STATE_PROPS, ...P_FILTER] },
+  KlInputBox:   { layaType: 'KlInputBox',  label: '输入框容器', category: 'choice', defaultSize: { width: 1920, height: 1080 }, defaultPosition: { x: 0, y: 0 }, defaultProps: {}, properties: [...COMMON_STATE_PROPS] },
   DragObj:      { layaType: 'DragObj',     label: '拖拽对象', category: 'speechCourse', toolbarHidden: true, defaultSize: { width: 258, height: 187 }, placeholderImage: assetSrc('dragObjPlaceholder'), varFromName: true, defaultProps: { hasDrop: 'false', group: '-1', filterColor: '#ffff00', filterBlur: 6, canSelect: 'false' }, properties: [{ key: 'skin', label: '图片', type: 'file', group: '外观' }, { key: 'dropSkin', label: '放置位皮肤', type: 'file', group: '外观' }, { key: 'rightDropObjName', label: '正确目标', type: 'elementRef', group: '交互', elementFilter: ['DropObj'], scopedToAncestorType: 'DragViewBox' }, { key: 'cusAttribute', label: '自定义属性', type: 'text', group: '交互', advanced: true }, { key: 'group', label: '分组', type: 'text', group: '交互', advanced: true }, { key: 'hasDrop', label: '已放置', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }, { key: 'canSelect', label: '可选中', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }, { key: 'canOverlayDrop', label: '可重叠', type: 'boolean', group: '交互', advanced: true }, { key: 'isMoveEvent', label: '可移动', type: 'boolean', group: '交互', advanced: true }, { key: 'filterColor', label: '滤镜颜色', type: 'color', group: '外观', advanced: true }, { key: 'filterBlur', label: '滤镜模糊', type: 'number', min: 0, max: 20, group: '外观', advanced: true }, { key: 'pivotX', label: '轴心X', type: 'number', group: '外观', advanced: true }, { key: 'pivotY', label: '轴心Y', type: 'number', group: '外观', advanced: true }] },
   DropObj:      { layaType: 'DropObj',     label: '放置区域', category: 'speechCourse', toolbarHidden: true, defaultSize: { width: 258, height: 187 }, placeholderImage: assetSrc('dropObjPlaceholder'), varFromName: true, defaultProps: { hasDrop: 'false', group: '-1', isNeedTip: false, noticeColor: '#ff0000', noticeBlur: 4 }, properties: [{ key: 'skin', label: '放置区皮肤', type: 'file', group: '外观' }, { key: 'tipSkin', label: '放置区提示图', type: 'file', group: '外观' }, { key: '_placedPreview', label: '放置后预览图（仅编辑器）', type: 'file', group: '外观' }, { key: 'cusAttribute', label: '自定义属性', type: 'text', group: '交互', advanced: true }, { key: 'group', label: '分组', type: 'text', group: '交互', advanced: true }, { key: 'hasDrop', label: '已放置', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }, { key: 'isNeedTip', label: '显示提示', type: 'boolean', group: '交互', advanced: true }, { key: 'showNotice', label: '提示边框', type: 'boolean', group: '外观', advanced: true }, { key: 'noticeColor', label: '提示颜色', type: 'color', group: '外观', advanced: true }, { key: 'noticeBlur', label: '提示模糊', type: 'number', min: 0, max: 20, group: '外观', advanced: true }, { key: 'pivotX', label: '轴心X', type: 'number', group: '外观', advanced: true }, { key: 'pivotY', label: '轴心Y', type: 'number', group: '外观', advanced: true }] },
   DragViewBox:  { layaType: 'DragViewBox', label: '拖拽容器', category: 'speechCourse', toolbarHidden: true, varFromName: true, defaultSize: { width: 1920, height: 1080 }, defaultPosition: { x: 0, y: 0 }, defaultProps: { mode: 1, successPosMode: 0, comDropNotice: true, dropNotice: 'true', clickPlace: 'false', changePos: 'true', backToInitPos: 'true', backAni: 'true', autoSorting: 'true' }, properties: [{ key: 'mode', label: '放置模式', type: 'select', group: '交互', options: [{ label: '鼠标位', value: 0 }, { label: '放置位', value: 1 }, { label: '自定义', value: 2 }, { label: '自动排列', value: 3 }] }, { key: 'dropNotice', label: '放置提示', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }, { key: 'clickPlace', label: '点击放置', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }, { key: 'changePos', label: '改变位置', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }, { key: 'backToInitPos', label: '失败返回', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }, { key: 'backAni', label: '返回动画', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }, { key: 'autoSorting', label: '自动排序', type: 'select', group: '交互', advanced: true, options: [{ label: '是', value: 'true' }, { label: '否', value: 'false' }] }] },
@@ -265,25 +281,28 @@ export const elementMeta: Record<string, Meta> = {
 
   // ─── 新组件分类 ───
   // 编辑模式下不会创建真实 sdk_baiya 实例，统一用 Laya Image + 占位图渲染；导出时按 layaType 输出真实组件
-  NewImage: { layaType: 'Image',       label: '图片',   category: 'commonComponents', defaultSize: { width: 200, height: 200 }, defaultPosition: { x: 0, y: 0 }, defaultProps: { skin: '' }, properties: [...COMMON_STATE_PROPS, { key: 'skin', label: '图片', type: 'file', group: '外观' }, { key: 'sizeGrid', label: '九宫格', type: 'text', group: '外观' }] },
+  NewImage: { layaType: 'Image',       label: '图片',   category: 'commonComponents', mirrorable: true, defaultSize: { width: 200, height: 200 }, defaultPosition: { x: 0, y: 0 }, defaultProps: { skin: '' }, properties: [...COMMON_STATE_PROPS, { key: 'skin', label: '图片', type: 'file', group: '外观' }, { key: 'sizeGrid', label: '九宫格', type: 'text', group: '外观' }] },
   // 双击进入行内编辑（HTML textarea 浮层），编辑模式下用 Laya Label 实时显示文字；
   // 此条目刻意未配置 placeholderImage —— 是 commonComponents「必须用 Image 占位」约定的破例（需要画布上 live 显示用户输入）。
-  // 导出阶段由 exportProject.ts 的 bakeTextElements() 用 Canvas 2D 把文字烘焙成 PNG data URL，
+  // 导出阶段由 exportProject.ts 的 bakeCourseAssets() 用 Canvas 2D 把文字烘焙成 PNG data URL，
   // 把元素就地替换成 type/layaType='Image'，下游流程对 NewTextArea 完全无感。
   NewTextArea: {
     layaType: 'TextArea',
-    label: '文本输入',
+    label: '文本',
     category: 'commonComponents',
-    defaultSize: { width: 1458, height: 137 },
-    defaultPosition: { x: 262, y: 108 },
+    defaultSize: { width: 800, height: 62 },
+    defaultPosition: { x: 560, y: 509 },
     defaultProps: {
-      text: '文本编辑',
+      text: NEW_TEXT_DEFAULT_CONTENT,
       fontSize: 38,
-      color: '#0d0d0d',
+      color: '#ffffff',
       leading: 24,
       wordWrap: true,
       align: 'left',
       valign: 'top',
+      bold: false,
+      italic: false,
+      textSizingMode: 'fixed-width',
       mouseEnabled: false,
       fontLibraryId: DEFAULT_FONT_ID,
       fontLocalPath: '',
@@ -293,15 +312,67 @@ export const elementMeta: Record<string, Meta> = {
       { key: 'text', label: '文本', type: 'textarea', group: '文本' },
       { key: 'fontSize', label: '字号', type: 'number', min: 8, max: 200, group: '文本' },
       { key: 'color', label: '颜色', type: 'color', group: '文本' },
+      { key: 'bold', label: '粗体', type: 'boolean', group: '文本' },
+      { key: 'italic', label: '斜体', type: 'boolean', group: '文本' },
       { key: 'fontLibraryId', label: '字体', type: 'fontLibrary', group: '文本' },
       { key: 'fontLocalPath', label: '本地字体', type: 'fontLocal', group: '文本' },
       { key: 'align', label: '水平对齐', type: 'select', options: [{ label: '左', value: 'left' }, { label: '中', value: 'center' }, { label: '右', value: 'right' }], group: '文本' },
       { key: 'valign', label: '垂直对齐', type: 'select', options: [{ label: '顶部', value: 'top' }, { label: '居中', value: 'middle' }, { label: '底部', value: 'bottom' }], group: '文本' },
       { key: 'wordWrap', label: '自动换行', type: 'boolean', group: '文本' },
       { key: 'leading', label: '行间距', type: 'number', min: 0, group: '文本' },
+      { key: 'textSizingMode', label: '尺寸模式', type: 'select', options: [
+        { label: '自动宽高', value: 'auto' },
+        { label: '固定宽度、自动高度', value: 'fixed-width' },
+        { label: '固定宽高', value: 'fixed' },
+      ], group: '布局' },
     ],
   },
   KlInputImage: { layaType: 'KlInputImage', label: '输入框', category: 'commonComponents', defaultSize: { width: 120, height: 60 }, placeholderImage: assetSrc('klInput.placeholder'), defaultProps: { ...KL_INPUT_IMAGE_CONFIG.defaultProps }, runtime: KL_INPUT_IMAGE_CONFIG.runtime, exportChildren: KL_INPUT_IMAGE_CONFIG.exportChildren, properties: [...COMMON_STATE_PROPS, ...KL_INPUT_IMAGE_CONFIG.properties.filter(p => p.key !== 'keyBoradID' && p.key !== 'pattern')] },
+  FractionInput: {
+    layaType: 'FractionInput',
+    label: '分数输入框',
+    category: 'commonComponents',
+    defaultSize: { width: 360, height: 120 },
+    // 编辑器直接使用普通输入框底图；配合 sizeGrid 避免宽分数框拉伸圆角。
+    placeholderImage: assetSrc('klInput.bg'),
+    runtime: 'Components.FractionInput',
+    defaultProps: {
+      anchorX: 0,
+      anchorY: 0,
+      _judgeAnswer: '',
+      _inputTextTheme: 'blue',
+      _inputFontSize: 42,
+      _inputLetterSpacing: 6,
+      _inputFontReferenceWidth: 360,
+      _inputFontReferenceHeight: 120,
+      _inputFontPreview: '12<3_4>',
+      _inputFractionFontScale: 0.64,
+      place: 11,
+      sheet: FRACTION_INPUT_SHEET,
+      lineSkin: assetExport('keyboard.math.fractionLine'),
+      fontClipSkin: assetExport('keyboard.math.inputFont'),
+      fontWidth: 42,
+      fractionPlace: 3,
+      fractionDigits: 4,
+      contentScale: 0,
+      spaceX: 0,
+      align: 'center',
+      canSelected: true,
+      sizeGrid: '10,10,10,10',
+    },
+    exportChildren: KL_INPUT_IMAGE_CONFIG.exportChildren,
+    properties: [
+      ...COMMON_STATE_PROPS,
+      { key: '_judgeAnswer', label: '正确答案', type: 'text', group: '交互' },
+      { key: 'place', label: '最大字符数', type: 'number', min: 3, max: 60, group: '交互' },
+      { key: 'camp', label: '阵营', type: 'text', group: '交互' },
+      { key: 'canSelected', label: '可输入', type: 'boolean', group: '交互' },
+      { key: '_inputTextTheme', label: '文本颜色', type: 'inputTextTheme', group: '外观' },
+      { key: 'align', label: '内容对齐', type: 'select', options: [{ label: '左', value: 'left' }, { label: '中', value: 'center' }, { label: '右', value: 'right' }], group: '外观' },
+      { key: 'lineSkin', label: '分数线皮肤', type: 'file', group: '外观', advanced: true },
+      { key: 'fontClipSkin', label: '数字字体图', type: 'file', group: '外观', advanced: true },
+    ],
+  },
   KlBaseKeyboard: {
     layaType: 'KlBaseKeyboard',
     label: '键盘',
@@ -312,12 +383,15 @@ export const elementMeta: Record<string, Meta> = {
     defaultProps: {},
     properties: [
       ...COMMON_STATE_PROPS,
+      { key: '_mathKeyboardTheme', label: '键盘皮肤', type: 'mathKeyboardTheme', group: '外观' },
+      { key: '_customAnswerKeyboard', label: '答案配置', type: 'answerKeyboard', group: '交互' },
       { key: 'camp',    label: '阵营',     type: 'text',    group: '交互' },
       { key: 'sheet',   label: '可输入字符', type: 'text',  group: '交互' },
       { key: 'pattern', label: '键盘样式',  type: 'number', group: '交互' },
       { key: 'visible', label: '初始可见',  type: 'boolean', group: '外观' },
       { key: 'isHide',  label: '可隐藏',    type: 'boolean', group: '交互' },
       { key: 'fixed',   label: '固定位置',  type: 'boolean', group: '交互' },
+      { key: 'disabled', label: '禁用', type: 'boolean', group: '状态' },
     ],
   },
   ConfirmButton: { layaType: 'ScaleButton', label: '确定按钮', category: 'commonComponents', defaultSize: { width: 238, height: 126 }, defaultPosition: { x: 160, y: 160 }, placeholderImage: assetSrc('okBtn.m_qddk_on'), varFromName: true, defaultProps: { anchorX: 0.5, anchorY: 0.5, skin: assetExport('okBtn.m_qddk_on'), stateNum: 1, label: '' }, properties: [...COMMON_STATE_PROPS] },
@@ -357,8 +431,26 @@ export const elementMeta: Record<string, Meta> = {
       { key: 'sizeGrid', label: '九宫格', type: 'text', group: '外观' },
     ],
   },
-  ContainerBox: { layaType: 'Box', label: '容器Box', category: 'commonComponents', defaultSize: { width: 300, height: 300 }, defaultPosition: { x: 200, y: 200 }, placeholderImage: assetSrc('containerBox.placeholder'), defaultProps: {}, properties: [...COMMON_STATE_PROPS] },
-  // ─── 画笔组件（commonComponents 分类，组合创建：Box + SelectableObj + ScaleButton；导出时注入 NewBrushSprite 子节点）───
+  ContainerBox: {
+    layaType: 'Box',
+    label: '容器Box',
+    category: 'commonComponents',
+    defaultSize: { width: 300, height: 300 },
+    defaultPosition: { x: 200, y: 200 },
+    placeholderImage: assetSrc('containerBox.placeholder'),
+    defaultProps: { _inputRuleEnabled: false },
+    properties: [
+      ...COMMON_STATE_PROPS,
+      {
+        key: '_inputRuleEnabled',
+        label: '启用答题判定',
+        type: 'boolean',
+        group: '交互',
+        tooltip: '开启后，容器内输入框可建立算式关系并作为一组统一判定；关闭时保留配置，输入框恢复独立判定。',
+      },
+    ],
+  },
+  // ─── 画笔组件（commonComponents 分类，组合创建：Box + SelectableObj + ScaleButton；导出时注入 SDK 已注册的 BrushSprite 子节点）───
   NewBrushSprite: {
     layaType: 'Box',
     label: '画笔',
@@ -387,7 +479,7 @@ export const elementMeta: Record<string, Meta> = {
     ],
     exportChildren: [
       {
-        type: 'NewBrushSprite',
+        type: 'BrushSprite',
         inheritSize: true,
         inheritProps: ['brushMode', 'brushColor', 'thickness', 'brushFillColor'],
         inheritVar: true,
@@ -528,7 +620,9 @@ export const elementMeta: Record<string, Meta> = {
       cus1: '',
       cus2: '',
       _foregroundSkin: assetExport('selectableObj.btn1'),
+      _pressedSkin: '',
       _bgSkin: '',
+      _correctSkin: '',
       _wrongSkin: '',
     },
     properties: [
@@ -536,7 +630,9 @@ export const elementMeta: Record<string, Meta> = {
       { key: 'filterColor', label: '滤镜颜色', type: 'color', group: '外观' },
       { key: 'filterBlur', label: '滤镜模糊', type: 'number', min: 0, max: 20, group: '外观' },
       { key: '_foregroundSkin', label: '未选中时的图片', type: 'file', group: '外观' },
+      { key: '_pressedSkin', label: '按下时的图片', type: 'file', group: '外观' },
       { key: '_bgSkin', label: '选中时的图片', type: 'file', group: '外观' },
+      { key: '_correctSkin', label: '正确时的描边', type: 'file', group: '外观' },
       { key: '_wrongSkin', label: '错误时显示的图片', type: 'file', group: '外观' },
     ],
   },
@@ -606,7 +702,11 @@ export function createDefaultElement(type: string, subPageId?: string): Element 
   if (type === 'NewTextArea') {
     try {
       const last = localStorage.getItem('forge_lastFontLibraryId');
-      if (last) extraProps.fontLibraryId = last;
+      if (last) {
+        const normalized = normalizeFontLibraryId(last);
+        extraProps.fontLibraryId = normalized;
+        if (normalized !== last) localStorage.setItem('forge_lastFontLibraryId', normalized);
+      }
     } catch { /* localStorage 失败时不干预 */ }
   }
   return {

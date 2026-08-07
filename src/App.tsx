@@ -12,6 +12,8 @@ import { I18nProvider } from './i18n';
 import type { Course } from './types';
 import FocusWorkspace from './components/FocusWorkspace';
 import { isInternalPagesSubPage, isInternalPagesWorkbenchReadonly } from './utils/internalPages';
+import { requestPageThumbnailFlush } from './utils/pageThumbnailSync';
+import { commitPendingPropertyEdits } from './utils/propertyEditSession';
 
 function App() {
   const setCurrentCourse = useEditorStore((state) => state.setCurrentCourse);
@@ -33,6 +35,7 @@ function App() {
   const [phase, setPhase] = useState<'landing' | 'editor'>('landing');
   const [isDirty, setIsDirty] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [textCreateRequest, setTextCreateRequest] = useState(0);
   const [focusWidth, setFocusWidth] = useState(() => Math.min(440, Math.max(280, Number(localStorage.getItem('forge_focus_workspace_width')) || 320)));
   const internalPageWorkbenchReadonly = isInternalPagesWorkbenchReadonly(currentCourse, currentSubPageId, focusSubPageId);
 
@@ -77,10 +80,15 @@ function App() {
     const timer = setTimeout(async () => {
       setIsDirty(true);
       try {
-        const filePath = getCourseFilePath(currentCourse.id);
-        if (filePath) {
-          await writeBackToLocalFile(currentCourse.id, currentCourse);
-          await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
+        commitPendingPropertyEdits();
+        const courseToSave = useEditorStore.getState().currentCourse;
+        if (courseToSave) {
+          requestPageThumbnailFlush();
+          const filePath = getCourseFilePath(courseToSave.id);
+          if (filePath) {
+            await writeBackToLocalFile(courseToSave.id, courseToSave);
+            await cleanupUnreferencedImages(courseToSave.id, collectImageReferences(courseToSave));
+          }
         }
       } catch { /* 写入失败，忽略 */ }
       setIsDirty(false);
@@ -104,9 +112,9 @@ function App() {
         return;
       }
 
-      if (mod && e.key === 'z' && !e.shiftKey) {
+      if (mod && e.key === 'z' && !e.shiftKey && !isInput) {
         e.preventDefault(); undo();
-      } else if (mod && (e.key === 'Z' || (e.shiftKey && e.key === 'z'))) {
+      } else if (mod && (e.key === 'Z' || (e.shiftKey && e.key === 'z')) && !isInput) {
         e.preventDefault(); redo();
       } else if (mod && e.key === 'c' && !isInput) {
         e.preventDefault(); copyElements();
@@ -124,11 +132,14 @@ function App() {
         moveElementLayer(selectedElementIds[0], direction);
       } else if (mod && e.key === 's') {
         e.preventDefault();
-        if (currentCourse) {
-          const filePath = getCourseFilePath(currentCourse.id);
+        commitPendingPropertyEdits();
+        const courseToSave = useEditorStore.getState().currentCourse;
+        if (courseToSave) {
+          requestPageThumbnailFlush();
+          const filePath = getCourseFilePath(courseToSave.id);
           if (filePath) {
-            await writeBackToLocalFile(currentCourse.id, currentCourse);
-            await cleanupUnreferencedImages(currentCourse.id, collectImageReferences(currentCourse));
+            await writeBackToLocalFile(courseToSave.id, courseToSave);
+            await cleanupUnreferencedImages(courseToSave.id, collectImageReferences(courseToSave));
           }
           setIsDirty(false);
         }
@@ -180,7 +191,10 @@ function App() {
         <StartPage onEnterEditor={handleEnterEditor} />
       ) : (
         <div className="h-screen flex flex-col bg-slate-900 text-white">
-          <Toolbar isDirty={isDirty} onBack={() => setPhase('landing')} />
+          <Toolbar isDirty={isDirty} onBack={() => {
+            commitPendingPropertyEdits();
+            setPhase('landing');
+          }} />
           <EditorWorkspaceLayout
             sidebar={focusSubPageId ? <FocusWorkspace /> : <PageList />}
             sidebarWidth={focusSubPageId ? focusWidth : 240}
@@ -206,7 +220,7 @@ function App() {
                 }}
               />
             ) : null}
-            canvas={<><ElementToolbar /><Canvas /></>}
+            canvas={<><ElementToolbar onCreateText={() => setTextCreateRequest((value) => value + 1)} /><Canvas textCreateRequest={textCreateRequest} /></>}
             propertyPanel={<PropertyPanel />}
           />
         </div>

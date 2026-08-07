@@ -1,149 +1,136 @@
-// 字体库元数据。新增字体只改这一份配置,UI 下拉、loader、烘焙都从这里读取。
-// fontFace 字段用 ASCII,与 TTF 文件名严格一致;同 family 重名时按 <name>-2.TTF 命名。
-
-export type FontCategory = '派培优' | '豌豆口才' | '豌豆益智';
+// 字体库元数据。字体下拉、loader、烘焙和导出都从这里读取。
 
 export interface FontEntry {
-  id: string;          // 全局唯一 id,如 'paipeiyou.lantinghei'
-  category: FontCategory;
-  label: string;       // 下拉里显示给用户的中文名,如 '方正兰亭黑简体'
-  url: string;         // 编辑器加载 TTF 的 public 相对路径
-  fontFace: string;    // FontFace family name(注册到 document.fonts),必须 ASCII
+  id: string;
+  label: string;
+  url: string;
+  fontFace: string;
 }
 
+export const DEFAULT_FONT_ID = 'source-han-sans-cn.regular';
+export const DEFAULT_FONT_FACE = 'ForgeSourceHanSansCNRegular';
+
 export const FONT_LIBRARY: FontEntry[] = [
-  // ─── 派培优 ───
   {
-    id: 'paipeiyou.lantinghei',
-    category: '派培优',
-    label: '方正兰亭黑简体',
-    url: '/builtin/runtime/fonts/方正兰亭黑简体.TTF',
-    fontFace: 'FZLanTingHei',
+    id: DEFAULT_FONT_ID,
+    label: '思源黑体 Regular',
+    url: '/builtin/runtime/fonts/SourceHanSansCN-Regular.otf',
+    fontFace: DEFAULT_FONT_FACE,
   },
   {
-    id: 'paipeiyou.lantingzhonghei',
-    category: '派培优',
-    label: '方正兰亭中黑简体',
-    url: '/builtin/runtime/fonts/方正兰亭中黑简体.TTF',
-    fontFace: 'FZLanTingZhongHei',
+    id: 'source-han-sans-cn.extralight',
+    label: '思源黑体 ExtraLight',
+    url: '/builtin/runtime/fonts/SourceHanSansCN-ExtraLight.otf',
+    fontFace: 'ForgeSourceHanSansCNExtraLight',
   },
   {
-    id: 'paipeiyou.lantingtehei',
-    category: '派培优',
-    label: '方正兰亭特黑简体',
-    url: '/builtin/runtime/fonts/方正兰亭特黑简体.TTF',
-    fontFace: 'FZLanTingTeHei',
+    id: 'source-han-sans-cn.light',
+    label: '思源黑体 Light',
+    url: '/builtin/runtime/fonts/SourceHanSansCN-Light.otf',
+    fontFace: 'ForgeSourceHanSansCNLight',
   },
   {
-    id: 'paipeiyou.lantingcuhei',
-    category: '派培优',
-    label: '方正兰亭粗黑简体',
-    url: '/builtin/runtime/fonts/方正兰亭粗黑简体.TTF',
-    fontFace: 'FZLanTingCuHei',
+    id: 'source-han-sans-cn.normal',
+    label: '思源黑体 Normal',
+    url: '/builtin/runtime/fonts/SourceHanSansCN-Normal.otf',
+    fontFace: 'ForgeSourceHanSansCNNormal',
   },
   {
-    id: 'paipeiyou.lantingxianhei',
-    category: '派培优',
-    label: '方正兰亭纤黑简体',
-    url: '/builtin/runtime/fonts/方正兰亭纤黑简体.TTF',
-    fontFace: 'FZLanTingXianHei',
+    id: 'source-han-sans-cn.medium',
+    label: '思源黑体 Medium',
+    url: '/builtin/runtime/fonts/SourceHanSansCN-Medium.otf',
+    fontFace: 'ForgeSourceHanSansCNMedium',
   },
   {
-    id: 'paipeiyou.luomacu',
-    category: '派培优',
+    id: 'source-han-sans-cn.bold',
+    label: '思源黑体 Bold',
+    url: '/builtin/runtime/fonts/SourceHanSansCN-Bold.otf',
+    fontFace: 'ForgeSourceHanSansCNBold',
+  },
+  {
+    id: 'source-han-sans-cn.heavy',
+    label: '思源黑体 Heavy',
+    url: '/builtin/runtime/fonts/SourceHanSansCN-Heavy.otf',
+    fontFace: 'ForgeSourceHanSansCNHeavy',
+  },
+  {
+    id: 'arial.regular',
+    label: 'Arial Regular',
+    url: '/builtin/runtime/fonts/Arial-Regular.ttf',
+    fontFace: 'ForgeArialRegular',
+  },
+  {
+    id: 'arial.bold',
+    label: 'Arial Bold',
+    url: '/builtin/runtime/fonts/Arial-Bold.ttf',
+    fontFace: 'ForgeArialBold',
+  },
+  {
+    id: 'arial.italic',
+    label: 'Arial Italic',
+    url: '/builtin/runtime/fonts/Arial-Italic.ttf',
+    fontFace: 'ForgeArialItalic',
+  },
+  {
+    id: 'arial.bold-italic',
+    label: 'Arial Bold Italic',
+    url: '/builtin/runtime/fonts/Arial-BoldItalic.ttf',
+    fontFace: 'ForgeArialBoldItalic',
+  },
+  {
+    id: 'arial.black',
+    label: 'Arial Black',
+    url: '/builtin/runtime/fonts/Arial-Black.ttf',
+    fontFace: 'ForgeArialBlack',
+  },
+  {
+    id: 'simhei.regular',
+    label: '黑体',
+    url: '/builtin/runtime/fonts/SimHei.ttf',
+    fontFace: 'ForgeSimHei',
+  },
+  {
+    id: 'times-new-roman.bold',
     label: '罗马粗',
     url: '/builtin/runtime/fonts/罗马粗.ttf',
-    fontFace: 'RomaBold',
+    fontFace: 'ForgeTimesNewRomanBold',
   },
   {
-    id: 'paipeiyou.luomacuxie',
-    category: '派培优',
+    id: 'times-new-roman.bold-italic',
     label: '罗马粗斜',
     url: '/builtin/runtime/fonts/罗马粗斜.ttf',
-    fontFace: 'RomaBoldItalic',
+    fontFace: 'ForgeTimesNewRomanBoldItalic',
   },
   {
-    id: 'paipeiyou.luomaxi',
-    category: '派培优',
+    id: 'times-new-roman.regular',
     label: '罗马细',
     url: '/builtin/runtime/fonts/罗马细.ttf',
-    fontFace: 'RomaLight',
+    fontFace: 'ForgeTimesNewRomanRegular',
   },
   {
-    id: 'paipeiyou.luomaxixie',
-    category: '派培优',
+    id: 'times-new-roman.italic',
     label: '罗马细斜',
     url: '/builtin/runtime/fonts/罗马细斜.ttf',
-    fontFace: 'RomaLightItalic',
-  },
-
-  // ─── 豌豆口才 ───
-  {
-    id: 'koucai.lantingyuan',
-    category: '豌豆口才',
-    label: '方正兰亭圆简体',
-    url: '/builtin/runtime/fonts/方正兰亭圆简体.TTF',
-    fontFace: 'FZLanTingYuan',
-  },
-  {
-    id: 'koucai.lantingyuanzhongcu',
-    category: '豌豆口才',
-    label: '方正兰亭圆简体中粗',
-    url: '/builtin/runtime/fonts/方正兰亭圆简体中粗.TTF',
-    fontFace: 'FZLanTingYuanZhongCu',
-  },
-  {
-    id: 'koucai.lantingyuante',
-    category: '豌豆口才',
-    label: '方正兰亭圆简体特',
-    url: '/builtin/runtime/fonts/方正兰亭圆简体特.TTF',
-    fontFace: 'FZLanTingYuanTe',
-  },
-  {
-    id: 'koucai.hupo',
-    category: '豌豆口才',
-    label: '方正琥珀简体',
-    url: '/builtin/runtime/fonts/方正琥珀简体.TTF',
-    fontFace: 'FZHuPo',
-  },
-
-  // ─── 豌豆益智 ───
-  {
-    id: 'yizhi.lantingyuan',
-    category: '豌豆益智',
-    label: '方正兰亭圆简体',
-    url: '/builtin/runtime/fonts/方正兰亭圆简体.TTF',
-    fontFace: 'FZLanTingYuan',
-  },
-  {
-    id: 'yizhi.lantingyuanzhongcu',
-    category: '豌豆益智',
-    label: '方正兰亭圆简体中粗',
-    url: '/builtin/runtime/fonts/方正兰亭圆简体中粗.TTF',
-    fontFace: 'FZLanTingYuanZhongCu',
-  },
-  {
-    id: 'yizhi.lantingyuante',
-    category: '豌豆益智',
-    label: '方正兰亭圆简体特',
-    url: '/builtin/runtime/fonts/方正兰亭圆简体特.TTF',
-    fontFace: 'FZLanTingYuanTe',
-  },
-  {
-    id: 'yizhi.hupo',
-    category: '豌豆益智',
-    label: '方正琥珀简体',
-    url: '/builtin/runtime/fonts/方正琥珀简体.TTF',
-    fontFace: 'FZHuPo',
+    fontFace: 'ForgeTimesNewRomanItalic',
   },
 ];
 
-// 类别顺序(下拉 optgroup 显示顺序)
-export const FONT_CATEGORIES: FontCategory[] = ['派培优', '豌豆口才', '豌豆益智'];
+const FONT_IDS = new Set(FONT_LIBRARY.map((font) => font.id));
+
+const LEGACY_FONT_ID_MAP: Readonly<Record<string, string>> = {
+  'paipeiyou.luomacu': 'times-new-roman.bold',
+  'paipeiyou.luomacuxie': 'times-new-roman.bold-italic',
+  'paipeiyou.luomaxi': 'times-new-roman.regular',
+  'paipeiyou.luomaxixie': 'times-new-roman.italic',
+};
 
 export function lookupFont(id: string): FontEntry | undefined {
-  return FONT_LIBRARY.find((f) => f.id === id);
+  return FONT_LIBRARY.find((font) => font.id === id);
 }
 
-/** 默认兜底字体 id(派培优兰亭黑) */
-export const DEFAULT_FONT_ID = 'paipeiyou.lantinghei';
+/** 将旧业务字体 ID、缺失值和未知值统一归一化为当前有效字体 ID。 */
+export function normalizeFontLibraryId(id: unknown): string {
+  if (typeof id !== 'string' || id.length === 0) return DEFAULT_FONT_ID;
+  const migratedId = LEGACY_FONT_ID_MAP[id] ?? id;
+  return FONT_IDS.has(migratedId) ? migratedId : DEFAULT_FONT_ID;
+}

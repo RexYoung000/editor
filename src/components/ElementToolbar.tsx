@@ -12,8 +12,19 @@ import { isFlatLesson } from '../utils/courseKind';
 import { downloadLibraryFile, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import QuickPresetDialog, { type QuickPreset, type QuickPresetKind } from './QuickPresetDialog';
+import SpinePresetDialog from './SpinePresetDialog';
 import type { Action, Element } from '../types';
+import { applySpinePreset, type SpinePreset } from '../elements/spinePresets';
 import { findActiveElementPage, getElementPages, isInternalPagesWorkbenchReadonly, type ElementPageRef } from '../utils/internalPages';
+import {
+  applyKeyboardBindingProps,
+  keyboardCamp,
+  keyboardPresetId,
+  keyboardSupportsInput,
+  nextKeyboardCamp,
+} from '../utils/keyboardBinding';
+import { isInputRuleHost } from '../utils/inputAnswerRules';
+import { applyQuickTemplateConfirmDefaults } from '../utils/quickTemplateConfirm';
 
 const QUICK_PRESET_BUTTONS: Array<{ kind: QuickPresetKind; label: string }> = [
   { kind: 'confirm', label: '确定' },
@@ -103,9 +114,14 @@ function getMatchingLayout(direction: 0 | 1 | 2): MatchingLayout {
   ] };
 }
 
-export default function ElementToolbar() {
+interface ElementToolbarProps {
+  onCreateText?: () => void;
+}
+
+export default function ElementToolbar({ onCreateText }: ElementToolbarProps) {
   const { language } = useI18n();
   const addElement = useEditorStore((s) => s.addElement);
+  const updateElement = useEditorStore((s) => s.updateElement);
   const selectElement = useEditorStore((s) => s.selectElement);
   const frozen = useEditorStore((s) => {
     const course = s.currentCourse;
@@ -126,123 +142,47 @@ export default function ElementToolbar() {
   });
     const [activeTab, setActiveTab] = useState('commonComponents');
   const [keyboardDialogOpen, setKeyboardDialogOpen] = useState(false);
+  const [pendingKeyboardInputId, setPendingKeyboardInputId] = useState<string | null>(null);
+  const [pendingKeyboardInputType, setPendingKeyboardInputType] = useState<string | null>(null);
   const [quickPresetOpen, setQuickPresetOpen] = useState(false);
   const [quickPresetKind, setQuickPresetKind] = useState<QuickPresetKind>('confirm');
   const [quickPresetBusy, setQuickPresetBusy] = useState(false);
+  const [spinePresetOpen, setSpinePresetOpen] = useState(false);
 
-  const handleAdd = (type: string) => {
-    if (frozen) return;
-    const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
-    if (type === 'KlBaseKeyboard') {
-      setKeyboardDialogOpen(true);
-      return;
-    }
-    if (type === 'NewBrushSprite') {
-      handleAddBrush();
-      return;
-    }
-    const element = createDefaultElement(type, subPageId);
-
-    // 输入框组件：自动绑定或创建键盘2
-    if (type === 'KlInputImage') {
-      const course = useEditorStore.getState().currentCourse;
-      let existingKbCamp: string | undefined;
-      if (course && subPageId) {
-        for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-          for (const page of stage.subPages) {
-            if (page.id !== subPageId) continue;
-            const active = findActiveElementPage(course, page.id, useEditorStore.getState().currentInternalPageId);
-            for (const el of active?.elements ?? []) {
-              const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-              if (el.type === 'KlBaseKeyboard' && p?._keyboardPreset?.id === 'preset2') {
-                existingKbCamp = typeof p.camp === 'string' ? p.camp : undefined;
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      if (existingKbCamp) {
-        // 画布上已有键盘2，直接绑定
-        element.props = { ...element.props, camp: existingKbCamp };
-      } else {
-        // 画布上没有键盘2，自动创建一个并绑定
-        const preset2 = KEYBOARD_PRESETS.find(p => p.id === 'preset2');
-        if (preset2) {
-          let maxIdx = 0;
-          if (course) {
-            const re = new RegExp(`^${preset2.campPrefix}-(\\d+)$`);
-            for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-              for (const page of stage.subPages) {
-                for (const elementPage of getElementPages(page)) for (const el of elementPage.elements) {
-                  const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-                  if (p?._keyboardPreset?.id !== preset2.id) continue;
-                  const camp = typeof p.camp === 'string' ? p.camp : '';
-                  const m = camp.match(re);
-                  if (m) {
-                    const n = parseInt(m[1], 10);
-                    if (n > maxIdx) maxIdx = n;
-                  }
-                }
-              }
-            }
-          }
-          const kbCamp = `${preset2.campPrefix}-${maxIdx + 1}`;
-          const kbElement = createDefaultElement('KlBaseKeyboard', subPageId);
-          kbElement.width = preset2.defaultSize.width;
-          kbElement.height = preset2.defaultSize.height;
-          // 放在画布底部居中，避免与输入框重叠
-          kbElement.x = Math.round((1920 - preset2.defaultSize.width) / 2);
-          kbElement.y = 1080 - preset2.defaultSize.height;
-          kbElement.props = {
-            ...preset2.defaultProps,
-            camp: kbCamp,
-            _keyboardPreset: { id: preset2.id },
-          };
-          const kbObj = createLayaComponent(kbElement);
-          if (kbObj) registerObject(kbElement.id, kbObj);
-          addElement(kbElement);
-          element.props = { ...element.props, camp: kbCamp };
-        }
-      }
-    }
-
-    const obj = createLayaComponent(element);
-    if (obj) registerObject(element.id, obj);
-    addElement(element);
-    selectElement(element.id, false);
+  const findExistingKeyboardCamp = (presetId: string, inputType: string): string | undefined => {
+    const state = useEditorStore.getState();
+    const page = findActiveElementPage(state.currentCourse, state.currentSubPageId, state.currentInternalPageId);
+    const keyboards = (page?.elements ?? []).filter((element) =>
+      element.type === 'KlBaseKeyboard' && keyboardSupportsInput(element, inputType, page?.elements ?? []));
+    const keyboard = keyboards.find((element) => keyboardPresetId(element, page?.elements ?? []) === presetId)
+      ?? keyboards.find((element) => !keyboardPresetId(element, page?.elements ?? []));
+    if (!keyboard || !page) return undefined;
+    const existingCamp = keyboardCamp(keyboard);
+    if (existingCamp) return existingCamp;
+    const camp = nextKeyboardCamp(page.elements);
+    updateElement(keyboard.id, { props: { ...keyboard.props, camp } });
+    return camp;
   };
 
-  const handlePresetSelected = (preset: KeyboardPreset) => {
-    // 直接从 store 取最新状态，避免 closure 捕获到旧 currentCourse 导致 camp 编号不递增
+  const addKeyboardFromPreset = (preset: KeyboardPreset, shouldSelect: boolean): string => {
     const state = useEditorStore.getState();
-    const course = state.currentCourse;
-    const currentStageId = state.currentStageId;
     const currentSubPageId = state.currentSubPageId;
     let maxIdx = 0;
-    if (course && currentStageId && currentSubPageId) {
+    if (state.currentCourse && currentSubPageId) {
       const re = new RegExp(`^${preset.campPrefix}-(\\d+)$`);
-      // 只扫描当前 subPage（小关卡），每个 subPage 内 camp 编号独立
-      const currentStage = [...course.stages, ...(course.previewStages ?? [])].find(s => s.id === currentStageId);
-      const currentPage = currentStage?.subPages.find(p => p.id === currentSubPageId);
-      if (currentPage) {
-        const active = findActiveElementPage(course, currentPage.id, state.currentInternalPageId);
-        for (const el of active?.elements ?? []) {
-          const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-          if (p?._keyboardPreset?.id !== preset.id) continue;
-          const camp = typeof p.camp === 'string' ? p.camp : '';
-          const m = camp.match(re);
-          if (m) {
-            const n = parseInt(m[1], 10);
-            if (n > maxIdx) maxIdx = n;
-          }
+      const page = findActiveElementPage(state.currentCourse, currentSubPageId, state.currentInternalPageId);
+      for (const element of page?.elements ?? []) {
+        const props = element.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
+        if (props?._keyboardPreset?.id !== preset.id) continue;
+        const match = String(props.camp ?? '').match(re);
+        if (match) {
+          const index = Number(match[1]);
+          if (index > maxIdx) maxIdx = index;
         }
       }
     }
     const camp = `${preset.campPrefix}-${maxIdx + 1}`;
     const subPageId = currentSubPageId ?? undefined;
-
     const element = createDefaultElement('KlBaseKeyboard', subPageId);
     element.width = preset.defaultSize.width;
     element.height = preset.defaultSize.height;
@@ -254,8 +194,99 @@ export default function ElementToolbar() {
     const obj = createLayaComponent(element);
     if (obj) registerObject(element.id, obj);
     addElement(element);
+    if (shouldSelect) selectElement(element.id, false);
+    return camp;
+  };
+
+  const handleAdd = (type: string) => {
+    if (frozen) return;
+    if (type === 'NewTextArea') {
+      onCreateText?.();
+      return;
+    }
+    const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
+    if (type === 'KlBaseKeyboard') {
+      setPendingKeyboardInputId(null);
+      setPendingKeyboardInputType(null);
+      setKeyboardDialogOpen(true);
+      return;
+    }
+    if (type === 'Spine') {
+      setSpinePresetOpen(true);
+      return;
+    }
+    if (type === 'NewBrushSprite') {
+      handleAddBrush();
+      return;
+    }
+    const element = createDefaultElement(type, subPageId);
+    let needsKeyboardChoice = false;
+
+    if (type === 'KlInputImage') {
+      const preset = KEYBOARD_PRESETS.find((item) => item.id === 'preset2');
+      if (preset) {
+        const camp = findExistingKeyboardCamp(preset.id, type);
+        if (camp) element.props = { ...element.props, camp };
+        else needsKeyboardChoice = true;
+      }
+    }
+
+    if (type === 'FractionInput') {
+      const preset = KEYBOARD_PRESETS.find((item) => item.id === 'fraction');
+      const camp = preset ? findExistingKeyboardCamp(preset.id, type) : undefined;
+      if (camp) element.props = { ...element.props, camp };
+      else needsKeyboardChoice = true;
+    }
+
+    const obj = createLayaComponent(element);
+    if (obj) registerObject(element.id, obj);
+    addElement(element);
     selectElement(element.id, false);
+    if (needsKeyboardChoice) {
+      setPendingKeyboardInputId(element.id);
+      setPendingKeyboardInputType(type);
+      setKeyboardDialogOpen(true);
+    }
+  };
+
+  const handlePresetSelected = (preset: KeyboardPreset) => {
+    if (pendingKeyboardInputId) {
+      const camp = addKeyboardFromPreset(preset, false);
+      const page = currentElementPage();
+      const input = page?.elements.find((element) => element.id === pendingKeyboardInputId);
+      if (input) {
+        updateElement(input.id, {
+          props: applyKeyboardBindingProps(input.props as Record<string, unknown> | undefined, camp, preset.id),
+        });
+      }
+      selectElement(pendingKeyboardInputId, false);
+      setPendingKeyboardInputId(null);
+      setPendingKeyboardInputType(null);
+      setKeyboardDialogOpen(false);
+      return;
+    }
+
+    addKeyboardFromPreset(preset, true);
     setKeyboardDialogOpen(false);
+  };
+
+  const handleKeyboardDialogClose = () => {
+    if (pendingKeyboardInputId) {
+      showToast('输入框已保留，请在属性面板中绑定键盘', 'warning');
+      setPendingKeyboardInputId(null);
+      setPendingKeyboardInputType(null);
+    }
+    setKeyboardDialogOpen(false);
+  };
+
+  const handleSpinePresetSelected = (preset: SpinePreset) => {
+    const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
+    const element = applySpinePreset(createDefaultElement('Spine', subPageId), preset);
+    const obj = createLayaComponent(element);
+    if (obj) registerObject(element.id, obj);
+    addElement(element);
+    selectElement(element.id, false);
+    setSpinePresetOpen(false);
   };
 
   /** 翻页组件:一次创建 PageTurnBox + 第一页 ContainerBox + 左/右箭头 + 第一页标签按钮 */
@@ -364,7 +395,6 @@ export default function ElementToolbar() {
     const choiceBox = createDefaultElement('ChoiceBox', subPageId);
 
     const optionNames = ['a', 'b', 'c', 'd'];
-    const optionFgSkins = ['selectableObj.btn1', 'selectableObj.btn2', 'selectableObj.btn3', 'selectableObj.btn4'];
     const positions = [
       { x: 343, y: 938 }, { x: 714, y: 938 },
       { x: 1085, y: 938 }, { x: 1456, y: 938 },
@@ -374,8 +404,17 @@ export default function ElementToolbar() {
       opt.name = name;
       opt.x = positions[i].x;
       opt.y = positions[i].y;
+      opt.width = 237;
+      opt.height = 77;
       opt.parentId = choiceBox.id;
-      opt.props = { ...opt.props, _foregroundSkin: assetExport(optionFgSkins[i]) };
+      opt.props = {
+        ...opt.props,
+        _foregroundSkin: assetExport('choiceOption.normal'),
+        _pressedSkin: assetExport('choiceOption.pressed'),
+        _bgSkin: assetExport('choiceOption.selected'),
+        _correctSkin: assetExport('choiceOption.correct'),
+        _wrongSkin: assetExport('choiceOption.wrong'),
+      };
       return opt;
     });
 
@@ -405,12 +444,14 @@ export default function ElementToolbar() {
 
     // 正课：保留 ConfirmButton 原逻辑
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{
       id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       event: 'onClickInitConfirmWithLock',
       targetId: choiceBox.id,
+      targetNameSnapshot: choiceBox.name,
       actionType: 'toggleVisible',
       groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     }];
@@ -442,25 +483,10 @@ export default function ElementToolbar() {
     const subPageId = useEditorStore.getState().currentSubPageId ?? undefined;
     const isFlat = isFlatLesson(course?.kind);
 
-    // 查找或创建键盘2
-    let kbCamp: string | undefined;
-    if (course && subPageId) {
-      for (const stage of [...course.stages, ...(course.previewStages ?? [])]) {
-        for (const page of stage.subPages) {
-          if (page.id !== subPageId) continue;
-          const active = findActiveElementPage(course, page.id, useEditorStore.getState().currentInternalPageId);
-          for (const el of active?.elements ?? []) {
-            const p = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
-            if (el.type === 'KlBaseKeyboard' && p?._keyboardPreset?.id === 'preset2') {
-              kbCamp = typeof p.camp === 'string' ? p.camp : undefined;
-              break;
-            }
-          }
-        }
-      }
-    }
+    // 优先复用当前页面已有的兼容键盘（包括没有 _keyboardPreset 的旧键盘）。
+    const preset2 = KEYBOARD_PRESETS.find(p => p.id === 'preset2');
+    let kbCamp: string | undefined = preset2 ? findExistingKeyboardCamp(preset2.id, 'KlInputImage') : undefined;
     if (!kbCamp) {
-      const preset2 = KEYBOARD_PRESETS.find(p => p.id === 'preset2');
       if (preset2) {
         let maxIdx = 0;
         if (course) {
@@ -533,12 +559,14 @@ export default function ElementToolbar() {
 
     // 正课：创建确定按钮（顶级元素，与 KlInputBox 同级）
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{
       id: crypto.randomUUID?.() ?? `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       event: 'onClickInitConfirmWithLock',
       targetId: inputBox.id,
+      targetNameSnapshot: inputBox.name,
       actionType: 'toggleVisible',
       groupId: crypto.randomUUID?.() ?? `g-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     }];
@@ -625,6 +653,7 @@ export default function ElementToolbar() {
     // 7. 正课/预习：创建 ConfirmButton 并绑定 onClickInitGameConfirmWithLock
     if (!isFlat) {
       const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+      applyQuickTemplateConfirmDefaults(confirmBtn);
       confirmBtn.x = 1666;
       confirmBtn.y = 960;
       confirmBtn.actions = [{
@@ -700,6 +729,7 @@ export default function ElementToolbar() {
 
     // 正课/预习：创建 ConfirmButton，绑 onClickInitGameConfirmWithLock，target 指向 DragViewBox
     const confirmBtn = createDefaultElement('ConfirmButton', subPageId);
+    applyQuickTemplateConfirmDefaults(confirmBtn);
     confirmBtn.x = 1666;
     confirmBtn.y = 960;
     confirmBtn.actions = [{
@@ -766,7 +796,7 @@ export default function ElementToolbar() {
       if (kind === 'confirm') {
         const element = createDefaultElement('ConfirmButton', subPageId);
         await applyPresetImage(element, courseId, preset, 'skin');
-        const target = pageContext.elements.find((item) => item.type === 'KlInputBox' || item.layaType === 'ChoiceBox')
+        const target = pageContext.elements.find((item) => isInputRuleHost(item) || item.layaType === 'ChoiceBox')
           ?? pageContext.elements.find((item) => item.type === 'DragViewBox' || item.type === 'MatchingGame');
         if (target) {
           const isGame = target.type === 'DragViewBox' || target.type === 'MatchingGame';
@@ -774,6 +804,7 @@ export default function ElementToolbar() {
             id: makeId('action'),
             event: isGame ? 'onClickInitGameConfirmWithLock' : 'onClickInitConfirmWithLock',
             targetId: target.id,
+            targetNameSnapshot: target.name,
             actionType: 'toggleVisible',
             groupId: makeId('group'),
           }];
@@ -953,8 +984,11 @@ export default function ElementToolbar() {
 
       <KeyboardPresetDialog
         open={keyboardDialogOpen}
-        onClose={() => setKeyboardDialogOpen(false)}
+        onClose={handleKeyboardDialogClose}
         onSelect={handlePresetSelected}
+        presets={pendingKeyboardInputType
+          ? KEYBOARD_PRESETS.filter((preset) => preset.compatibleInputTypes.includes(pendingKeyboardInputType))
+          : KEYBOARD_PRESETS}
       />
       {quickPresetOpen && (
         <QuickPresetDialog
@@ -962,6 +996,12 @@ export default function ElementToolbar() {
           busy={quickPresetBusy}
           onClose={() => setQuickPresetOpen(false)}
           onSelect={handleQuickPresetSelected}
+        />
+      )}
+      {spinePresetOpen && (
+        <SpinePresetDialog
+          onClose={() => setSpinePresetOpen(false)}
+          onSelect={handleSpinePresetSelected}
         />
       )}
     </div>

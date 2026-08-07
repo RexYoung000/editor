@@ -1,6 +1,6 @@
 # 导出流程
 
-forge 编辑器的导出流程由 Toolbar 上两个按钮触发，**前段共用** `exportProject`，**尾段在 SVN/编译两条岔路上分开**。本文档先按按钮拉两条主线讲尾段差异，再展开共用核心。
+forge 编辑器的导出流程由 Toolbar 上发布与预览入口触发，**工程生成共用** `exportProject`，之后分别进入发布窗口或本地编译预览。本文档先按入口说明两条主线，再展开共用核心。
 
 ---
 
@@ -8,8 +8,8 @@ forge 编辑器的导出流程由 Toolbar 上两个按钮触发，**前段共用
 
 | 触发 | 调用 | 关键差异 |
 |---|---|---|
-| **发布工程** ([Toolbar.tsx:222-242](../src/components/Toolbar.tsx#L222-L242)) | `exportProject(course)` | 走完整 SVN 提交 + WebSocket 通知打包机 |
-| **预览** ([Toolbar.tsx:251-274](../src/components/Toolbar.tsx#L251-L274)) | `exportProject(course, { skipSvn: true })` → `compileBuild` → `zipDirectory` → `POST /api/upload-compiled-zip` → `window.open` | 跳过 SVN，本地 Electron 编译后上传 Vite，浏览器开 GameLoader |
+| **发布工程** ([Toolbar.tsx](../src/components/Toolbar.tsx)) | 打开统一发布窗口；确认预览后由窗口调用 `exportProject(course, { cleanBuildOutput: true })` | 生成、校验、SVN 提交，再通知打包机 |
+| **预览** ([Toolbar.tsx](../src/components/Toolbar.tsx)) | `exportProject(course)` → `compileBuild` → `zipDirectory` → `POST /api/upload-compiled-zip` → `window.open` | 本地 Electron 编译后上传 Vite，浏览器开 GameLoader，不接触 SVN |
 
 两条流程都先跑**前置检查（资源就绪检查）**，再跑导出共用部分（`writeBackToLocalFile` 写回课件 JSON → `cleanupUnreferencedImages` 清未引用图 → 实际导出）。
 
@@ -44,16 +44,12 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 ## 二、发布工程
 
-`runPublishFlow` 直接调 `exportProject(currentCourse)`，跑完整流水线：
+老师发布不再要求当前可编辑课件本身位于 SVN 工作副本。工具栏先打开统一发布窗口，由窗口完成最新预览确认、SVN 目标确认、工程生成、课件级工作副本同步、commit 和现有打包机通知。完整产品规则、身份保护和失败恢复见 [老师课件发布流程](course-publishing.md)。
 
-1. **共用核心**：清理 `project/<courseId>/` + `esBuild/` → `bakeTextElements` → `collectResources` → `enrichAnimAudioResources` → `collectImageSizes` → 按 `course.kind` 走 normal 或 homework 分支（详见三、四）→ 有预习关卡则调 `exportPreviewProject`
-2. **SVN 提交**（`options.skipSvn` 为 false 才走，[exportProject.ts:1431-1464](../src/utils/exportProject.ts#L1431-L1464)）：
-   - `eApi.isSvnDirectory(dirPath)` 判断课件目录是否在 SVN 仓库下，不是直接 return
-   - `eApi.svnCommit(dirPath)` 弹 SVN 提交对话框，用户取消即抛错中止发布
-   - `eApi.svnHasUnversioned(dirPath)` 检查是否还有未加入版本控制的文件，有就要求重新发布
-   - `eApi.getSubdirs(${dirPath}/project/${course.id})` 拿到所有子工程目录（`Game1_LT` / `Game1_HW` / `Game1_PREVIEW`），对每个走 `eApi.svnGetUrl()` 拿 SVN URL
-   - 有预习时把 `Game1_PREVIEW` 的 URL **unshift 到首位**（打包机约定首位是项目根路径）
-   - `loadWsConfig()` + `sendCourseToServer(course.id, svnPaths, ...)` 通过 WebSocket 通知后端打包机
+1. **共用核心**：`exportProject(course)` 清理 `project/<courseId>/`，烘焙编辑内容，收集资源并生成当前课型需要的完整 `Game1_*` 工程；正式发布额外传入 `{ cleanBuildOutput: true }` 清理旧编译产物，复习课也进入同一工程生成入口。
+2. **预览一致性**：预览后按范围记录完整工程目录指纹；正式发布重新生成并逐项比对，避免确认后发布了不同内容。
+3. **SVN 发布**：Electron 发布服务只把身份文件和完整 `Game1_*` 同步到老师确认的最终课件目录，取得 revision 后返回工程 SVN URL；普通课件存在预习时 `Game1_PREVIEW` 仍位于 `devSVNPaths` 首位。
+4. **打包通知**：渲染进程通过现有 `integrationRequest` 发送工程 URL。请求成功发送即显示“发布已提交”，后续可获得的文本反馈继续更新为成功或明确失败。
 
 ---
 
@@ -61,7 +57,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 入口 [Toolbar.tsx:124-157](../src/components/Toolbar.tsx#L124-L157) 的 `runCompileBuildAndOpen(previewMode)`：
 
-1. **`exportProject(course, { skipSvn: true })`** ← 跑核心导出但跳过 SVN（导出完直接 return，不动 SVN/WebSocket）
+1. **`exportProject(course)`** ← 只生成完整工程，不动 SVN 或 WebSocket
 2. **`compileBuild(course)`** Electron IPC：调 `layaair2-cmd` + `esbuild` 把 sdk_baiya 工程编译成 `bin/`，产出包含 `index.html` 的可运行目录
    - 实现细节参见 [docs/electron-packaging.md](electron-packaging.md)（pnpm 符号链接 / `ELECTRON_RUN_AS_NODE` / 轮询 `fileconfig.json` 等坑）
 3. **`window.electronAPI.zipDirectory(outputDir)`** Electron 把编译产物打成 zip Buffer（dev 服务器约定 300MB 上限）
@@ -72,6 +68,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
    - `cn` = `test_<teacherId>_<courseId>`（无 teacherId 时退化成 `test_<courseId>`）
    - `previewMode=true` 时在 `cn` 后追加 `_preview` 后缀，URL 指向 `Game1_PREVIEW` 工程
    - URL 拼接前对 `forge_server_url` 做 `.replace(/\/+$/, '')` 去尾斜杠，避免双斜杠破坏 middleware 匹配
+   - `sdk=full` 保留完整 cursor 同步链路；该模式不会再加载数学学科 SDK，因此豌豆精灵通用反馈的胜利、失败和遗憾音效由 `share/sdk/sdk_baiya.js` 自身绑定
+   - 动作和场景导出只触发 SDK 通用反馈，不重复注入正确或错误音效
 
 > **预习关卡选择对话框**：当课件有 `previewStages.length > 0` 时，预览按钮先弹「预习关卡 / 正常关卡」二选一，**只决定 URL 后缀**，不影响 `exportProject` 导出哪几个工程（永远全导）。
 
@@ -93,9 +91,21 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 [exportProject.ts:21-44](../src/utils/exportProject.ts#L21-L44)。`structuredClone` 深拷 course，把所有 `NewTextArea` 元素就地替换成 `Image`，`skin` = `renderTextToImage` 渲染出的 `data:image/png;base64,...`。后续流程对它一无所知，data URL 走 `data:image` 通道。
 
+文本的编辑器画布、编辑结束后的画布、编辑器预览和正式导出共享同一套字体测量、换行、行高、粗体/斜体和尺寸模式规则。编辑态只暂时覆盖底层文本图像，退出编辑时一次提交文本与自动计算后的尺寸；预览和导出继续使用同一 PNG 烘焙路径。这样不会出现“编辑器看起来能放下、预览或发布却换行/裁切不同”的三套排版结果。
+
+字体选择与默认值以 [字体库与历史兼容](font-library.md) 为准。历史课件中的旧方正字体 ID 会在进入编辑器时迁移为“思源黑体 Regular”，字体解析入口也执行同一缺省归一化；导出只携带烘焙后的 PNG，不携带或动态加载 OTF/TTF。
+
+### 4.1.1 输入框字体图烘焙
+
+`bakeCourseAssets` 在同一份课程副本中统一烘焙 `KlInputImage`、`FractionInput` 和自定义答案键盘的文字资源。显式配置了新输入框文字主题的组件按“字符表 + 黄色/蓝色/绿色主题 + 当前比例字号”生成横向 FontClip PNG，并把运行时需要的 `fontClipSkin`、`sheet`、单元宽高、字符间距与缩放参数写入副本。一个字符间距值统一控制连续字符、分子分母和字符与分数结构之间的间隔，并与字号一起按框体比例缩放。分数输入框还把独立分数字号比例转换为分子分母缩放、分数线宽度和纵向结构比例，默认 `64%`；普通输入框和分数输入框必须调用同一套样式与字形生成器，自定义答案键盘只提供答案字符集合，不能覆盖输入框自己的主题。
+
+生成结果仍是 `data:image/png;base64,...`，因此继续通过统一资源收集、路径重写和写盘链路进入 Electron 预览与正式工程，不在课件运行时加载字体文件。输入框字号弹窗保存的测试样例属于 `_` 前缀编辑器配置，在构建 scene 前剥离；它不得成为 `fontClipValue`、正确答案或运行时资源。没有新主题字段的历史输入框跳过这一步，保留原 `fontClipSkin` 和旧显示行为。
+
 ### 4.2 资源收集 `collectResources(course, viewDir, stages, options)`
 
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程共用该入口，通过 `viewDir` 和待遍历 stages 决定课程命名空间，遍历所有元素的 `props` / `actions` / `exportChildren` / `_keyboardPreset.children`，产出 `Map<src, dest>`：
+
+视频关卡在创建或替换时已经按 [视频关卡来源选择](video-stage-selection.md) 把预设、本地或资源库 MP4 统一落入当前课件目录。导出只读取实际 `videoUrl`，不能扫描或整批复制内置预设目录。
 
 | src 形态 | 落点（`viewDir = game_lt` 为例） | 说明 |
 |---|---|---|
@@ -124,12 +134,15 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 [exportProject.ts](../src/utils/exportProject.ts)。正式工程与预习工程统一从 `buildScene` 进入，复用变量分配、包装节点和特殊组件子节点规则；课程类型只传入不同 `viewDir` 和场景名。节点构建遍历元素树产出 LayaAir Designer 风格结构（`{x, type, searchKey, label, compId, nodeParent, props, child}`）。特殊行为：
 
 - **DragObj/DropObj 锚点 0.5 补偿**：sdk_baiya 运行时构造函数强制 `anchorX=0.5, anchorY=0.5`（中心锚点），编辑器 `element.x/y` 是左上角。导出时 `props.x = element.x + element.width / 2`、y 同理，让 Laya 可见左上角与编辑器一致
-- **SelectableObj 双 skin 拆子节点**：`_foregroundSkin` 和 `_bgSkin` 拆成两个 Image 子节点（`name='img'` / `name='bg'`），用 `left/top/right/bottom = 0` 撑满
+- **普通图片镜像补偿**：`Image` / `NewImage` 的 `mirrorX`、`mirrorY` 是课程中的编辑状态，不直接写入 scene。导出时转换为 `scaleX=-1` / `scaleY=-1`，再按图片尺寸、锚点和自身旋转方向补偿 `x/y`；镜像前后的可见外框和选区位置必须一致，正式与预习工程复用同一规则
+- **选择题 SelectableObj 五态拆子节点**：`_foregroundSkin`、`_pressedSkin`、`_bgSkin`、`_correctSkin`、`_wrongSkin` 分别生成通常、按压、选中、正确、错误图层；状态图层互斥，底框和描边使用九宫格横向拉伸
 - **DragObj `dropSkin` → 第二个 Image 子节点**：`visible: false`，`anchorX/Y = 0.5`，运行时由 `EVENT_SUCCESS` 切换显隐
 - **DropObj `tipSkin` → name=tip Image 子节点**：同时设置 `props.isNeedTip = true`；没有 tipSkin 时显式 `isNeedTip = false`
 - **`exportChildren` 注入**：从 `elementMeta.exportChildren` 或 `_keyboardPreset.children` 读固定子节点（如 KlInputImage 的三层皮肤），递归 `cloneFixed` 克隆
 - **`_` 前缀 props 一律剥掉**（编辑器专用）；`runtime` / `hidden` / `blockThrough` 不写入 scene
 - **ChoiceBox 的 `mouseEnabled` 不导出**，由 runtime 内部控制
+- **ChoiceBox 答案转换**：编辑器 `_correctOptionIds` 不进入 scene；导出时按直属选项当前名称生成 `rightItemNames`，并按答案数量生成 `upperLimit`（1 个为单选，2 个及以上为不限数量多选）
+- **选项文字点击穿透**：选择题选项内部 Label 强制 `mouseEnabled=false, mouseThrough=true`，点击文字区域仍由选项元素接收
 - **`var` 缺失时自动用 `name`** 补齐
 - 子节点顺序：`selectableObjChildren + dragSkinChildren + fixedChildren + userChildren`
 
@@ -153,11 +166,13 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 [exportProject.ts:639-853](../src/utils/exportProject.ts#L639-L853)。`generateSceneTs(sceneName, flags, page, resourceMap, uiNamespace='game_lt')` 产出每个场景对应的 ts 文件，模板继承 `ui.<viewDir>.<sceneName>UI`，在 `initView(byReset)` 内拼装：
 
-1. **`GameUtils.initConfirm`**：当 `flags.hasBtnConfirm && hasKlInputBox` 时插入，把 `_btnConfirm` / `_klInputBox` / `_lockBox` 串起来
-2. **`btn_ok` + `choiceBox` 对错音效**（`hasBtnOk && hasChoiceBox`）：点击 `btn_ok` 时根据 `choiceBox.isRight` 播 `<viewDir>/sound/right.mp3` 或 `wrong.mp3`，错时还调 `cancelAllSel()` 取消选中
+1. **确认判定初始化**：根据确认按钮指向的目标生成 `GameUtils.initConfirm`、`GameUtils.initChoiceBoxConfirm` 或结构化填空判定；正课与预习共用同一目标规则
+2. **ChoiceBox 五态运行时**：选项点击只更新选择与黄色描边；确认后用绿/红描边替换。正确后锁定，错误后下一次修改清除结果；作业和专题测评只在通用提交读取 `result` 时应用结果
 3. **`PageTurnBox` 翻页 JS**：每个翻页组生成 `var _ptPages_<gid> = [...]; var _ptIndex_<gid> = ...; var _ptTotal_<gid> = ...;` + 左右按钮的 `Event.CLICK` 切换 visible
 4. **`DragObj` 带 `dropSkin` 的 `EVENT_SUCCESS / EVENT_FAILD` 监听**：找最近的 `DragViewBox` 祖先节点，挂事件——成功时切换 `slcDragObj.getChildAt(0/1)` 的 visible 实现 dropSkin 切换，失败时回滚
 5. **用户 Action 映射表 + `buildActionBody`**：
+
+普通事件绑定由正课、预习、作业和专题测评共享：`onClick`、`onClickSound`、`onLoad`、`onChange` 统一按元素和事件分组，每组只生成一个监听，再在监听中顺序执行动作。`onClickSound` 每次事件只在动作序列前播放一次点击音效。内部页面动作、SDK 判定、PageTurnBox 翻页和其他专项动作从普通事件序列中排除，由对应编译器单独生成，避免重复监听。
 
 | forge `event` | Laya 事件 | 备注 |
 |---|---|---|
@@ -182,7 +197,11 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 | `animate`（Spine 目标）| `t.play(value, loop)`，`spineLoop !== 'false'` 时循环 |
 | `animate`（其他目标）| `t.play(value ?? 'shan')` |
 
-**Homework 模板** `generateHomeworkSceneTs`：极简，只有 `super.initView(byReset)` 和占位的 `_result` / `checkResult` getter/setter，没有任何 action / 翻页逻辑（作业模式由 sdk_baiya 的作业题型类自行处理交互）。
+**Homework 模板** `generateHomeworkSceneTs`：继承 `ui.game_hw` 并保留 `_result` / `checkResult` getter/setter，同时复用上述普通事件绑定。题型组件继续通过 `onChoiceJudge`、`onInputJudge`、`onDragJudge`、`onMatchingJudge` 接入结果；显式 `onClickSdkJudge` 继续生成点击监听。除此之外，导出器会收集不属于答题判定容器且配置了非空 `_judgeAnswer` 的 `KlInputImage` / `FractionInput`，在 `checkResult()` 中按“任一未填为 `null`、全部填写且全对为 `true`、全部填写但任一错误为 `false`”聚合。未配置答案的普通输入控件不会进入判定，编辑器专用 `_judgeAnswer` 仍不写入 scene。
+
+配置了多候选答案或 `_inputRelations` 的 `KlInputBox`，以及显式开启“启用答题判定”的 `ContainerBox`，会在正常、作业和预习场景的 `initView()` 中注入实例级判定：`isNull()` 统一检查该组全部输入格，`isRight()` 将未关联空位的候选答案判断与两框算式关系判断做 AND 聚合。输入格只归属最近的答题判定容器，嵌套容器不会重复收集。关系支持加、减、乘、除和相等，小数使用稳定容差，简单分数转换为数值后参与计算。被引用输入格会强制生成 scene `var`，编辑器专用候选、关系和容器开关字段仍从 scene 剥离。这样通用点击判定、`GameUtils.initConfirm` 和作业 `checkResult()` 无需建立平行入口即可得到同一结果；失效引用、重复占用、无效目标或无规则空位会在预览与发布前中止并返回可修复信息。
+
+快捷确定按钮引用 `KlInputBox` 时继续生成 `GameUtils.initConfirm`；引用启用答题判定的 `ContainerBox` 时改为生成通用三态点击监听，直接调用容器已注入的 `isNull()` / `isRight()`，并按事件配置执行默认正确、错误反馈和锁屏。失效的确认目标在工程生成前统一校验并阻止继续，不能静默跳过监听代码。
 
 ### 4.10 `finalConfig.json`
 
@@ -196,6 +215,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
     - `<viewDir>/image/...`：`isLargeImage` 为 true → push `{url, type:'image'}` 单文件；为 false → 把 `parts[2]`（一级子目录名）加入 `imageDirs`
     - `<viewDir>/sound/...`：单独 push `{url, type:'sound'}`
     - `<viewDir>/animation/<...>.sk`：push `{url}` + 同目录 `.png` push `{url, type:'image'}`
+
+正常课、作业、专题测评和预习的普通场景都必须同时扫描两类固定子节点资源：`elementMeta.exportChildren` 与 `getKeyboardChildren(element)`。前者承载 `KlInputImage` 等组件的输入框底图，后者承载键盘预设的动态按键与底板；任何课程类型漏掉其中一类，编译后都可能出现“场景节点存在，但对应图集未预加载、组件不可见”的结果。复习课当前只生成视频配置，不导出题目场景，因此不进入这项资源一致性约束。
   - 末尾 `imageDirs.forEach(dir => res.push({url: 'res/atlas/<viewDir>/image/<dir>.atlas'}))`
   - 内置音效条件加入：扫 stage 内所有 actions，**用到 `onClickSound`** → 加 `<viewDir>/sound/btn_click.wav`；**有 `playRightSound`** → 加 `right.mp3`；**有 `playWrongSound`** → 加 `wowo.mp3`（preview 是 `wrong.mp3`）
 
@@ -205,6 +226,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 
 1. **工程模板**：`Game1_LT.zip` / `Game1_HW.zip` / `Game1_PREVIEW.zip` 解压到 `${dirPath}/project/<cid>/Game1_XX/`，`pathMapper` 不传，整包还原
 2. **`game.zip` 内置资源**：`collectGameZipFiles(resourceMap)` 算出**实际被引用**的精确路径集合（去掉 `game/` 前缀），filter 命中才解压；引用路径和解压落点统一由同一映射决定：`sound/` → `<viewDir>/sound/`，`animation/` → `<viewDir>/animation/`，`image/` → `<viewDir>/image/img/`，其他图片目录 → `<viewDir>/image/<topDir>/`
+
+运行时组件源码属于工程模板，不属于 `game.zip` 素材包。以 `FractionInput` 为例，正课、作业和预习分别从三份模板中的 `src/view/*/Components/FractionInput.ts` 编译；修改该组件时必须同步三份源目录并执行 `node scripts/pack-template-zips.mjs`，否则开发预览和正式导出可能因使用旧模板而表现不一致。该类修复不应改动 `game.zip`，除非同时变更了 `public/builtin/runtime/game/` 下的素材。
 
 每个 zip entry 通过 `eApi.writeBinaryFile(destPath, base64)` IPC 写盘；空目录通过 `eApi.ensureDir` 创建。
 
@@ -232,18 +255,24 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 5. **`.ts` 模板** `generatePreviewSceneTs`：
    - **有** `GameUtils.initConfirm`、PageTurnBox 翻页、DragObj `EVENT_SUCCESS/FAILD`
    - **有** `onClickSdkJudge` 通用点击判定，复用与正式工程一致的目标能力和结果分支生成器
+   - **有**与正课、作业和专题测评共享的 `onClick`、`onClickSound`、`onLoad`、`onChange` 普通事件绑定
    - **无** `btn_ok + choiceBox` 对错音效绑定（preview 通常不出题判对错）
-   - 普通用户 Action 仍保持预习现有边界；内部页面动作和通用点击判定按明确入口生成
+   - 内部页面动作、PageTurnBox 翻页和通用点击判定按明确入口单独生成，不与普通事件重复绑定
 6. **`finalConfig.json`** `buildPreviewConfigJson`：
    - 顶层 `mode: 'preview'`，`feedback: 'spirit'`，无 `noVideoMystery`
-   - 视频关卡 `classType: 'yx'`
-   - 普通 page：`name: '预习<i+1>'`、`classType: 'yx'`，**无 subviews**（每个预习关卡单 page）
+   - 视频关卡保持单页配置，不生成 `subviews`
+   - 普通大关卡与正课使用相同的页面容器结构：每个 stage 生成一个 page，stage 内每个 subPage 生成一个独立场景并按顺序写入 `subviews`
+   - 第一个预习场景继续使用 `Game<i+1>` 名称以兼容既有单页工程；后续小关卡使用 `Game<i+1>_<j+1>`，每项 `classType: 'yx'`
+   - 运行时默认显示第一个 `subview`，继续由现有 PageView 协议上下切换小关卡；大关卡本身不额外生成场景
+   - 普通 page 的 `res` 与正式工程保持固定子节点资源边界一致：同时收集 `elementMeta.exportChildren` 和键盘预设 children，保证输入框底图与键盘皮肤对应图集都进入预加载清单
    - 内置音效中 wrong 文件名是 **`wrong.mp3`** 而非主流程的 `wowo.mp3`
    - 也有 `onClickSound → btn_click.wav` / `playRightSound → right.mp3` / `playWrongSound → wrong.mp3` 的条件加入
-7. **不做 SVN/WebSocket**：发布尾段统一在 `exportProject` 中处理
+7. **不做 SVN/WebSocket**：`exportProject` 只生成工程；发布窗口统一处理 SVN 与打包机通知
 8. **模板 zip**：从 `${serverUrl}/builtin/layaProjectModel/Game1_PREVIEW.zip` 单独拉
 
 内部页面编译、页面动作生成、关系校验和页面资源遍历由正式工程与预习工程共享，不能再各自维护一份规则。正课、作业、专题测评和预习区均支持 `internal-pages-v1`；复习课和视频关卡继续走原流程。
+
+普通课件复制大关卡后，预习与正课导出都必须按副本的完整 `subPages` 重新生成页面配置和场景；不得复用原关卡 ID、场景实例或内部页面引用。视频大关卡副本继续按独立视频 page 导出。
 
 ---
 

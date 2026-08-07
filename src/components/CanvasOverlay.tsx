@@ -1,14 +1,24 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { EditorLayerGroup, Element } from '../types';
 import { useEditorStore } from '../store/editorStore';
-import { getObject } from '../utils/layaBridge';
+import { getCourseResourceUrl } from '../utils/electronFs';
+import { applyElementTransform, getObject } from '../utils/layaBridge';
+import { applyNewTextAreaRender } from '../utils/laya/components';
 import { clientToWorld, worldRectToScreen } from '../utils/laya/selection';
 import { resolveElementFont } from '../utils/fontLoader';
+import { DEFAULT_FONT_FACE } from '../elements/fontLibrary';
+import { caretOffsetAtPoint, layoutText, normalizeTextSizingMode } from '../utils/textLayout';
+import type { RenderTextProps } from '../utils/textToImage';
+import { NEW_TEXT_DEFAULT_CONTENT } from '../elements/elementMeta';
 import {
   getElementWorldBounds,
+  getElementWorldMatrix,
+  invertMatrix,
+  transformPoint,
   type CanvasPoint,
 } from '../utils/canvasGeometry';
 import {
+  findCanvasPointerTarget,
   findTopElementAtPoint,
   getContainerIds,
   getSelectionContextContainerIds,
@@ -51,6 +61,7 @@ import {
   type SnapLocks,
   type SnapResult,
 } from '../utils/canvasSnap';
+import { isChoiceOption } from '../utils/choiceAnswerRules';
 import {
   createEqualSpacingItems,
   getDistanceHintBetweenRects,
@@ -123,6 +134,7 @@ interface MovePointer extends PointerBase {
   startWorld: CanvasPoint;
   transaction: MoveTransaction;
   clickSelection: string[] | null;
+  clickPrimaryId: string | null;
   duplicateOnDrag: boolean;
   duplicateIds: string[] | null;
   originalSelection: string[];
@@ -171,6 +183,11 @@ interface CanvasOverlayProps {
   showSnapGuides: boolean;
   distanceHintsEnabled: boolean;
   setEditingId: (id: string | null) => void;
+  textCaretPoint: { x: number; y: number } | null;
+  setTextCaretPoint: (point: { x: number; y: number } | null) => void;
+  selectAllTextOnEdit: boolean;
+  setSelectAllTextOnEdit: (value: boolean) => void;
+  onTextSessionEnd: (id: string) => void;
 }
 
 export default function CanvasOverlay({
@@ -186,7 +203,13 @@ export default function CanvasOverlay({
   showSnapGuides,
   distanceHintsEnabled,
   setEditingId,
+  textCaretPoint,
+  setTextCaretPoint,
+  selectAllTextOnEdit,
+  setSelectAllTextOnEdit,
+  onTextSessionEnd,
 }: CanvasOverlayProps) {
+  const hoveredElementId = useEditorStore((state) => state.hoveredElementId);
   const interactionRef = useRef<PointerInteraction | null>(null);
   const [localMarquee, setLocalMarqueeState] = useState<MarqueeState | null>(null);
   const localMarqueeRef = useRef<MarqueeState | null>(null);
@@ -196,6 +219,23 @@ export default function CanvasOverlay({
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [spacingHints, setSpacingHints] = useState<EqualSpacingHint[]>([]);
   const [distanceHint, setDistanceHint] = useState<DistanceHint | null>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textResizeFrameRef = useRef<number | null>(null);
+  const pendingTextResizeRef = useRef<{ element: Element; width: number; height: number } | null>(null);
+  const caretAppliedForRef = useRef<string | null>(null);
+  const committedTextSessionRef = useRef<string | null>(null);
+  const [textDraftState, setTextDraftState] = useState({ id: '', value: '' });
+  const editingTextId = editingElement?.type === 'NewTextArea' ? editingElement.id : null;
+  const textDraft = editingTextId && textDraftState.id === editingTextId
+    ? textDraftState.value
+    : editingElement?.type === 'NewTextArea'
+      ? String(editingElement.props.text ?? '')
+      : '';
+
+  useEffect(() => {
+    committedTextSessionRef.current = null;
+    caretAppliedForRef.current = null;
+  }, [editingTextId]);
   const worldRef = useRef(world);
   const currentPageRef = useRef(currentPage);
   const snapRef = useRef(snap);
@@ -215,6 +255,40 @@ export default function CanvasOverlay({
     setLocalMarqueeState(value);
   }, []);
 
+  const cancelTextResizePreview = useCallback(() => {
+    if (textResizeFrameRef.current !== null) {
+      cancelAnimationFrame(textResizeFrameRef.current);
+      textResizeFrameRef.current = null;
+    }
+    pendingTextResizeRef.current = null;
+  }, []);
+
+  const scheduleTextResizePreview = useCallback((element: Element, width: number, height: number) => {
+    const renderPreview = (pending: { element: Element; width: number; height: number }) => {
+      const object = getObject(pending.element.id);
+      if (!object) return;
+      object.width = pending.width;
+      object.height = pending.height;
+      applyNewTextAreaRender(object, {
+        ...pending.element,
+        width: pending.width,
+        height: pending.height,
+      });
+    };
+    if (textResizeFrameRef.current !== null) {
+      pendingTextResizeRef.current = { element, width, height };
+      return;
+    }
+    renderPreview({ element, width, height });
+    textResizeFrameRef.current = requestAnimationFrame(() => {
+      textResizeFrameRef.current = null;
+      const pending = pendingTextResizeRef.current;
+      pendingTextResizeRef.current = null;
+      if (!pending) return;
+      renderPreview(pending);
+    });
+  }, []);
+
   const [resolvedFont, setResolvedFont] = useState<{ elementId: string; fontFamily: string } | null>(null);
   useEffect(() => {
     if (!editingElement || editingElement.type !== 'NewTextArea') return;
@@ -229,13 +303,83 @@ export default function CanvasOverlay({
     ).then((fontFamily) => {
       if (!cancelled) setResolvedFont({ elementId: editingElement.id, fontFamily });
     }).catch(() => {
-      if (!cancelled) setResolvedFont({ elementId: editingElement.id, fontFamily: 'FZLanTingHei' });
+      if (!cancelled) setResolvedFont({ elementId: editingElement.id, fontFamily: DEFAULT_FONT_FACE });
     });
     return () => { cancelled = true; };
   }, [editingElement]);
   const overlayFontFamily = resolvedFont && resolvedFont.elementId === editingElement?.id
     ? resolvedFont.fontFamily
-    : 'FZLanTingHei';
+    : DEFAULT_FONT_FACE;
+
+  useEffect(() => {
+    if (!editingElement || editingElement.type !== 'NewTextArea') return;
+    const object = getObject(editingElement.id);
+    if (!object) return;
+    const previousVisible = object.visible;
+    object.visible = false;
+    return () => { object.visible = previousVisible; };
+  }, [editingElement]);
+
+  const finishTextEditing = useCallback(() => {
+    if (!editingElement || editingElement.type !== 'NewTextArea') return;
+    if (committedTextSessionRef.current === editingElement.id) return;
+    committedTextSessionRef.current = editingElement.id;
+    const props = editingElement.props as Record<string, unknown>;
+    const nextProps = { ...props, text: textDraft };
+    const layout = layoutText(textDraft, editingElement.width, editingElement.height, nextProps as RenderTextProps, overlayFontFamily);
+    const mode = normalizeTextSizingMode(props.textSizingMode);
+    const changed = textDraft !== String(props.text ?? '')
+      || (mode !== 'fixed' && (layout.width !== editingElement.width || layout.height !== editingElement.height));
+    if (changed) {
+      useEditorStore.getState().updateElement(editingElement.id, {
+        width: layout.width,
+        height: layout.height,
+        props: nextProps,
+      });
+      useEditorStore.getState().saveHistory();
+    }
+    setEditingId(null);
+    onTextSessionEnd(editingElement.id);
+  }, [editingElement, onTextSessionEnd, overlayFontFamily, setEditingId, textDraft]);
+
+  useLayoutEffect(() => {
+    const textarea = textAreaRef.current;
+    if (!textarea || !editingElement || editingElement.type !== 'NewTextArea') return;
+    if (caretAppliedForRef.current === editingElement.id) return;
+    caretAppliedForRef.current = editingElement.id;
+    textarea.focus();
+    if (selectAllTextOnEdit) {
+      textarea.setSelectionRange(0, textDraft.length);
+    } else if (textCaretPoint) {
+      const props = editingElement.props as Record<string, unknown>;
+      textarea.setSelectionRange(
+        caretOffsetAtPoint(textDraft, editingElement.width, props, textCaretPoint.x, textCaretPoint.y, overlayFontFamily),
+        caretOffsetAtPoint(textDraft, editingElement.width, props, textCaretPoint.x, textCaretPoint.y, overlayFontFamily),
+      );
+    } else {
+      textarea.setSelectionRange(textDraft.length, textDraft.length);
+    }
+  }, [editingElement, overlayFontFamily, selectAllTextOnEdit, textCaretPoint, textDraft]);
+
+  // CanvasOverlay 阻止画布默认 pointer 行为时，浏览器不会替 textarea 自然触发失焦。
+  // 在文档捕获阶段主动提交，保证点击画布、属性面板或工具栏都能结束编辑。
+  useEffect(() => {
+    if (!editingTextId) return;
+    const handleDocumentPointerDown = (event: Event) => {
+      const textarea = textAreaRef.current;
+      const target = event.target;
+      if (!textarea || !(target instanceof Node)) return;
+      const editor = textarea.closest('[data-text-editor]');
+      if (editor?.contains(target)) return;
+      textarea.blur();
+    };
+    document.addEventListener('pointerdown', handleDocumentPointerDown, true);
+    document.addEventListener('mousedown', handleDocumentPointerDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', handleDocumentPointerDown, true);
+      document.removeEventListener('mousedown', handleDocumentPointerDown, true);
+    };
+  }, [editingTextId]);
 
   const pointerToWorld = useCallback((clientX: number, clientY: number) => {
     const host = layaHostRef.current;
@@ -258,11 +402,16 @@ export default function CanvasOverlay({
     for (const start of transaction.roots) {
       const object = getObject(start.id);
       if (object) {
-        object.x = start.x;
-        object.y = start.y;
-        object.width = start.width;
-        object.height = start.height;
-        object.rotation = start.rotation;
+        const element = currentPageRef.current?.elements.find((item) => item.id === start.id);
+        if (element) {
+          applyElementTransform(object, { ...element, ...start });
+        } else {
+          object.x = start.x;
+          object.y = start.y;
+          object.width = start.width;
+          object.height = start.height;
+          object.rotation = start.rotation;
+        }
       }
     }
   }, []);
@@ -280,6 +429,7 @@ export default function CanvasOverlay({
   const finishInteraction = useCallback((commit: boolean) => {
     const interaction = interactionRef.current;
     if (!interaction) return;
+    cancelTextResizePreview();
     interactionRef.current = null;
     setPreviewTransforms(null);
     setPreviewFrame(null);
@@ -292,9 +442,17 @@ export default function CanvasOverlay({
     const store = useEditorStore.getState();
     if (!commit) {
       restorePreview(interaction);
+      if (interaction.kind === 'resize') {
+        const page = currentPageRef.current;
+        for (const root of interaction.transaction.roots) {
+          const element = page?.elements.find((item) => item.id === root.id);
+          const object = element ? getObject(element.id) : undefined;
+          if (element?.type === 'NewTextArea' && object) applyNewTextAreaRender(object, element);
+        }
+      }
       if (interaction.kind === 'move' && interaction.duplicateIds) {
         store.removeElementsWithoutHistory(interaction.duplicateIds);
-        store.selectElements(interaction.originalSelection);
+        store.selectElements(interaction.originalSelection, 'other');
       }
       setLocalMarquee(null);
       return;
@@ -303,7 +461,7 @@ export default function CanvasOverlay({
     if (interaction.kind !== 'marquee') {
       if (!interaction.started) {
         if (interaction.kind === 'move' && interaction.clickSelection) {
-          store.selectElements(interaction.clickSelection);
+          store.selectElements(interaction.clickSelection, 'canvas', interaction.clickPrimaryId ?? undefined);
         }
         return;
       }
@@ -311,7 +469,7 @@ export default function CanvasOverlay({
         restorePreview(interaction);
         if (interaction.kind === 'move' && interaction.duplicateIds) {
           store.removeElementsWithoutHistory(interaction.duplicateIds);
-          store.selectElements(interaction.originalSelection);
+          store.selectElements(interaction.originalSelection, 'other');
         }
         return;
       }
@@ -348,8 +506,8 @@ export default function CanvasOverlay({
       hits,
       interaction.toggle,
       editorLayerGroupIds,
-    ));
-  }, [commitPageTurnPosition, restorePreview, setLocalMarquee]);
+    ), 'canvas');
+  }, [cancelTextResizePreview, commitPageTurnPosition, restorePreview, setLocalMarquee]);
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || interactionRef.current) return;
@@ -366,21 +524,24 @@ export default function CanvasOverlay({
 
     const store = useEditorStore.getState();
     const currentIds = store.selectedElementIds;
-    const hit = containerHandle
-      ? page.elements.find((element) => element.id === containerHandle.dataset.containerHandle) ?? null
-      : findTopElementAtPoint(page.elements, point, currentIds);
+    const hit = findCanvasPointerTarget(
+      page.elements,
+      point,
+      currentIds,
+      containerHandle?.dataset.containerHandle,
+    );
     const toggle = event.metaKey || event.ctrlKey;
     const duplicateOnDrag = IS_MAC ? event.altKey : event.ctrlKey;
     const editorLayerGroupIds = new Set(page.editorLayerGroups?.map((group) => group.id) ?? []);
     if (hit) {
       const hitWasSelected = currentIds.includes(hit.id);
       const delayedMacToggle = IS_MAC && event.metaKey && hitWasSelected;
-      const pointerSelection = duplicateOnDrag && hitWasSelected
-        ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
-        : hitWasSelected && (!toggle || delayedMacToggle)
+      const preserveSelection = duplicateOnDrag && hitWasSelected
+        || hitWasSelected && (!toggle || delayedMacToggle);
+      const pointerSelection = preserveSelection
         ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
         : resolvePointerSelection(page.elements, currentIds, hit.id, toggle, editorLayerGroupIds);
-      store.selectElements(pointerSelection);
+      store.selectElements(pointerSelection, 'canvas', hit.id);
       const elementMap = new Map(page.elements.map((element) => [element.id, element]));
       const transaction = isElementLocked(hit, elementMap)
         ? null
@@ -402,8 +563,9 @@ export default function CanvasOverlay({
           : duplicateOnDrag && toggle
           ? resolvePointerSelection(page.elements, currentIds, hit.id, true, editorLayerGroupIds)
           : hitWasSelected && !toggle
-            ? resolvePointerSelection(page.elements, currentIds, hit.id, false, editorLayerGroupIds)
+            ? normalizeSelection(page.elements, currentIds, undefined, editorLayerGroupIds)
             : null,
+        clickPrimaryId: hit.id,
         duplicateOnDrag,
         duplicateIds: null,
         originalSelection: currentIds,
@@ -495,7 +657,7 @@ export default function CanvasOverlay({
     const frame = getSelectionFrame(page.elements, selectedIds, {
       editorLayerGroupIds: new Set(page.editorLayerGroups?.map((group) => group.id) ?? []),
     });
-    const hit = findTopElementAtPoint(page.elements, point, []);
+    const hit = findTopElementAtPoint(page.elements, point, [], { includeLocked: true });
     if (!frame || !hit || selectedIds.includes(hit.id)) {
       setDistanceHint(null);
       return;
@@ -508,9 +670,26 @@ export default function CanvasOverlay({
     ));
   }, [pointerToWorld, selectedIds]);
 
+  const updateCanvasHover = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-canvas-interactive]') || target.closest('[data-container-handle]')) {
+      useEditorStore.getState().setHoveredElementId(null);
+      return;
+    }
+    const page = currentPageRef.current;
+    const point = pointerToWorld(event.clientX, event.clientY);
+    if (!page || !point) {
+      useEditorStore.getState().setHoveredElementId(null);
+      return;
+    }
+    const hit = findTopElementAtPoint(page.elements, point, []);
+    useEditorStore.getState().setHoveredElementId(hit?.id ?? null);
+  }, [pointerToWorld]);
+
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const interaction = interactionRef.current;
     if (!interaction) {
+      updateCanvasHover(event);
       updateHoverDistance(event);
       return;
     }
@@ -676,11 +855,16 @@ export default function CanvasOverlay({
       for (const preview of interaction.transaction.preview) {
         const object = getObject(preview.id);
         if (object) {
-          object.x = preview.x;
-          object.y = preview.y;
-          object.width = preview.width;
-          object.height = preview.height;
-          object.rotation = preview.rotation;
+          const element = page.elements.find((item) => item.id === preview.id);
+          if (element) {
+            applyElementTransform(object, { ...element, ...preview });
+          } else {
+            object.x = preview.x;
+            object.y = preview.y;
+            object.width = preview.width;
+            object.height = preview.height;
+            object.rotation = preview.rotation;
+          }
         }
       }
       if (interaction.duplicateIds) {
@@ -757,6 +941,18 @@ export default function CanvasOverlay({
         interaction.snapLocks = snapResult.locks;
         setSnapGuides(showSnapGuidesRef.current ? snapResult.guides : []);
       }
+      if (nextTransaction.handle === 'e' || nextTransaction.handle === 'w') {
+        const root = nextTransaction.preview.length === 1 ? nextTransaction.preview[0] : null;
+        const element = root ? page.elements.find((item) => item.id === root.id) : null;
+        if (root && element?.type === 'NewTextArea' && normalizeTextSizingMode(element.props.textSizingMode) === 'fixed-width') {
+          const measured = layoutText(String(element.props.text ?? ''), root.width, root.height, element.props, overlayFontFamily);
+          nextTransaction = {
+            ...nextTransaction,
+            preview: nextTransaction.preview.map((item) => item.id === root.id ? { ...item, height: measured.height } : item),
+            previewFrame: { ...nextTransaction.previewFrame, height: measured.height },
+          };
+        }
+      }
       setSpacingHints([]);
       setDistanceHint(null);
       interaction.transaction = nextTransaction;
@@ -774,17 +970,28 @@ export default function CanvasOverlay({
     for (const preview of interaction.transaction.preview) {
       const object = getObject(preview.id);
       if (object) {
-        object.x = preview.x;
-        object.y = preview.y;
-        object.width = preview.width;
-        object.height = preview.height;
-        object.rotation = preview.rotation;
+        const element = page.elements.find((item) => item.id === preview.id);
+        const preserveTextMetrics = interaction.kind === 'resize' && element?.type === 'NewTextArea';
+        if (!preserveTextMetrics && element) {
+          applyElementTransform(object, { ...element, ...preview });
+        } else {
+          object.x = preview.x;
+          object.y = preview.y;
+          object.rotation = preview.rotation;
+          if (!preserveTextMetrics) {
+            object.width = preview.width;
+            object.height = preview.height;
+          }
+        }
+        if (preserveTextMetrics && element) {
+          scheduleTextResizePreview(element, preview.width, preview.height);
+        }
       }
     }
     setPreviewTransforms(interaction.transaction.preview);
     setPreviewFrame(interaction.transaction.previewFrame);
     setPreviewAngle(interaction.kind === 'rotate' ? interaction.transaction.angleDelta : null);
-  }, [pageHeight, pageWidth, pointerToWorld, setLocalMarquee, updateHoverDistance]);
+  }, [overlayFontFamily, pageHeight, pageWidth, pointerToWorld, scheduleTextResizePreview, setLocalMarquee, updateCanvasHover, updateHoverDistance]);
 
   const handlePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (interactionRef.current?.pointerId !== event.pointerId) return;
@@ -826,8 +1033,18 @@ export default function CanvasOverlay({
     if (!page || !point) return;
     const hit = findTopElementAtPoint(page.elements, point, useEditorStore.getState().selectedElementIds);
     const elementMap = new Map(page.elements.map((element) => [element.id, element]));
-    if (hit && !isElementLocked(hit, elementMap) && (hit.type === 'NewTextArea' || hit.type === 'Video')) setEditingId(hit.id);
-  }, [pointerToWorld, setEditingId]);
+    if (!hit || isElementLocked(hit, elementMap) || (hit.type !== 'NewTextArea' && hit.type !== 'Video')) return;
+    if (hit.type === 'NewTextArea') {
+      const selectDefaultContent = String(hit.props.text ?? '') === NEW_TEXT_DEFAULT_CONTENT;
+      setSelectAllTextOnEdit(selectDefaultContent);
+      const inverse = invertMatrix(getElementWorldMatrix(hit, page.elements));
+      setTextCaretPoint(selectDefaultContent ? null : (inverse ? transformPoint(inverse, point) : null));
+    } else {
+      setSelectAllTextOnEdit(false);
+      setTextCaretPoint(null);
+    }
+    setEditingId(hit.id);
+  }, [pointerToWorld, setEditingId, setSelectAllTextOnEdit, setTextCaretPoint]);
 
   const elements = currentPage?.elements ?? [];
   const previewMap = new Map((previewTransforms ?? []).map((snapshot) => [snapshot.id, snapshot]));
@@ -861,7 +1078,30 @@ export default function CanvasOverlay({
     includeLocked: true,
     editorLayerGroupIds,
   });
+  const hoveredElement = hoveredElementId
+    ? displayElements.find((element) => element.id === hoveredElementId) ?? null
+    : null;
+  const hoveredFrame = hoveredElement && !selectedIds.includes(hoveredElement.id)
+    ? getSelectionFrame(displayElements, [hoveredElement.id], { includeLocked: true, editorLayerGroupIds })
+    : null;
   const canTransform = getTransformRootIds(displayElements, selectedIds, editorLayerGroupIds).length > 0;
+  const selectedTextMode = selectedElement?.type === 'NewTextArea'
+    ? normalizeTextSizingMode(selectedElement.props.textSizingMode)
+    : null;
+  const resizeHandleDefinitions = selectedTextMode === 'auto'
+    ? []
+    : selectedTextMode === 'fixed-width' || (selectedElement && isChoiceOption(selectedElement, displayElements))
+      ? HANDLE_DEFS.filter((definition) => definition.id === 'e' || definition.id === 'w')
+      : HANDLE_DEFS;
+  const selectedTextOverflow = selectedElement?.type === 'NewTextArea'
+    ? layoutText(
+      String(selectedElement.props.text ?? ''),
+      selectedElement.width,
+      selectedElement.height,
+      selectedElement.props,
+      overlayFontFamily,
+    ).overflow
+    : false;
 
   const groupColors = new Map<string, string>();
   const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#ec4899'];
@@ -883,7 +1123,10 @@ export default function CanvasOverlay({
       onPointerUp={handlePointerUp}
       onPointerCancel={() => finishInteraction(false)}
       onPointerLeave={() => {
-        if (!interactionRef.current) setDistanceHint(null);
+        if (!interactionRef.current) {
+          setDistanceHint(null);
+          useEditorStore.getState().setHoveredElementId(null);
+        }
       }}
       onDoubleClick={handleDoubleClick}
     >
@@ -1135,6 +1378,38 @@ export default function CanvasOverlay({
         );
       })}
 
+      {hoveredElement && hoveredFrame && (() => {
+        const origin = worldRectToScreen(
+          hoveredFrame.origin.x,
+          hoveredFrame.origin.y,
+          0,
+          0,
+          panX,
+          panY,
+          zoom,
+        );
+        return (
+          <div
+            data-canvas-hover={hoveredElement.id}
+            style={{
+              position: 'absolute',
+              left: origin.left,
+              top: origin.top,
+              width: hoveredFrame.width * zoom,
+              height: hoveredFrame.height * zoom,
+              border: '1px solid rgba(34, 211, 238, 0.9)',
+              background: 'rgba(34, 211, 238, 0.06)',
+              boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.22)',
+              boxSizing: 'border-box',
+              pointerEvents: 'none',
+              transform: `rotate(${hoveredFrame.rotation}deg)`,
+              transformOrigin: '0 0',
+              zIndex: 35,
+            }}
+          />
+        );
+      })()}
+
       {selectionFrame && !(editingElement && selectedElement?.id === editingElement.id) && (() => {
         const origin = worldRectToScreen(
           selectionFrame.origin.x,
@@ -1154,13 +1429,16 @@ export default function CanvasOverlay({
             top: origin.top,
             width: frameWidth,
             height: frameHeight,
-            border: canTransform ? '1px solid #3b82f6' : '1px solid #f59e0b',
+            border: selectedElement?.type === 'NewTextArea' ? '1px solid #fff' : canTransform ? '1px solid #3b82f6' : '1px solid #f59e0b',
+            boxShadow: selectedElement?.type === 'NewTextArea'
+              ? `0 0 0 2px ${selectedTextOverflow ? '#f97316' : '#1677ff'}, 0 2px 8px rgba(0, 0, 0, 0.9)`
+              : undefined,
             boxSizing: 'border-box',
             pointerEvents: 'none',
             transform: `rotate(${selectionFrame.rotation}deg)`,
             transformOrigin: '0 0',
           }}>
-            {canTransform && HANDLE_DEFS.map((definition) => (
+            {canTransform && resizeHandleDefinitions.map((definition) => (
               <div
                 key={definition.id}
                 style={{
@@ -1171,6 +1449,7 @@ export default function CanvasOverlay({
                   height: HANDLE_SIZE,
                   background: '#fff',
                   border: '2px solid #3b82f6',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.9)',
                   cursor: definition.cursor,
                   pointerEvents: 'auto',
                   boxSizing: 'border-box',
@@ -1285,55 +1564,62 @@ export default function CanvasOverlay({
         const props = editingElement.props as Record<string, unknown>;
         const fontSize = (props.fontSize as number) ?? 16;
         const leading = (props.leading as number) ?? 0;
-        const verticalAlign = (props.valign as string) ?? 'top';
+        const liveLayout = layoutText(textDraft, editingElement.width, editingElement.height, props, overlayFontFamily);
+        const matrix = getElementWorldMatrix(editingElement, elements);
+        const decorationScale = 1 / Math.max(zoom, 0.05);
         return (
-          <div data-canvas-interactive style={{
+          <div data-canvas-interactive data-text-editor data-text-editor-state="editing" style={{
             position: 'absolute',
-            left: editingElement.x * zoom + panX,
-            top: editingElement.y * zoom + panY,
-            width: editingElement.width,
-            height: editingElement.height,
-            transform: `scale(${zoom})`,
+            left: matrix.tx * zoom + panX,
+            top: matrix.ty * zoom + panY,
+            width: liveLayout.width,
+            height: liveLayout.height,
+            transform: `matrix(${matrix.a * zoom}, ${matrix.b * zoom}, ${matrix.c * zoom}, ${matrix.d * zoom}, 0, 0)`,
             transformOrigin: '0 0',
             zIndex: 50,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: verticalAlign === 'middle' ? 'center' : verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
-            background: '#ffffff',
-            border: '1px solid #3b82f6',
+            background: 'transparent',
+            backgroundColor: 'transparent',
+            outline: `${2 * decorationScale}px solid #06b6d4`,
+            outlineOffset: decorationScale,
+            boxShadow: `0 0 0 ${decorationScale}px #fff, 0 0 0 ${4 * decorationScale}px rgba(8, 145, 178, 0.38), 0 ${3 * decorationScale}px ${10 * decorationScale}px rgba(0, 0, 0, 0.9)`,
             boxSizing: 'border-box',
             pointerEvents: 'auto',
+            cursor: 'text',
           }}>
             <textarea
-              autoFocus
-              value={(props.text as string) ?? ''}
-              onFocus={(event) => event.currentTarget.select()}
-              onChange={(event) => useEditorStore.getState().updateElement(editingElement.id, {
-                props: { ...props, text: event.target.value },
-              })}
+              ref={textAreaRef}
+              value={textDraft}
+              aria-label="编辑文本"
+              onChange={(event) => setTextDraftState({ id: editingElement.id, value: event.target.value })}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
                 if (event.key === 'Escape' || (event.key === 'Enter' && (event.ctrlKey || event.metaKey))) {
                   event.preventDefault();
                   event.currentTarget.blur();
                 }
               }}
-              onBlur={() => {
-                setEditingId(null);
-                useEditorStore.getState().saveHistory();
-              }}
+              onBlur={finishTextEditing}
               style={{
+                display: 'block',
                 width: '100%',
-                flexShrink: 0,
-                maxHeight: '100%',
+                height: '100%',
                 margin: 0,
                 padding: 0,
                 border: 'none',
                 outline: 'none',
                 background: 'transparent',
+                backgroundColor: 'transparent',
+                backgroundImage: 'none',
+                appearance: 'none',
+                WebkitAppearance: 'none',
                 resize: 'none',
-                overflow: 'auto',
+                cursor: 'text',
+                caretColor: '#ff2d55',
+                overflow: normalizeTextSizingMode(props.textSizingMode) === 'fixed' ? 'auto' : 'hidden',
                 fontFamily: `"${overlayFontFamily}"`,
                 fontSize,
+                fontWeight: props.bold ? 700 : 400,
+                fontStyle: props.italic ? 'italic' : 'normal',
                 lineHeight: `${fontSize + leading}px`,
                 color: (props.color as string) ?? '#333',
                 textAlign: (props.align as 'left' | 'center' | 'right') ?? 'left',
@@ -1367,7 +1653,7 @@ export default function CanvasOverlay({
               key={`video-${editingElement.id}`}
               autoPlay
               controls
-              src={`forge-local://${courseId}/${videoUrl}`}
+              src={getCourseResourceUrl(courseId, videoUrl)}
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
           </div>

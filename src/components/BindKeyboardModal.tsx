@@ -5,12 +5,14 @@ interface KeyboardItem {
   element: Element;
   camp: string;
   thumbnail?: string;
+  label: string;
+  legacy: boolean;
 }
 
 interface Props {
   keyboards: KeyboardItem[];
   currentCamp: string;
-  onSelect: (camp: string) => void;
+  onSelect: (keyboard: KeyboardItem) => void;
   onClose: () => void;
 }
 
@@ -37,16 +39,17 @@ export default function BindKeyboardModal({ keyboards, currentCamp, onSelect, on
         <div className="flex-1 overflow-y-auto p-3">
           {keyboards.length === 0 ? (
             <div className="flex items-center justify-center h-32 text-xs text-slate-500">
-              当前页面没有键盘组件
+              当前页面没有可绑定的键盘组件
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              {keyboards.map(({ element, camp, thumbnail }) => {
+              {keyboards.map((keyboard) => {
+                const { element, camp, thumbnail, label, legacy } = keyboard;
                 const isBound = !!currentCamp && camp === currentCamp;
                 return (
                   <button
                     key={element.id}
-                    onClick={() => onSelect(camp)}
+                    onClick={() => onSelect(keyboard)}
                     className={`flex items-start gap-2 p-2 rounded border text-left transition-colors ${
                       isBound
                         ? 'bg-blue-600/30 border-blue-500'
@@ -64,7 +67,10 @@ export default function BindKeyboardModal({ keyboards, currentCamp, onSelect, on
                     <div className="flex-1 min-w-0">
                       <div className="text-xs text-white truncate">{element.name || element.id}</div>
                       <div className="text-[10px] text-slate-400 mt-0.5">
-                        阵营: <span className="text-slate-200">{camp || '(未设置)'}</span>
+                        类型: <span className="text-slate-200">{legacy ? '旧版/自定义' : label}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        阵营: <span className="text-slate-200">{camp || '(绑定时自动生成)'}</span>
                       </div>
                       <div className="text-[10px] text-slate-500 mt-0.5">
                         位置: ({Math.round(element.x)}, {Math.round(element.y)})

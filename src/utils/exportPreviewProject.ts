@@ -1,27 +1,32 @@
-import type { Action, Course, SubPage, Element } from '../types';
+import type { Course, SubPage, Element } from '../types';
 import { elementMeta, type ExportChild } from '../elements/elementMeta';
-import { getKeyboardPreset } from '../elements/keyboardPresets';
+import { getKeyboardChildren } from '../elements/keyboardPresets';
 import { lookupBuiltinByExportPath } from '../elements/builtinAssets';
 import { getCourseDirPath } from './electronFs';
 import { getApiBaseUrl } from './apiConfig';
 import { collectImageSizes, isLargeImage } from './imageSize';
 import {
   buildScene,
+  buildChoiceVisualInitCode,
   buildSdkJudgeClickInitCode,
+  buildMathKeyboardInitCode,
   collectGameZipFiles,
   collectResources,
   extractZipFromServer,
+  getImageAtlasDirectory,
   isLocalSkPath,
   isLocalSoundPath,
   isLocalVideoPath,
+  makeActionBuilder,
   mapGameZipEntryToProjectPath,
 } from './exportProject';
 import {
   buildInternalPageActionBindings,
   buildInternalPageRuntime,
   compileInternalPagesCourse,
-  internalPageActionBody,
 } from './internalPageCompiler';
+import { buildInputRuleConfirmInitCode, buildInputRuleInitCode, isInputRuleHost } from './inputAnswerRules';
+import { buildOrdinaryActionBindings } from './ordinaryActionCompiler';
 
 // ─── 预习场景差异 ───
 
@@ -39,6 +44,11 @@ function detectSceneFlags(page: SubPage): SceneFlags {
   return { hasBtnConfirm, hasKlInputBox };
 }
 
+function previewSceneName(stageIndex: number, subPageIndex: number): string {
+  const stageNumber = stageIndex + 1;
+  return subPageIndex === 0 ? `Game${stageNumber}` : `Game${stageNumber}_${subPageIndex + 1}`;
+}
+
 // ─── 生成 scene 对应的 ts 文件 ───
 
 function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: SubPage, varAssignment: Map<string, string>, resourceMap: Map<string, string>): string {
@@ -46,37 +56,35 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     return varAssignment.get(el.id) || (el.name || el.id).replace(/[^a-zA-Z0-9_]/g, '_').replace(/^(\d)/, '_$1');
   };
   let initCode = '';
-  const buildActionBody = (action: Action, elementRef: string, currentPage: SubPage, source?: Element): string => {
-    const pageBody = internalPageActionBody(action);
-    if (pageBody) return pageBody;
-    const targetElement = action.targetId ? currentPage.elements.find((item) => item.id === action.targetId) : source;
-    const targetRef = targetElement && action.targetId ? `this.${getVar(targetElement)}` : elementRef;
-    if (action.actionType === 'toggleVisible') return `var t = ${targetRef}; if (t) t.visible = !t.visible;`;
-    if (action.actionType === 'setVisible') return `var t = ${targetRef}; if (t) t.visible = ${action.value === false ? 'false' : 'true'};`;
-    if (action.actionType === 'setProperty' && action.property) return `var t = ${targetRef}; if (t) t.${action.property} = ${JSON.stringify(action.value)};`;
-    if (action.actionType === 'playSound') return `this.playSound(${JSON.stringify(resourceMap.get(String(action.value)) ?? action.value)});`;
-    if (action.actionType === 'playRightSound') return 'this.playSound("game_preview/sound/right.mp3");';
-    if (action.actionType === 'playWrongSound') return 'this.playSound("game_preview/sound/wrong.mp3");';
-    if (action.actionType === 'showAnswerRight') return 'this.showAnswerFace(1);';
-    if (action.actionType === 'showAnswerRightLock') return 'this.showAnswerFace(1); this._lockBox.visible = true;';
-    if (action.actionType === 'showAnswerWrong') return 'this.showAnswerFace(2);';
-    if (action.actionType === 'animate') return `var t = ${targetRef}; if (t && t.play) t.play(${JSON.stringify(action.value ?? 'shan')});`;
-    return '';
-  };
+  const buildActionBody = makeActionBuilder(varAssignment, resourceMap, 'game_preview');
   const internalRuntime = buildInternalPageRuntime(page, getVar, buildActionBody);
+  initCode += buildMathKeyboardInitCode(page, getVar);
+  initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
-  // onClickInitConfirm / onClickInitConfirmWithLock 事件：在 initView 注入 GameUtils.initConfirm
+  initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, 'game_preview');
+  // onClickInitConfirm / onClickInitConfirmWithLock 事件：按判定目标注入对应确认逻辑。
   for (const el of page.elements) {
     if (!el.actions?.length) continue;
     for (const action of el.actions) {
       if (action.event !== 'onClickInitConfirm' && action.event !== 'onClickInitConfirmWithLock') continue;
       const targetEl = action.targetId ? page.elements.find(e => e.id === action.targetId) : null;
-      if (!targetEl || targetEl.type !== 'KlInputBox') continue;
+      if (!targetEl) continue;
       const btnVar = getVar(el);
-      const inputBoxVar = getVar(targetEl);
       const lockArg = action.event === 'onClickInitConfirmWithLock' ? ', null, this._lockBox' : '';
-      initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
+      if (targetEl.type === 'ContainerBox' && isInputRuleHost(targetEl)) {
+        initCode += buildInputRuleConfirmInitCode(
+          el,
+          targetEl,
+          getVar,
+          action.event === 'onClickInitConfirmWithLock',
+        );
+      } else if (targetEl.type === 'KlInputBox') {
+        const inputBoxVar = getVar(targetEl);
+        initCode += `        GameUtils.initConfirm(this, this.${btnVar}, this.${inputBoxVar}${lockArg});\n`;
+      } else if (targetEl.layaType === 'ChoiceBox') {
+        initCode += `        GameUtils.initChoiceBoxConfirm(this, this.${btnVar}, this.${getVar(targetEl)}${lockArg});\n`;
+      }
     }
   }
 
@@ -245,8 +253,12 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
     initCode += `        GameUtils.initDraw(this, this.${drawVar}, this.${clearVar}, this.${brushVar});\n`;
   }
 
+  initCode += buildChoiceVisualInitCode(page, getVar);
   // 页面首次显示动作最后执行，确保输入、拖拽、翻页等组件已完成初始化。
   initCode += internalRuntime.initCode;
+  const needFractionInput = page.elements.some((element) => element.type === 'FractionInput');
+  const fractionImport = needFractionInput ? 'import FractionInput from "./Components/FractionInput";\n' : '';
+  const fractionReference = needFractionInput ? '    _ref = [FractionInput];\n\n' : '';
 
   return `import { ui } from "../../ui/layaMaxUI";
 
@@ -257,11 +269,11 @@ import KlKeyboardEvent = com.klzz.ui.custom.KeyBoard.KlKeyboardEvent;
 import KlKey = com.klzz.ui.custom.KeyBoard.KlKey;
 import KlBaseKeyboard = com.klzz.ui.custom.KeyBoard.KlBaseKeyboard;
 import SelectableObj = com.klzz.ui.custom.SelectableObj;
-import { GameUtils } from "./GameUtils";
+${fractionImport}import { GameUtils } from "./GameUtils";
 
 export default class ${sceneName} extends ui.game_preview.${sceneName}UI {
 
-    public initView(byReset: boolean) {
+${fractionReference}    public initView(byReset: boolean) {
         super.initView(byReset);
 
 ${initCode}        //add script
@@ -285,13 +297,26 @@ function collectPreviewExportChildrenRes(
 ) {
   if (!children) return;
   for (const c of children) {
+    if (c.resources) {
+      for (const resource of c.resources) {
+        const mapped = resourceMap.get(resource);
+        if (!mapped || addedSingleFiles.has(mapped)) continue;
+        if (/\.ttf$/i.test(mapped)) {
+          resEntries.push({ url: mapped, type: 'ttf' });
+          addedSingleFiles.add(mapped);
+        }
+      }
+    }
     if (c.props) {
       for (const v of Object.values(c.props)) {
         const mapped = resourceMap.get(String(v));
         if (!mapped) continue;
-        if (mapped.startsWith('game_preview/image/')) {
-          const parts = mapped.split('/');
-          if (parts.length >= 3) imageDirs.add(parts[2]);
+        if (/\.ttf$/i.test(mapped) && !addedSingleFiles.has(mapped)) {
+          resEntries.push({ url: mapped, type: 'ttf' });
+          addedSingleFiles.add(mapped);
+        } else if (mapped.startsWith('game_preview/image/')) {
+          const dir = getImageAtlasDirectory(mapped, 'game_preview/image/');
+          if (dir) imageDirs.add(dir);
         } else if (mapped.startsWith('game_preview/sound/') && !addedSingleFiles.has(mapped)) {
           resEntries.push({ url: mapped, type: 'sound' });
           addedSingleFiles.add(mapped);
@@ -319,7 +344,11 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
         return { type: 'video', videoUrl: mappedVideoUrl, classType: 'yxdh' };
       }
 
-      const sceneName = `Game${si + 1}`;
+      const subviews = stage.subPages.flatMap((page, sj) => page.frozen ? [] : [{
+        view: `view/game_preview/${previewSceneName(si, sj)}.ts`,
+        param: sj === 0 ? String(si + 1) : `${si + 1}_${sj + 1}`,
+        classType: 'yx',
+      }]);
       const resEntries: { url: string; type?: string }[] = [];
       const imageDirs = new Set<string>();
       const addedSingleFiles = new Set<string>();
@@ -341,8 +370,8 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
                 addedSingleFiles.add(mapped);
               }
               if (!isLarge) {
-                const parts = mapped.split('/');
-                if (parts.length >= 3) imageDirs.add(parts[2]);
+                const dir = getImageAtlasDirectory(mapped, 'game_preview/image/');
+                if (dir) imageDirs.add(dir);
               }
             }
 
@@ -362,10 +391,10 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
               }
             }
           }
-          // 选项卡片：_foregroundSkin/_bgSkin/_wrongSkin 被主循环跳过，需显式收集
+          // 选项卡片状态皮肤被主循环跳过，需显式收集
           if (el.type === 'SpeechSelectableObj') {
-            const sMerged = merged as { _foregroundSkin?: string; _bgSkin?: string; _wrongSkin?: string };
-            for (const skinVal of [sMerged._foregroundSkin, sMerged._bgSkin, sMerged._wrongSkin]) {
+            const sMerged = merged as { _foregroundSkin?: string; _pressedSkin?: string; _bgSkin?: string; _correctSkin?: string; _wrongSkin?: string };
+            for (const skinVal of [sMerged._foregroundSkin, sMerged._pressedSkin, sMerged._bgSkin, sMerged._correctSkin, sMerged._wrongSkin]) {
               if (!skinVal) continue;
               const mapped = resourceMap.get(skinVal);
               if (!mapped) continue;
@@ -376,17 +405,16 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
                   addedSingleFiles.add(mapped);
                 }
                 if (!isLarge) {
-                  const parts = mapped.split('/');
-                  if (parts.length >= 3) imageDirs.add(parts[2]);
+                  const dir = getImageAtlasDirectory(mapped, 'game_preview/image/');
+                  if (dir) imageDirs.add(dir);
                 }
               }
             }
           }
           // PageTurnBox 不携带 pages 数组，ContainerBox 子元素资源由主循环收集
-          // 键盘预设：通过 _keyboardPreset.id 查表得到 children，递归收集（皮肤都进 atlas）
-          const presetId = (el.props as { _keyboardPreset?: { id?: string } } | undefined)?._keyboardPreset?.id;
-          const presetChildren = presetId ? getKeyboardPreset(presetId)?.children : undefined;
-          collectPreviewExportChildrenRes(presetChildren, resourceMap, imageDirs, resEntries, addedSingleFiles);
+          // 固定组件子节点与键盘预设都要进入预加载清单，否则编译进 atlas 后运行时不可见。
+          collectPreviewExportChildrenRes(meta?.exportChildren, resourceMap, imageDirs, resEntries, addedSingleFiles);
+          collectPreviewExportChildrenRes(getKeyboardChildren(el), resourceMap, imageDirs, resEntries, addedSingleFiles);
         }
       }
 
@@ -421,9 +449,8 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
 
       return {
         name: `预习${si + 1}`,
-        view: `view/game_preview/${sceneName}.ts`,
+        subviews,
         res: resEntries,
-        classType: 'yx',
       };
     }),
   };
@@ -456,22 +483,24 @@ function buildPreparedPreviewExportArtifacts(
     const videoPage = stage.subPages.find((page) => page.frozen);
     const videoElement = videoPage?.elements.find((element) => element.locked && element.type === 'Video');
     if (videoElement) continue;
-    const page = stage.subPages[0];
-    if (!page || page.frozen) continue;
-    const name = `Game${si + 1}`;
-    const { json, varAssignment } = buildScene(
-      page,
-      name,
-      resourceMap,
-      'game_preview',
-      { includeCHFeedback: false },
-    );
-    const flags = detectSceneFlags(page);
-    scenes.push({
-      name,
-      scene: json,
-      source: generatePreviewSceneTs(name, flags, page, varAssignment, resourceMap),
-    });
+    for (let sj = 0; sj < stage.subPages.length; sj++) {
+      const page = stage.subPages[sj];
+      if (page.frozen) continue;
+      const name = previewSceneName(si, sj);
+      const { json, varAssignment } = buildScene(
+        page,
+        name,
+        resourceMap,
+        'game_preview',
+        { includeCHFeedback: false },
+      );
+      const flags = detectSceneFlags(page);
+      scenes.push({
+        name,
+        scene: json,
+        source: generatePreviewSceneTs(name, flags, page, varAssignment, resourceMap),
+      });
+    }
   }
   return {
     viewDir: 'game_preview',

@@ -2,7 +2,7 @@
 
 > 作者：Wills.Deng【微信：43592330】  
 > 第二作者：AI 助手 Kiro  
-> 更新日期：2026-07-16
+> 更新日期：2026-07-21
 
 ---
 
@@ -122,6 +122,12 @@
 - 皮肤预览裂图修复（share/comp/ 路径不显示缩略图）
 - 皮肤编辑器应用修复（一次性合并所有 props 变更）
 
+### v1.2.0 / v1.2.1 正式版本
+
+v1.2.0 已于 2026-07-22 发布，纳入数字小数点与分数键盘、锁定图层命中、单框多答案与两框算式关系、选择题配置四项能力。v1.2.1 已于 2026-07-23 发布，纳入文本编辑体验与分数输入稳定性修复。完整范围以 [v1.2.0 发布记录](./releases/v1.2.0.md) 与 [v1.2.1 发布记录](./releases/v1.2.1.md) 为准。
+
+资源库独立搜索与三级快捷筛选 #73 未进入 v1.2.0，也未进入实际发布的 v1.2.1；其确认需求保留在 [资源库检索需求基线](./roadmap/v1.2.1-requirements.md)，等待资源前置和新的版本或里程碑归属。
+
 ---
 
 ## 未完成 / 后续计划
@@ -156,6 +162,7 @@
 | 同步机制 | docs/sync-mechanism.md | ISyncComp、xpath、TransManager |
 | 视图架构 | docs/view-architecture.md | ViewManager/MainView/PageView |
 | 资源管理 | docs/resource-management.md | 资源体系、打包方案、皮肤规范 |
+| v1.2.0 需求基线 | docs/roadmap/v1.2.0-requirements.md | 已确认的产品规则、Issue、资源依赖与验收边界 |
 | 里程碑 | docs/milestones.md | 本文档 |
 
 ## 代码结构

@@ -21,7 +21,9 @@ try {
     platform: 'node',
     format: 'esm',
     target: 'node24',
+    jsx: 'automatic',
     external: ['node:*'],
+    banner: { js: "import { createRequire as __forgeCreateRequire } from 'node:module'; const require = __forgeCreateRequire(import.meta.url);" },
     logLevel: 'silent',
   });
 
