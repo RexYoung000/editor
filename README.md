@@ -4,6 +4,8 @@ forge 是面向豌豆思维课件制作的 Electron 桌面编辑器。编辑器�
 
 当前版本：`1.5.1`
 
+新负责人从 [项目交接总览](./documentation/handoff.md) 开始。它记录当前主线、未合并本机成果、外部依赖、验证缺口和权限交接，不把历史资料当作当前状态。
+
 ## 开发前须知
 
 - 项目是 Electron 客户端与远程 Vite 开发服务器配合运行的桌面应用。
@@ -91,6 +93,8 @@ pnpm build
 - [自定义模板](./docs/custom-templates.md)：本地模板存储与资源去重。
 - [迭代路线](./docs/roadmap/editor-iteration-roadmap.md)：阶段目标和 Issue 拆解依据。
 - [代码健康治理](./docs/roadmap/code-health-refactoring.md)：核心风险、渐进式重构顺序和后续复评机制。
+- [项目交接总览](./documentation/handoff.md)：新负责人接手顺序、当前状态、外部依赖和未验证风险。
+- [交接架构与流程](./documentation/architecture.md)：交接专用的架构、权限、配置、自动化和测试文档入口。
 
 ## 项目结构
 
@@ -103,6 +107,7 @@ public/preview-game/    发布预览页面
 scripts/                测试与资源打包脚本
 tests/                  Node 单元测试
 docs/                   架构、流程、设计和迭代文档
+documentation/          项目交接、权限、配置、自动化和验证地图
 .github/                Issue、PR、CODEOWNERS 和 CI 配置
 ```
 

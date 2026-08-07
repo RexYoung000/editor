@@ -152,6 +152,8 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 
 ## 相关文档
 
+新负责人和审计任务先阅读 [项目交接总览](../documentation/handoff.md) 及其 Related Documents。本文继续作为产品架构和实现边界的详细说明，不记录 GitHub 的实时 Issue、PR 或部署状态。
+
 - [开发环境](./development.md)
 - [命令清单](./commands.md)
 - [测试与验收](./testing.md)
@@ -163,3 +165,4 @@ Electron 和 Vite 运行在不同电脑时，路径只对各自所在机器有�
 - [版本管理](./versioning.md)
 - [阶段迭代路线](./roadmap/editor-iteration-roadmap.md)
 - [代码健康治理与渐进式重构路线](./roadmap/code-health-refactoring.md)
+- [项目交接总览](../documentation/handoff.md)

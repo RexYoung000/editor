@@ -1,5 +1,7 @@
 # Electron Build Guide
 
+> 历史资料：本文包含早期 Windows 打包前置和产物名称，不能作为当前版本发布基线。请先阅读 [项目交接总览](./documentation/handoff.md)、[Electron 打包约束](./docs/electron-packaging.md) 和目标版本发布记录。
+
 ## Prerequisites
 
 ### 1. Install pnpm 10

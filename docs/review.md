@@ -1,5 +1,7 @@
 # forge 编辑器完整 Review（已更新）
 
+> 历史资料：本文的审计日期、完成度、性能数字和“无已知阻塞”结论已经过时。当前产品、版本、外部验收和风险以 [项目交接总览](../documentation/handoff.md)、[系统架构](./architecture.md) 和 [测试与验收](./testing.md) 为准。
+
 > 作者：Wills.Deng【微信：43592330】  
 > 第二作者：AI 助手 Kiro  
 > 更新日期：2026-04-27  
