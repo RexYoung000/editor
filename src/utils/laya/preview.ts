@@ -78,6 +78,20 @@ function _executePreviewAction(action: Action, selfId: string): void {
   }
 }
 
+function _setPreviewInputWrongState(inputObject: unknown, visible: boolean): void {
+  const input = inputObject as { getChildByName?: (name: string) => { visible?: boolean } | null };
+  const wrong = input?.getChildByName?.('wrong');
+  const bg = input?.getChildByName?.('bg');
+  if (wrong) wrong.visible = visible;
+  if (visible && bg) bg.visible = false;
+}
+
+function _setPreviewInputSdkJudgeWrongState(page: Page, action: Action, visible: boolean): void {
+  _getInputSdkJudgeObjects(page, action).forEach((inputObject) => {
+    _setPreviewInputWrongState(inputObject, visible);
+  });
+}
+
 function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | null {
   const target = action.judgeTargetId
     ? page.elements.find((element) => element.id === action.judgeTargetId)
@@ -125,6 +139,9 @@ function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | nul
 function _runPreviewSdkJudgeGroup(page: Page, source: Element, group: Action[]): void {
   const condition = _getSdkJudgeCondition(page, group[0]);
   if (!condition) return;
+  if (group[0]?.event === INPUT_SDK_JUDGE_EVENT) {
+    _setPreviewInputSdkJudgeWrongState(page, group[0], condition === 'wrong');
+  }
   group
     .filter((action) => (action.branchCondition ?? 'right') === condition)
     .forEach((action) => _executePreviewAction(action, source.id));
@@ -195,6 +212,8 @@ function _renderPreviewPage(idx: number): void {
               if (inputObject && typeof (inputObject as { on?: unknown }).on === 'function') {
                 (inputObject as { on: (event: string, caller: unknown, listener: () => void) => void })
                   .on(KL_KEYBOARD_INPUT_LATER_EVENT, null, () => _runPreviewSdkJudgeGroup(page, el, group));
+                (inputObject as { on: (event: string, caller: unknown, listener: () => void) => void })
+                  .on('click', null, () => _setPreviewInputSdkJudgeWrongState(page, group[0], false));
               }
             }
           });

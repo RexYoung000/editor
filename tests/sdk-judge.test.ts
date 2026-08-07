@@ -367,13 +367,18 @@ test('输入后立即 SDK 判断绑定 INPUT_LATER 并复用结果分支', () =>
   );
 
   assert.match(code, /this\.answer_fraction\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(code, /this\.answer_fraction\.on\(Laya\.Event\.CLICK/);
   assert.match(code, /\(\["1<2_3>"\]\)\.indexOf\(String\(this\.answer_fraction\.fontClipValue \|\| ""\)\) >= 0/);
   assert.match(code, /this\.answer_fraction\.valueOrSkinIsNull/);
+  assert.match(code, /getChildByName\("wrong"\)/);
+  assert.match(code, /getChildByName\("bg"\)/);
+  assert.match(code, /__wrong\.visible = true/);
+  assert.match(code, /__bg\.visible = false/);
+  assert.match(code, /__wrong\.visible = false/);
   assert.match(code, /this\.result = true/);
   assert.match(code, /this\.result = false/);
   assert.match(code, /this\.result = null/);
   assert.match(code, /run_setVisible_feedback-image/);
-  assert.doesNotMatch(code, /Laya\.Event\.CLICK/);
 
   const inputVars = collectElementsNeedingVar(page);
   assert.equal(inputVars.has(source.id), true);
@@ -399,8 +404,11 @@ test('输入后立即 SDK 判断容器目标时绑定内部输入格', () => {
   );
 
   assert.match(code, /this\.answer_input\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(code, /this\.answer_input\.on\(Laya\.Event\.CLICK/);
   assert.match(code, /this\.answer_container\.isRight\(\)/);
   assert.match(code, /this\.answer_container\.isNull\(\)/);
+  assert.match(code, /getChildByName\("wrong"\)/);
+  assert.match(code, /\}\)\(this\.answer_input\)/);
   assert.match(code, /run_right/);
   assert.match(code, /run_wrong/);
   assert.match(code, /run_null/);
@@ -417,7 +425,9 @@ test('输入后立即 SDK 判断在正式、作业和预习导出中生效', () 
   activePage(normal).elements.push(normalSource, normalInput);
   const normalExportSource = buildExportRegressionArtifacts(normal, regressionImageSizes('game_lt')).scenes[0].source;
   assert.match(normalExportSource, /this\.normal_input_now\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(normalExportSource, /this\.normal_input_now\.on\(Laya\.Event\.CLICK/);
   assert.match(normalExportSource, /\(\["8"\]\)\.indexOf\(String\(this\.normal_input_now\.fontClipValue \|\| ""\)\) >= 0/);
+  assert.match(normalExportSource, /\}\)\(this\.normal_input_now\)/);
 
   const homework = homeworkCourseFixture();
   const homeworkInput = element('homework-input-now', 'KlInputImage', { props: { _judgeAnswer: '9' } });
@@ -436,5 +446,7 @@ test('输入后立即 SDK 判断在正式、作业和预习导出中生效', () 
     regressionImageSizes('game_preview'),
   ).scenes[0].source;
   assert.match(previewExportSource, /this\.preview_input_now\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(previewExportSource, /this\.preview_input_now\.on\(Laya\.Event\.CLICK/);
   assert.match(previewExportSource, /\(\["A"\]\)\.indexOf\(String\(this\.preview_input_now\.fontClipValue \|\| ""\)\) >= 0/);
+  assert.match(previewExportSource, /\}\)\(this\.preview_input_now\)/);
 });
