@@ -1309,6 +1309,12 @@ function buildSdkJudgeChecks(
   return { rightCheck, nullCheck };
 }
 
+function buildInputWrongStateCode(inputRefs: string[], visible: boolean): string {
+  return inputRefs.map((inputRef) =>
+    `(function(__input) { var __wrong = __input && __input.getChildByName ? __input.getChildByName("wrong") : null; var __bg = __input && __input.getChildByName ? __input.getChildByName("bg") : null; if (__wrong) __wrong.visible = ${visible}; if (${visible} && __bg) __bg.visible = false; })(${inputRef});`,
+  ).join(' ');
+}
+
 /**
  * 把触发元素上的通用 SDK 判定关系转换为点击监听。
  * 判定只读取目标组件已有 SDK 状态，结果动作仍使用 action.targetId。
@@ -1437,16 +1443,20 @@ export function buildSdkJudgeInputInitCode(
         : getFillAnswerInputs(target, page.elements).map((input) => `this.${getVar(input)}`);
       if (inputRefs.length === 0) continue;
 
+      const clearWrongState = buildInputWrongStateCode(inputRefs, false);
+      const showWrongState = buildInputWrongStateCode(inputRefs, true);
       const handlerBody = [
+        clearWrongState,
         `if (${checks.rightCheck}) { ${resultBody('right')} }`,
         checks.nullCheck ? `else if (${checks.nullCheck}) { ${resultBody('null')} }` : '',
-        `else { ${resultBody('wrong')} }`,
+        `else { ${showWrongState} ${resultBody('wrong')} }`,
       ].filter(Boolean).join('\n            ');
 
       for (const inputRef of inputRefs) {
         code += `        if (${inputRef}) ${inputRef}.on(KlKeyboardEvent.INPUT_LATER, this, function() {\n`;
         code += `            ${handlerBody}\n`;
         code += `        });\n`;
+        code += `        if (${inputRef}) ${inputRef}.on(Laya.Event.CLICK, this, function() { ${clearWrongState} });\n`;
       }
     }
   }
