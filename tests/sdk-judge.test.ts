@@ -4,6 +4,7 @@ import type { Action, Course, Element, SubPage } from '../src/types';
 import {
   buildExportRegressionArtifacts,
   buildHomeworkStandaloneInputJudgeCode,
+  buildRightSoundLockJudgeInputCode,
   buildSdkJudgeClickInitCode,
   buildSdkJudgeInputInitCode,
   collectElementsNeedingVar,
@@ -16,6 +17,7 @@ import {
   getSdkJudgeCapability,
   INPUT_SDK_JUDGE_EVENT,
   isSdkJudgeTarget,
+  PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
   SDK_JUDGE_EVENT,
 } from '../src/utils/sdkJudge';
 import {
@@ -449,4 +451,120 @@ test('输入后立即 SDK 判断在正式、作业和预习导出中生效', () 
   assert.match(previewExportSource, /this\.preview_input_now\.on\(Laya\.Event\.CLICK/);
   assert.match(previewExportSource, /\(\["A"\]\)\.indexOf\(String\(this\.preview_input_now\.fontClipValue \|\| ""\)\) >= 0/);
   assert.match(previewExportSource, /\}\)\(this\.preview_input_now\)/);
+});
+
+test('播放正确音效+锁定判断输入框生成局部锁定和键盘关闭代码', () => {
+  const input = element('answer-input', 'KlInputImage', {
+    props: { _judgeAnswer: '8', camp: 'answer-camp' },
+  });
+  const keyboard = element('answer-keyboard', 'KlBaseKeyboard', {
+    props: { camp: 'answer-camp' },
+  });
+  const source = element('source-image', 'Image', {
+    actions: [{
+      id: 'lock-right',
+      event: INPUT_SDK_JUDGE_EVENT,
+      actionType: PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
+      branchCondition: 'right',
+      judgeTargetId: input.id,
+    }],
+  });
+  const page: SubPage = { id: 'page', name: '页面', elements: [source, input, keyboard] };
+
+  const code = buildRightSoundLockJudgeInputCode(
+    source.actions![0],
+    page,
+    (item) => item.name ?? item.id,
+    'game_lt',
+    source,
+  );
+
+  assert.match(code, /this\.playSound\("game_lt\/sound\/right\.mp3"\)/);
+  assert.match(code, /var __inputs = \[this\.answer_input\]/);
+  assert.match(code, /var __keyboards = \[this\.answer_keyboard\]/);
+  assert.match(code, /__input\.mouseEnabled = false/);
+  assert.match(code, /__input\.canSelected = false/);
+  assert.match(code, /__keyboard\.setVisible\(false\)/);
+  assert.doesNotMatch(code, /showAnswerFace\(1\)/);
+  assert.doesNotMatch(code, /_lockBox\.visible = true/);
+
+  const vars = collectElementsNeedingVar(page);
+  assert.equal(vars.has(input.id), true);
+  assert.equal(vars.has(keyboard.id), true);
+});
+
+test('播放正确音效+锁定判断输入框支持容器内多个输入并对非法目标降级为音效', () => {
+  const container = element('answer-container', 'ContainerBox', {
+    props: { _inputRuleEnabled: true },
+  });
+  const inputA = element('answer-input-a', 'KlInputImage', {
+    parentId: container.id,
+    props: { _judgeAnswer: 'A', camp: 'shared-camp' },
+  });
+  const inputB = element('answer-input-b', 'KlInputImage', {
+    parentId: container.id,
+    props: { _judgeAnswer: 'B', camp: 'shared-camp' },
+  });
+  const keyboard = element('shared-keyboard', 'KlBaseKeyboard', {
+    props: { camp: 'shared-camp' },
+  });
+  const invalidTarget = element('plain-image', 'Image');
+  const source = element('source-image', 'Image');
+  const page: SubPage = { id: 'page', name: '页面', elements: [source, container, inputA, inputB, keyboard, invalidTarget] };
+
+  const containerCode = buildRightSoundLockJudgeInputCode(
+    {
+      id: 'lock-container',
+      event: INPUT_SDK_JUDGE_EVENT,
+      actionType: PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
+      branchCondition: 'right',
+      judgeTargetId: container.id,
+    },
+    page,
+    (item) => item.name ?? item.id,
+    'game_preview',
+    source,
+  );
+  assert.match(containerCode, /this\.playSound\("game_preview\/sound\/right\.mp3"\)/);
+  assert.match(containerCode, /var __inputs = \[this\.answer_input_a, this\.answer_input_b\]/);
+  assert.match(containerCode, /this\.shared_keyboard/);
+
+  const fallbackCode = buildRightSoundLockJudgeInputCode(
+    {
+      id: 'lock-invalid',
+      event: INPUT_SDK_JUDGE_EVENT,
+      actionType: PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
+      branchCondition: 'right',
+      judgeTargetId: invalidTarget.id,
+    },
+    page,
+    (item) => item.name ?? item.id,
+    'game_lt',
+    source,
+  );
+  assert.equal(fallbackCode, 'this.playSound("game_lt/sound/right.mp3");');
+});
+
+test('输入后立即 SDK 判断正确分支可导出播放正确音效+锁定判断输入框动作', () => {
+  const normal = normalCourseFixture();
+  const input = element('normal-lock-input', 'KlInputImage', {
+    props: { _judgeAnswer: '8', camp: 'normal-camp' },
+  });
+  const keyboard = element('normal-lock-keyboard', 'KlBaseKeyboard', {
+    props: { camp: 'normal-camp' },
+  });
+  const source = element('normal-lock-source', 'Image', {
+    actions: inputJudgeActions(input).map((action) => (
+      action.branchCondition === 'right'
+        ? { ...action, actionType: PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION }
+        : action
+    )),
+  });
+  activePage(normal).elements.push(source, input, keyboard);
+
+  const sourceCode = buildExportRegressionArtifacts(normal, regressionImageSizes('game_lt')).scenes[0].source;
+  assert.match(sourceCode, /this\.normal_lock_input\.on\(KlKeyboardEvent\.INPUT_LATER/);
+  assert.match(sourceCode, /this\.playSound\("game_lt\/sound\/right\.mp3"\)/);
+  assert.match(sourceCode, /__input\.mouseEnabled = false/);
+  assert.match(sourceCode, /this\.normal_lock_keyboard/);
 });

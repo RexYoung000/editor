@@ -6,9 +6,11 @@ import { objects } from './core';
 import { evaluateStructuredInputRuleState, getFillAnswerInputs, getInputAnswerCandidates } from '../inputAnswerRules';
 import { KL_KEYBOARD_INPUT_LATER_EVENT } from '../keyboardEvents';
 import {
+  getInputSdkJudgeTargets,
   getSdkJudgeCapability,
   INPUT_SDK_JUDGE_EVENT,
   isInputSdkJudgeTarget,
+  PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
   SDK_JUDGE_EVENT,
   type JudgeCondition,
 } from '../sdkJudge';
@@ -33,6 +35,7 @@ function _executePreviewAction(action: Action, selfId: string): void {
   const targetId = action.targetId ?? selfId;
   const _objs = objects();
   const L = laya();
+  const page = _previewPages[_previewPageIdx];
   switch (action.actionType) {
     case 'toggleVisible': {
       const obj = _objs.get(targetId);
@@ -64,6 +67,10 @@ function _executePreviewAction(action: Action, selfId: string): void {
     case 'playSound':
       if (action.value && L?.SoundManager) L.SoundManager.playSound(String(action.value));
       break;
+    case PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION:
+      if (L?.SoundManager) L.SoundManager.playSound('/builtin/runtime/game/sound/right.mp3');
+      if (page) _lockJudgeInputInPreview(page, action, selfId);
+      break;
     case 'stopSound':
       if (L?.SoundManager) L.SoundManager.stopAll();
       break;
@@ -90,6 +97,54 @@ function _setPreviewInputSdkJudgeWrongState(page: Page, action: Action, visible:
   _getInputSdkJudgeObjects(page, action).forEach((inputObject) => {
     _setPreviewInputWrongState(inputObject, visible);
   });
+}
+
+function _lockJudgeInputInPreview(page: Page, action: Action, sourceId: string): void {
+  const inputElements = getInputSdkJudgeTargets(action, page, page.elements.find((element) => element.id === sourceId));
+  const inputObjects = inputElements
+    .map((element) => objects().get(element.id))
+    .filter(Boolean) as Array<Record<string, unknown> & {
+      getChildByName?: (name: string) => { visible?: boolean; filters?: unknown[] } | null;
+    }>;
+  if (inputObjects.length === 0) return;
+
+  const camps = new Set<string>();
+  for (const inputObject of inputObjects) {
+    inputObject.isSelected = false;
+    inputObject._isSelected = false;
+    inputObject.canSelected = false;
+    inputObject.mouseEnabled = false;
+    const cursor = inputObject.guangbiaoI as { visible?: boolean } | undefined;
+    if (cursor) cursor.visible = false;
+    const bg = (inputObject._bg as { visible?: boolean; filters?: unknown[] } | undefined)
+      ?? inputObject.getChildByName?.('bg');
+    if (bg) {
+      bg.visible = false;
+      bg.filters = [];
+    }
+    const wrong = inputObject.getChildByName?.('wrong');
+    if (wrong) {
+      wrong.visible = false;
+      wrong.filters = [];
+    }
+    if (!inputObject.filters || Array.isArray(inputObject.filters)) {
+      inputObject.filters = [];
+    }
+    const camp = String(inputObject.camp ?? '').trim();
+    if (camp) camps.add(camp);
+  }
+
+  if (camps.size === 0) return;
+  for (const keyboard of page.elements.filter((element) => element.type === 'KlBaseKeyboard')) {
+    const keyboardObject = objects().get(keyboard.id) as (Record<string, unknown> & {
+      setVisible?: (visible: boolean) => void;
+    }) | undefined;
+    if (!keyboardObject || !camps.has(String(keyboardObject.camp ?? '').trim())) continue;
+    if (typeof keyboardObject.setVisible === 'function') keyboardObject.setVisible(false);
+    else keyboardObject.visible = false;
+    keyboardObject.currIptXpath = null;
+    keyboardObject._currIpt = null;
+  }
 }
 
 function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | null {
