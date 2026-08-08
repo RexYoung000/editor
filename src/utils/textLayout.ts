@@ -5,6 +5,7 @@ export type TextSizingMode = 'auto' | 'fixed-width' | 'fixed';
 
 export interface TextLayoutResult {
   lines: string[];
+  lineStartOffsets: number[];
   width: number;
   height: number;
   lineHeight: number;
@@ -93,19 +94,26 @@ export function layoutRichText(
   const items = parseRichTextHtml((props as { textHtml?: string }).textHtml, text, legacyStyle);
 
   const richLines: RichTextLine[] = [];
+  const lineStartOffsets: number[] = [];
   let currentGlyphs: Array<{ char: string; style: RichTextStyle }> = [];
   let currentWidth = 0;
+  let currentStartOffset = 0;
+  let textOffset = 0;
 
   const pushLine = () => {
     const textLine = currentGlyphs.map((item) => item.char).join('');
     richLines.push({ text: textLine, width: currentWidth, glyphs: currentGlyphs });
+    lineStartOffsets.push(currentStartOffset);
     currentGlyphs = [];
     currentWidth = 0;
+    currentStartOffset = textOffset;
   };
 
   for (const item of items) {
     if ('break' in item) {
       pushLine();
+      textOffset += 1;
+      currentStartOffset = textOffset;
       continue;
     }
     for (const char of splitGraphemes(item.text)) {
@@ -113,13 +121,18 @@ export function layoutRichText(
       const charWidth = measureWidth(glyph.char, glyph.style);
       if (wordWrap && currentGlyphs.length > 0 && currentWidth + charWidth > availableWidth) {
         pushLine();
+        currentStartOffset = textOffset;
       }
       currentGlyphs.push(glyph);
       currentWidth += charWidth;
+      textOffset += glyph.char.length;
     }
   }
   pushLine();
-  if (richLines.length === 0) richLines.push({ text: '', width: 0, glyphs: [] });
+  if (richLines.length === 0) {
+    richLines.push({ text: '', width: 0, glyphs: [] });
+    lineStartOffsets.push(0);
+  }
 
   const lines = richLines.map((line) => line.text);
   const contentWidth = Math.max(0, ...richLines.map((line) => line.width));
@@ -128,7 +141,7 @@ export function layoutRichText(
   const nextWidth = mode === 'auto' ? autoWidth : Math.max(1, Math.ceil(width || autoWidth));
   const nextHeight = mode === 'fixed' ? Math.max(1, Math.ceil(height || autoHeight)) : autoHeight;
   const overflow = mode === 'fixed' && (contentWidth > nextWidth || autoHeight > nextHeight);
-  return { lines, width: nextWidth, height: nextHeight, lineHeight, contentWidth, overflow, richLines };
+  return { lines, lineStartOffsets, width: nextWidth, height: nextHeight, lineHeight, contentWidth, overflow, richLines };
 }
 
 export function caretOffsetAtPoint(
@@ -139,20 +152,22 @@ export function caretOffsetAtPoint(
   localY: number,
   fontFamily = 'sans-serif',
 ): number {
+  const safeX = Number.isFinite(localX) ? localX : 0;
+  const safeY = Number.isFinite(localY) ? localY : 0;
   const layout = layoutRichText(text, width, 0, props, fontFamily);
-  const lineIndex = Math.max(0, Math.min(layout.lines.length - 1, Math.floor(Math.max(0, localY) / layout.lineHeight)));
+  const lineIndex = Math.max(0, Math.min(layout.lines.length - 1, Math.floor(Math.max(0, safeY) / layout.lineHeight)));
   const line = layout.richLines[lineIndex] ?? { text: '', width: 0, glyphs: [] };
   const measureGlyph = createRichTextMeasurer(props, fontFamily);
   let offset = 0;
   let best = Number.POSITIVE_INFINITY;
   let cursorX = 0;
   for (let i = 0; i <= line.glyphs.length; i++) {
-    const distance = Math.abs(cursorX - Math.max(0, localX));
+    const distance = Math.abs(cursorX - Math.max(0, safeX));
     if (distance < best) { best = distance; offset = i; }
     if (i < line.glyphs.length) {
       const glyph = line.glyphs[i];
       cursorX += measureGlyph(glyph.char, glyph.style);
     }
   }
-  return layout.richLines.slice(0, lineIndex).reduce((sum, item) => sum + item.text.length + 1, 0) + offset;
+  return (layout.lineStartOffsets[lineIndex] ?? 0) + offset;
 }

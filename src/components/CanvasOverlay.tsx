@@ -349,10 +349,12 @@ export default function CanvasOverlay({
       ? String(editingElement.props.text ?? '')
       : '';
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     committedTextSessionRef.current = null;
     caretAppliedForRef.current = null;
+  }, [editingTextId]);
 
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       if (!editingElement || editingElement.type !== 'NewTextArea') {
         setTextDraftState({ id: '', html: '', text: '' });

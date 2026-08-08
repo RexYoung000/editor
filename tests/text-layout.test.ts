@@ -29,3 +29,28 @@ test('自动宽高文本保留最小可编辑尺寸并支持点击定位光标',
   assert.equal(layout.height, 20);
   assert.equal(caretOffsetAtPoint('abc', 800, props, 12, 2), 1);
 });
+
+test('caretOffsetAtPoint treats word-wrap lines as visual lines, not newline characters', () => {
+  const props = { fontSize: 10, leading: 0, textSizingMode: 'fixed-width' as const };
+  const layout = layoutText('abcdefghi', 20, 10, props);
+  assert.deepEqual(layout.lines, ['abc', 'def', 'ghi']);
+  assert.deepEqual(layout.lineStartOffsets, [0, 3, 6]);
+  assert.equal(caretOffsetAtPoint('abcdefghi', 20, props, 999, 10), 6);
+  assert.equal(caretOffsetAtPoint('abcdefghi', 20, props, 999, 20), 9);
+});
+
+test('caretOffsetAtPoint keeps real newline offsets while ignoring automatic wrap gaps', () => {
+  const props = { fontSize: 10, leading: 0, textSizingMode: 'fixed-width' as const };
+  const layout = layoutText('abcdef\nghi', 20, 10, props);
+  assert.deepEqual(layout.lines, ['abc', 'def', 'ghi']);
+  assert.deepEqual(layout.lineStartOffsets, [0, 3, 7]);
+  assert.equal(caretOffsetAtPoint('abcdef\nghi', 20, props, 999, 10), 6);
+  assert.equal(caretOffsetAtPoint('abcdef\nghi', 20, props, 999, 20), 10);
+});
+
+test('caretOffsetAtPoint handles non-finite coordinates gracefully', () => {
+  const props = { fontSize: 10, leading: 0, textSizingMode: 'fixed-width' as const };
+  assert.equal(caretOffsetAtPoint('abcdefghi', 20, props, Number.NaN, Number.NaN), 0);
+  assert.equal(caretOffsetAtPoint('abcdefghi', 20, props, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY), 0);
+  assert.equal(caretOffsetAtPoint('abcdefghi', 20, props, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY), 0);
+});
