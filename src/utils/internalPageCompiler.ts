@@ -150,6 +150,13 @@ export function buildInternalPageRuntime(
   const pageIds = [page.id, ...(page.internalPages ?? []).map((item) => item.id)];
   for (const pageId of roots.keys()) if (!pageIds.includes(pageId)) pageIds.push(pageId);
   const rootRecord = Object.fromEntries(pageIds.map((id) => [id, roots.get(id) ?? []]));
+  const declaredPageKinds = new Map<string, 'main' | 'content' | 'dialog'>([[page.id, 'main']]);
+  for (const internalPage of page.internalPages ?? []) declaredPageKinds.set(internalPage.id, internalPage.kind);
+  const pageKindRecord = Object.fromEntries(
+    pageIds
+      .filter((id) => declaredPageKinds.has(id))
+      .map((id) => [id, declaredPageKinds.get(id)!]),
+  );
   const loadCases: string[] = [];
   for (const pageId of pageIds) {
     const normalBodies: string[] = [];
@@ -165,15 +172,38 @@ export function buildInternalPageRuntime(
     }
     loadCases.push(`            case ${JSON.stringify(pageId)}: ${[...normalBodies, ...pageBodies].join(' ')} break;`);
   }
-  const initCode = `        this.__forgePageRoots = ${JSON.stringify(rootRecord)};\n        this.__forgeUnderlyingPage = ${JSON.stringify(page.id)};\n        this.__forgeApplyPageVisibility(${JSON.stringify(page.id)}, null);\n        this.__forgeRunFirstLoad(${JSON.stringify(page.id)});\n`;
+  const initCode = `        this.__forgePageRoots = ${JSON.stringify(rootRecord)};\n        this.__forgePageKinds = ${JSON.stringify(pageKindRecord)};\n        this.__forgeUnderlyingPage = ${JSON.stringify(page.id)};\n        this.__forgeApplyPageVisibility(${JSON.stringify(page.id)}, null);\n        this.__forgeRunFirstLoad(${JSON.stringify(page.id)});\n`;
   const methodsCode = `
     private __forgePageRoots: any = {};
+    private __forgePageKinds: any = {};
     private __forgeLoadedPages: any = {};
     private __forgeUnderlyingPage: string = ${JSON.stringify(page.id)};
 
+    private __forgeHasPage(pageId: any): boolean {
+        return typeof pageId === 'string' && Object.prototype.hasOwnProperty.call(this.__forgePageKinds, pageId);
+    }
+
+    private __forgeIsContentPage(pageId: any): boolean {
+        if (!this.__forgeHasPage(pageId)) return false;
+        let kind = this.__forgePageKinds[pageId];
+        return kind === 'main' || kind === 'content';
+    }
+
+    private __forgeIsDialogPage(pageId: any): boolean {
+        return this.__forgeHasPage(pageId) && this.__forgePageKinds[pageId] === 'dialog';
+    }
+
+    private __forgeResolveContentPage(pageId: any): string {
+        if (this.__forgeIsContentPage(pageId)) return pageId;
+        if (this.__forgeIsContentPage(this.__forgeUnderlyingPage)) return this.__forgeUnderlyingPage;
+        return ${JSON.stringify(page.id)};
+    }
+
     private __forgeApplyPageVisibility(contentPageId: string, dialogPageId: string | null): void {
+        let safeContentPageId = this.__forgeResolveContentPage(contentPageId);
+        let safeDialogPageId = this.__forgeIsDialogPage(dialogPageId) ? dialogPageId : null;
         for (let pageId in this.__forgePageRoots) {
-            let visible = dialogPageId ? (pageId === ${JSON.stringify(page.id)} || pageId === dialogPageId) : pageId === contentPageId;
+            let visible = safeDialogPageId ? (pageId === safeContentPageId || pageId === safeDialogPageId) : pageId === safeContentPageId;
             let vars = this.__forgePageRoots[pageId] || [];
             for (let i = 0; i < vars.length; i++) {
                 let node: any = (this as any)[vars[i]];
@@ -183,6 +213,7 @@ export function buildInternalPageRuntime(
     }
 
     private __forgeRunFirstLoad(pageId: string): void {
+        if (!this.__forgeHasPage(pageId)) return;
         if (this.__forgeLoadedPages[pageId]) return;
         this.__forgeLoadedPages[pageId] = true;
         switch (pageId) {
@@ -191,12 +222,17 @@ ${loadCases.join('\n')}
     }
 
     private __forgeShowContent(pageId: string): void {
-        this.__forgeUnderlyingPage = pageId;
-        this.__forgeApplyPageVisibility(pageId, null);
-        this.__forgeRunFirstLoad(pageId);
+        let safePageId = this.__forgeResolveContentPage(pageId);
+        this.__forgeUnderlyingPage = safePageId;
+        this.__forgeApplyPageVisibility(safePageId, null);
+        this.__forgeRunFirstLoad(safePageId);
     }
 
     private __forgeOpenDialog(pageId: string): void {
+        if (!this.__forgeIsDialogPage(pageId)) {
+            this.__forgeShowContent(this.__forgeUnderlyingPage || ${JSON.stringify(page.id)});
+            return;
+        }
         this.__forgeApplyPageVisibility(${JSON.stringify(page.id)}, pageId);
         this.__forgeRunFirstLoad(pageId);
     }

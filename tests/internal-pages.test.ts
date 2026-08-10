@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+import type * as Ts from 'typescript';
 import type { Action, Course, Element, InternalPage, SubPage } from '../src/types/index';
 import {
   analyzeInternalPageMove,
@@ -19,6 +22,10 @@ import {
   internalPageActionBody,
 } from '../src/utils/internalPageCompiler';
 import { collectSubPageResourceRefs, customTemplateModel, rewriteSubPageResources } from '../src/utils/customTemplateFs';
+
+const ts = createRequire(import.meta.url)(
+  join(process.cwd(), 'node_modules/typescript/lib/typescript.js'),
+) as typeof Ts;
 
 let sequence = 0;
 const makeId = (prefix: string) => `${prefix}-new-${++sequence}`;
@@ -42,6 +49,58 @@ function element(id: string, actions: Action[] = [], props: Record<string, unkno
 
 function internalCourse(subPage: SubPage): Course {
   return { id: 'course', kind: 'normal', stages: [{ id: 'stage', name: '关卡 1', subPages: [subPage] }] };
+}
+
+type InternalPageRuntimeProbe = {
+  showContent(pageId: string): void;
+  openDialog(pageId: string): void;
+  closeDialog(afterType?: string, targetPageId?: string): void;
+  visible(): Record<string, boolean>;
+  underlying(): string;
+  loaded(pageId: string): boolean;
+};
+
+function createRuntimeProbe(source: SubPage): InternalPageRuntimeProbe {
+  const compiled = compileInternalSubPage(source);
+  const runtime = buildInternalPageRuntime(
+    compiled,
+    (item) => String(item.props.__internalPageRootVar ?? item.name),
+    (action) => internalPageActionBody(action),
+  );
+  const roots = compiled.elements
+    .filter((item) => typeof item.props.__internalPageRootVar === 'string' && typeof item.props.__internalPageId === 'string')
+    .map((item) => ({
+      pageId: String(item.props.__internalPageId),
+      varName: String(item.props.__internalPageRootVar),
+    }));
+  const sourceCode = `
+class Runtime {
+${roots.map((root) => `  public ${root.varName} = { visible: false };`).join('\n')}
+${runtime.methodsCode}
+  constructor() {
+${runtime.initCode}
+  }
+  public showContent(pageId: string): void { this.__forgeShowContent(pageId); }
+  public openDialog(pageId: string): void { this.__forgeOpenDialog(pageId); }
+  public closeDialog(afterType?: string, targetPageId?: string): void { this.__forgeCloseDialog(afterType, targetPageId); }
+  public visible(): Record<string, boolean> {
+    return {
+${roots.map((root) => `      ${JSON.stringify(root.pageId)}: this.${root.varName}.visible,`).join('\n')}
+    };
+  }
+  public underlying(): string { return this.__forgeUnderlyingPage; }
+  public loaded(pageId: string): boolean { return !!this.__forgeLoadedPages[pageId]; }
+}
+`;
+  const output = ts.transpileModule(sourceCode, {
+    compilerOptions: {
+      module: ts.ModuleKind.None,
+      target: ts.ScriptTarget.ES2020,
+      useDefineForClassFields: false,
+    },
+  }).outputText;
+  const Runtime = new Function(`${output}; return Runtime;`)() as new () => InternalPageRuntimeProbe;
+  return new Runtime();
 }
 
 test('创建内部页面模板时只给新模板写入能力字段', () => {
@@ -252,6 +311,128 @@ test('页面切换只控制持久容器，不覆盖元素自身的显隐状态',
   assert.equal(contentHidden?.props.visible, false);
   assert.equal(mainHidden?.parentId, mainRoot?.id);
   assert.equal(contentHidden?.parentId, contentRoot?.id);
+});
+
+test('弹窗从内容页打开后默认关闭会返回打开前内容页', () => {
+  const subPage = createInternalPagesSubPage('dialog-return-sub', '弹窗返回');
+  subPage.internalPages = [
+    { id: 'content-current', name: '当前内容页', kind: 'content', elements: [] },
+    { id: 'dialog-current', name: '提示弹窗', kind: 'dialog', elements: [] },
+  ];
+  const runtime = createRuntimeProbe(subPage);
+
+  runtime.showContent('content-current');
+  assert.deepEqual(runtime.visible(), {
+    'dialog-return-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+  });
+  assert.equal(runtime.underlying(), 'content-current');
+
+  runtime.openDialog('dialog-current');
+  assert.deepEqual(runtime.visible(), {
+    'dialog-return-sub': true,
+    'content-current': false,
+    'dialog-current': true,
+  });
+
+  runtime.closeDialog();
+  assert.deepEqual(runtime.visible(), {
+    'dialog-return-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+  });
+  assert.equal(runtime.underlying(), 'content-current');
+});
+
+test('弹窗关闭后跳转当前内容页或替换弹窗时保留返回路径', () => {
+  const subPage = createInternalPagesSubPage('after-close-sub', '关闭后动作');
+  subPage.internalPages = [
+    { id: 'content-current', name: '当前内容页', kind: 'content', elements: [] },
+    { id: 'dialog-current', name: '提示弹窗', kind: 'dialog', elements: [] },
+    { id: 'dialog-next', name: '下一弹窗', kind: 'dialog', elements: [] },
+  ];
+  const runtime = createRuntimeProbe(subPage);
+
+  runtime.showContent('content-current');
+  runtime.openDialog('dialog-current');
+  runtime.closeDialog('navigate', 'content-current');
+  assert.deepEqual(runtime.visible(), {
+    'after-close-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+    'dialog-next': false,
+  });
+  assert.equal(runtime.underlying(), 'content-current');
+
+  runtime.openDialog('dialog-current');
+  runtime.closeDialog('openDialog', 'dialog-next');
+  assert.deepEqual(runtime.visible(), {
+    'after-close-sub': true,
+    'content-current': false,
+    'dialog-current': false,
+    'dialog-next': true,
+  });
+  assert.equal(runtime.underlying(), 'content-current');
+
+  runtime.closeDialog();
+  assert.deepEqual(runtime.visible(), {
+    'after-close-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+    'dialog-next': false,
+  });
+});
+
+test('内部页面运行时遇到缺失目标或类型错配时不会隐藏全部根节点', () => {
+  const subPage = createInternalPagesSubPage('guard-sub', '运行时兜底');
+  subPage.internalPages = [
+    { id: 'content-current', name: '当前内容页', kind: 'content', elements: [] },
+    { id: 'dialog-current', name: '提示弹窗', kind: 'dialog', elements: [] },
+  ];
+  const runtime = createRuntimeProbe(subPage);
+
+  runtime.showContent('content-current');
+  runtime.showContent('missing-content');
+  assert.deepEqual(runtime.visible(), {
+    'guard-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+  });
+  assert.equal(runtime.underlying(), 'content-current');
+  assert.equal(runtime.loaded('missing-content'), false);
+
+  runtime.showContent('dialog-current');
+  assert.deepEqual(runtime.visible(), {
+    'guard-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+  });
+  assert.equal(runtime.underlying(), 'content-current');
+
+  runtime.openDialog('missing-dialog');
+  assert.deepEqual(runtime.visible(), {
+    'guard-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+  });
+  assert.equal(runtime.loaded('missing-dialog'), false);
+
+  runtime.openDialog('dialog-current');
+  runtime.closeDialog('navigate', 'missing-content');
+  assert.deepEqual(runtime.visible(), {
+    'guard-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+  });
+
+  runtime.openDialog('dialog-current');
+  runtime.closeDialog('openDialog', 'content-current');
+  assert.deepEqual(runtime.visible(), {
+    'guard-sub': false,
+    'content-current': true,
+    'dialog-current': false,
+  });
 });
 
 test('作业和预习的点击绑定先执行普通动作，再执行唯一页面动作', () => {

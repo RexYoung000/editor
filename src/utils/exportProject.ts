@@ -2788,12 +2788,13 @@ export async function exportProject(course: Course, options: { cleanBuildOutput?
     throw new Error(`自定义答案键盘配置尚未完成，不能预览或发布：\n\n${details}${more}`);
   }
 
-  if (options.cleanBuildOutput) {
-    const blockingIssues = collectInternalPageIssues(course).filter((issue) => issue.severity === 'blocking');
-    if (blockingIssues.length > 0) {
-      const details = blockingIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
-      throw new Error(`内部页面关系尚未完成，不能发布：\n\n${details}`);
-    }
+  const blockingInternalPageIssues = collectInternalPageIssues(course).filter((issue) => issue.severity === 'blocking');
+  if (blockingInternalPageIssues.length > 0) {
+    const details = blockingInternalPageIssues.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
+    const more = blockingInternalPageIssues.length > 8
+      ? `\n另有 ${blockingInternalPageIssues.length - 8} 项未显示`
+      : '';
+    throw new Error(`内部页面关系尚未完成，不能预览或发布：\n\n${details}${more}`);
   }
 
   const eApi = window.electronAPI;
