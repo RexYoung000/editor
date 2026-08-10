@@ -139,8 +139,18 @@ export default class FractionInput extends KlInputImage {
     }
     public set fontClipValue(v: string) {
         this.sync("fontClipValue", this.fontClipValue, v, undefined);
-        this._fontClipValue = v;
+        this.setFontClipValueForJudge(v);
         this.updateValue();
+    }
+    public get inputValue(): string {
+        return this._fontClipValue || "";
+    }
+    public set inputValue(v: string) {
+        this.fontClipValue = v || "";
+    }
+    private setFontClipValueForJudge(v: string) {
+        const value = v || "";
+        this._fontClipValue = value;
     }
     private _place: number;
     public get place(): number {
@@ -162,7 +172,8 @@ export default class FractionInput extends KlInputImage {
         VipThink.viewMgr.once(ViewEvent.MAINVIEW_PREPARED, this, this.onPrepared);
         this.inputs = [];
         this.clips = [];
-        this.fontClipValue = "";
+        this.setFontClipValueForJudge("");
+        this.updateValue();
         this.align = "center";
     }
     private onPrepared() {
@@ -572,7 +583,7 @@ export default class FractionInput extends KlInputImage {
         let str = values[count] = `<${numerator}_${denominator}>`;
         let v = values.join("");
         this.sync("fontClipValue", this.fontClipValue, v, undefined);
-        this._fontClipValue = v;
+        this.setFontClipValueForJudge(v);
         this.layoutFractionBox(input1.parent as KlBox, input1, input2, numerator, denominator);
         this.reflowDynamicContent();
         this.event(KlKeyboardEvent.INPUT_LATER, [this]);
@@ -593,7 +604,7 @@ export default class FractionInput extends KlInputImage {
         let str = values[count] = `[${integer}<${numerator}_${denominator}>]`;
         let v = values.join("");
         this.sync("fontClipValue", this.fontClipValue, v, undefined);
-        this._fontClipValue = v;
+        this.setFontClipValueForJudge(v);
         this.layoutMixedFractionBox(
             input0.parent as KlBox,
             input0,

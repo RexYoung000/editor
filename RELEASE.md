@@ -1,5 +1,7 @@
 # forge 编辑器 Release 文档
 
+> 历史资料：本文是 v1.0.0 的早期发布说明，不是当前版本、安装包或部署基线。当前状态请先阅读 [项目交接总览](./documentation/handoff.md)，版本发布以 `docs/releases/vX.Y.Z.md`、正式 Tag 和 GitHub Release 为准。
+
 > 版本：v1.0.0  
 > 发布日期：2026-04-27  
 > 状态：✅ 生产就绪  

@@ -13,7 +13,7 @@ forge 编辑器的导出流程由 Toolbar 上发布与预览入口触发，**工
 
 两条流程都先跑**前置检查（资源就绪检查）**，再跑导出共用部分（`writeBackToLocalFile` 写回课件 JSON → `cleanupUnreferencedImages` 清未引用图 → 实际导出）。
 
-内部页面课件在资源检查之后增加结构校验：目标不存在、目标类型不兼容或弹窗没有关闭出口时阻止预览与发布；无入口内容页和无打开入口弹窗只提示，不阻断。
+内部页面课件在资源检查之后增加结构校验：目标不存在、目标类型不兼容、同一次点击包含多个页面动作或弹窗没有关闭出口时阻止预览与发布；无入口内容页和无打开入口弹窗只提示，不阻断。运行时仍会在页面显隐切换前校验页面 ID 和页面类型，异常断链数据只能兜底到当前内容页或主界面，不允许隐藏全部内部页面根节点。
 
 ### 1.1 发布前置检查（资源就绪检查）
 
@@ -140,6 +140,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 - **DropObj `tipSkin` → name=tip Image 子节点**：同时设置 `props.isNeedTip = true`；没有 tipSkin 时显式 `isNeedTip = false`
 - **`exportChildren` 注入**：从 `elementMeta.exportChildren` 或 `_keyboardPreset.children` 读固定子节点（如 KlInputImage 的三层皮肤），递归 `cloneFixed` 克隆
 - **`_` 前缀 props 一律剥掉**（编辑器专用）；`runtime` / `hidden` / `blockThrough` 不写入 scene
+- **点击触发源热区**：只要元素会被导出为运行时 `click` 监听源，`.scene` 自动写入 `mouseEnabled=true, mouseThrough=false`。这覆盖普通 `onClick` / `onClickSound`、`onClickSdkJudge`、内部页面点击动作、翻页动作和历史确认按钮事件；`blockThrough` 继续作为手动阻止穿透开关保留，但不再是点击事件能触发的前提
 - **ChoiceBox 的 `mouseEnabled` 不导出**，由 runtime 内部控制
 - **ChoiceBox 答案转换**：编辑器 `_correctOptionIds` 不进入 scene；导出时按直属选项当前名称生成 `rightItemNames`，并按答案数量生成 `upperLimit`（1 个为单选，2 个及以上为不限数量多选）
 - **选项文字点击穿透**：选择题选项内部 Label 强制 `mouseEnabled=false, mouseThrough=true`，点击文字区域仍由选项元素接收
@@ -161,6 +162,8 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 [exportProject.ts](../src/utils/exportProject.ts)。包一层 `KlView` 根节点：`width=1920, height=1080, sceneColor='#000000', runtime='view/<viewDir>/<sceneName>.ts'`。正课默认按动作注入口才反馈动画节点；预习复用同一场景构建入口，但通过显式选项关闭这项正课专用能力，避免生成未收集资源的节点。
 
 内部页面小关卡仍只生成一个场景：主界面、内容页和弹窗分别编译为持久容器。内容页互斥显示；弹窗显示时以主界面为只读底板。切换仅改变容器显隐，不重新创建已进入页面，因此同一轮运行内保留输入、选择、拖拽和显隐状态。隐藏页面的加载动作延迟到首次显示时执行一次。
+
+页面动作生成的 `__forgeShowContent`、`__forgeOpenDialog` 和 `__forgeCloseDialog` 使用编译时页面类型表防护目标：内容跳转必须落在主界面或内容页，打开或替换弹窗必须落在弹窗页。无效目标不会写入当前底板页面，也不会触发首次加载动作；关闭弹窗默认返回打开前保留的内容页，保留值失效时回到主界面。
 
 ### 4.9 `.ts` 生成
 

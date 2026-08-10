@@ -138,6 +138,31 @@ test('旧版分数输入框导出时迁移完整位图字符表', () => {
   assert.equal(fractionNode?.props?.sheet, '0123456789+-×÷=()><.tabcdxyπ²');
 });
 
+test('分数输入框普通数字和分数结构安全提供 inputValue 供 SDK 判空', () => {
+  const runtimeFiles = [
+    'public/builtin/layaProjectModel/Game1_LT/src/view/game_lt/Components/FractionInput.ts',
+    'public/builtin/layaProjectModel/Game1_HW/src/view/game_hw/Components/FractionInput.ts',
+    'public/builtin/layaProjectModel/Game1_PREVIEW/src/view/game_preview/Components/FractionInput.ts',
+  ];
+
+  for (const relativePath of runtimeFiles) {
+    const source = readFileSync(join(process.cwd(), relativePath), 'utf8');
+    assert.match(source, /private setFontClipValueForJudge\(v: string\)/);
+    assert.match(source, /public get inputValue\(\): string/);
+    assert.match(source, /return this\._fontClipValue \|\| ""/);
+    assert.match(source, /public set inputValue\(v: string\)/);
+    assert.match(source, /this\.fontClipValue = v \|\| ""/);
+    assert.equal((source.match(/this\.setFontClipValueForJudge\(v\)/g) ?? []).length, 3);
+    const createChildrenBlock = source.match(/createChildren\(\) \{[\s\S]*?\n {4}\}/)?.[0] ?? '';
+    assert.match(createChildrenBlock, /this\.setFontClipValueForJudge\(""\)/);
+    assert.match(createChildrenBlock, /this\.updateValue\(\)/);
+    assert.doesNotMatch(createChildrenBlock, /this\.fontClipValue = ""/);
+    assert.match(source, /this\.fontClipValue \+= key\.output/);
+    assert.doesNotMatch(source, /\(this as any\)\.inputValue = value/);
+    assert.doesNotMatch(source, /this\._fontClipValue = v;/);
+  }
+});
+
 test('普通数字与分数混排时按实际字体缩放宽度推进位置', () => {
   const runtimeFiles = [
     'public/builtin/layaProjectModel/Game1_LT/src/view/game_lt/Components/FractionInput.ts',
