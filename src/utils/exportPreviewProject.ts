@@ -9,6 +9,7 @@ import {
   buildScene,
   buildChoiceVisualInitCode,
   buildSdkJudgeClickInitCode,
+  buildSdkJudgeInputInitCode,
   buildMathKeyboardInitCode,
   collectGameZipFiles,
   collectResources,
@@ -62,6 +63,7 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
   initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
+  initCode += buildSdkJudgeInputInitCode(page, getVar, buildActionBody);
   initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, 'game_preview');
   // onClickInitConfirm / onClickInitConfirmWithLock 事件：按判定目标注入对应确认逻辑。
   for (const el of page.elements) {

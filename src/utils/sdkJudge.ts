@@ -3,6 +3,7 @@ import { isInputRuleHost } from './inputAnswerRules';
 import { getLayerDisplayName } from './layerPresentation';
 
 export const SDK_JUDGE_EVENT = 'onClickSdkJudge';
+export const INPUT_SDK_JUDGE_EVENT = 'onInputSdkJudge';
 
 export type JudgeCondition = NonNullable<Action['branchCondition']>;
 export type SdkJudgeTargetKind = 'inputImage' | 'input' | 'choice' | 'drag' | 'matching';
@@ -67,6 +68,11 @@ export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCap
 
 export function isSdkJudgeTarget(element: Element | undefined): element is Element {
   return getSdkJudgeCapability(element) !== null;
+}
+
+export function isInputSdkJudgeTarget(element: Element | undefined): element is Element {
+  const capability = getSdkJudgeCapability(element);
+  return capability?.kind === 'inputImage' || capability?.kind === 'input';
 }
 
 const INPUT_CONFIRM_EVENTS = new Set(['onClickInitConfirm', 'onClickInitConfirmWithLock']);
