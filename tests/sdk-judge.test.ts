@@ -373,8 +373,12 @@ test('输入后立即 SDK 判断绑定 INPUT_LATER 并复用结果分支', () =>
   assert.match(code, /getChildByName\("wrong"\)/);
   assert.match(code, /getChildByName\("bg"\)/);
   assert.match(code, /__wrong\.visible = true/);
+  assert.match(code, /new Laya\.GlowFilter\("#ef4444", 14, 0, 0\)/);
+  assert.match(code, /__wrong\.filters = \[__wrong\.__forgeWrongGlowFilter\]/);
   assert.match(code, /__bg\.visible = false/);
+  assert.match(code, /__bg\.filters = \[\]/);
   assert.match(code, /__wrong\.visible = false/);
+  assert.match(code, /__wrong\.filters = \[\]/);
   assert.match(code, /this\.result = true/);
   assert.match(code, /this\.result = false/);
   assert.match(code, /this\.result = null/);
@@ -409,6 +413,7 @@ test('输入后立即 SDK 判断容器目标时绑定内部输入格', () => {
   assert.match(code, /this\.answer_container\.isNull\(\)/);
   assert.match(code, /getChildByName\("wrong"\)/);
   assert.match(code, /\}\)\(this\.answer_input\)/);
+  assert.match(code, /new Laya\.GlowFilter\("#ef4444", 14, 0, 0\)/);
   assert.match(code, /run_right/);
   assert.match(code, /run_wrong/);
   assert.match(code, /run_null/);
@@ -428,6 +433,7 @@ test('输入后立即 SDK 判断在正式、作业和预习导出中生效', () 
   assert.match(normalExportSource, /this\.normal_input_now\.on\(Laya\.Event\.CLICK/);
   assert.match(normalExportSource, /\(\["8"\]\)\.indexOf\(String\(this\.normal_input_now\.fontClipValue \|\| ""\)\) >= 0/);
   assert.match(normalExportSource, /\}\)\(this\.normal_input_now\)/);
+  assert.match(normalExportSource, /new Laya\.GlowFilter\("#ef4444", 14, 0, 0\)/);
 
   const homework = homeworkCourseFixture();
   const homeworkInput = element('homework-input-now', 'KlInputImage', { props: { _judgeAnswer: '9' } });
@@ -449,4 +455,5 @@ test('输入后立即 SDK 判断在正式、作业和预习导出中生效', () 
   assert.match(previewExportSource, /this\.preview_input_now\.on\(Laya\.Event\.CLICK/);
   assert.match(previewExportSource, /\(\["A"\]\)\.indexOf\(String\(this\.preview_input_now\.fontClipValue \|\| ""\)\) >= 0/);
   assert.match(previewExportSource, /\}\)\(this\.preview_input_now\)/);
+  assert.match(previewExportSource, /new Laya\.GlowFilter\("#ef4444", 14, 0, 0\)/);
 });

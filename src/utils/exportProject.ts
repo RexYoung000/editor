@@ -1311,7 +1311,7 @@ function buildSdkJudgeChecks(
 
 function buildInputWrongStateCode(inputRefs: string[], visible: boolean): string {
   return inputRefs.map((inputRef) =>
-    `(function(__input) { var __wrong = __input && __input.getChildByName ? __input.getChildByName("wrong") : null; var __bg = __input && __input.getChildByName ? __input.getChildByName("bg") : null; if (__wrong) __wrong.visible = ${visible}; if (${visible} && __bg) __bg.visible = false; })(${inputRef});`,
+    `(function(__input) { var __wrong = __input && __input.getChildByName ? __input.getChildByName("wrong") : null; var __bg = __input && __input.getChildByName ? __input.getChildByName("bg") : null; if (__wrong) { __wrong.visible = ${visible}; if (${visible}) { if (typeof Laya !== "undefined" && Laya.GlowFilter) { __wrong.__forgeWrongGlowFilter = __wrong.__forgeWrongGlowFilter || new Laya.GlowFilter("#ef4444", 14, 0, 0); __wrong.filters = [__wrong.__forgeWrongGlowFilter]; } } else { __wrong.filters = []; } } if (${visible} && __bg) { __bg.visible = false; __bg.filters = []; } })(${inputRef});`,
   ).join(' ');
 }
 

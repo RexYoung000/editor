@@ -79,11 +79,31 @@ function _executePreviewAction(action: Action, selfId: string): void {
 }
 
 function _setPreviewInputWrongState(inputObject: unknown, visible: boolean): void {
-  const input = inputObject as { getChildByName?: (name: string) => { visible?: boolean } | null };
+  const input = inputObject as {
+    getChildByName?: (name: string) => {
+      visible?: boolean;
+      filters?: unknown[] | null;
+      __forgeWrongGlowFilter?: unknown;
+    } | null;
+  };
   const wrong = input?.getChildByName?.('wrong');
   const bg = input?.getChildByName?.('bg');
-  if (wrong) wrong.visible = visible;
-  if (visible && bg) bg.visible = false;
+  if (wrong) {
+    wrong.visible = visible;
+    if (visible) {
+      const L = laya();
+      if (L?.GlowFilter) {
+        wrong.__forgeWrongGlowFilter = wrong.__forgeWrongGlowFilter || new L.GlowFilter('#ef4444', 14, 0, 0);
+        wrong.filters = [wrong.__forgeWrongGlowFilter];
+      }
+    } else {
+      wrong.filters = [];
+    }
+  }
+  if (visible && bg) {
+    bg.visible = false;
+    bg.filters = [];
+  }
 }
 
 function _setPreviewInputSdkJudgeWrongState(page: Page, action: Action, visible: boolean): void {
