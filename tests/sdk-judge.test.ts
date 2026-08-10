@@ -23,6 +23,12 @@ import {
   regressionImageSizes,
 } from './fixtures/export-courses';
 
+interface SceneNode {
+  type?: string;
+  props?: Record<string, unknown>;
+  child?: SceneNode[];
+}
+
 function element(id: string, type: string, extra: Partial<Element> = {}): Element {
   return {
     id,
@@ -80,6 +86,27 @@ function judgeActions(judgeTarget: Element, actionTarget?: Element): Action[] {
 function activePage(course: Course, preview = false): SubPage {
   const stages = preview ? course.previewStages ?? [] : course.stages;
   return stages[0].subPages[0];
+}
+
+function sceneNodes(scene: Record<string, unknown>): SceneNode[] {
+  const nodes: SceneNode[] = [];
+  const visit = (node: SceneNode) => {
+    nodes.push(node);
+    for (const child of node.child ?? []) visit(child);
+  };
+  visit(scene as SceneNode);
+  return nodes;
+}
+
+function findSceneNode(scene: Record<string, unknown>, name: string): SceneNode {
+  const node = sceneNodes(scene).find((item) => item.props?.name === name || item.props?.var === name);
+  assert.ok(node, `应导出场景节点 ${name}`);
+  return node;
+}
+
+function assertClickHotZone(label: string, node: SceneNode): void {
+  assert.equal(node.props?.mouseEnabled, true, `[${label}] 点击判定触发源应启用鼠标热区`);
+  assert.equal(node.props?.mouseThrough, false, `[${label}] 点击判定触发源不应穿透点击`);
 }
 
 test('SDK 判定目标矩阵只接受现有题型组件并返回真实结果能力', () => {
@@ -301,6 +328,7 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   assert.match(normalSource, /\(\["8"\]\)\.indexOf\(String\(this\.normal_judge_input\.fontClipValue \|\| ""\)\) >= 0/);
   assert.match(normalSource, /this\.normal_judge_feedback/);
   assert.doesNotMatch(JSON.stringify(normalArtifacts.scenes[0].scene), /_judgeAnswer/);
+  assertClickHotZone('正课 SDK 图片触发源', findSceneNode(normalArtifacts.scenes[0].scene, 'normal_judge_trigger'));
 
   const homework = homeworkCourseFixture();
   const homeworkChoice = element('homework-choice', 'ChoiceBox', { props: { rightItemNames: 'B' } });
@@ -308,14 +336,17 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
   const homeworkInput = element('homework-input', 'KlInputImage', { props: { _judgeAnswer: 'B' } });
   const homeworkInputTrigger = element('homework-input-trigger', 'Image', { actions: judgeActions(homeworkInput) });
   activePage(homework).elements.push(homeworkTrigger, homeworkChoice, homeworkInputTrigger, homeworkInput);
-  const homeworkSource = buildExportRegressionArtifacts(
+  const homeworkArtifacts = buildExportRegressionArtifacts(
     homework,
     regressionImageSizes('game_hw'),
-  ).scenes[0].source;
+  );
+  const homeworkSource = homeworkArtifacts.scenes[0].source;
   assert.match(homeworkSource, /this\.homework_trigger\.on\(Laya\.Event\.CLICK/);
   assert.match(homeworkSource, /this\.homework_choice\.isNull/);
   assert.match(homeworkSource, /this\.result = null/);
   assert.match(homeworkSource, /\(\["B"\]\)\.indexOf\(String\(this\.homework_input\.fontClipValue \|\| ""\)\) >= 0/);
+  assertClickHotZone('作业 SDK 选择题触发源', findSceneNode(homeworkArtifacts.scenes[0].scene, 'homework_trigger'));
+  assertClickHotZone('作业 SDK 输入格触发源', findSceneNode(homeworkArtifacts.scenes[0].scene, 'homework_input_trigger'));
 
   const preview = previewCourseFixture();
   const previewMatching = element('preview-matching', 'MatchingGame');
@@ -328,12 +359,15 @@ test('正常课、作业和预习导出都生成通用点击判定', () => {
     previewInputTrigger,
     previewInput,
   );
-  const previewSource = buildPreviewExportRegressionArtifacts(
+  const previewArtifacts = buildPreviewExportRegressionArtifacts(
     preview,
     regressionImageSizes('game_preview'),
-  ).scenes[0].source;
+  );
+  const previewSource = previewArtifacts.scenes[0].source;
   assert.match(previewSource, /this\.preview_trigger\.on\(Laya\.Event\.CLICK/);
   assert.match(previewSource, /this\.preview_matching\.allRight/);
   assert.match(previewSource, /this\.preview_matching\.isNull\(\)/);
   assert.match(previewSource, /\(\["A"\]\)\.indexOf\(String\(this\.preview_input\.fontClipValue \|\| ""\)\) >= 0/);
+  assertClickHotZone('预习 SDK 连线触发源', findSceneNode(previewArtifacts.scenes[0].scene, 'preview_trigger'));
+  assertClickHotZone('预习 SDK 输入格触发源', findSceneNode(previewArtifacts.scenes[0].scene, 'preview_input_trigger'));
 });

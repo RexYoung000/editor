@@ -348,6 +348,81 @@ function filterOptionalFileFields(props: Record<string, unknown>, keys: string[]
 let _compId = 0;
 function nextId() { return ++_compId; }
 
+const RUNTIME_CLICK_CONFIRM_EVENTS = new Set([
+  'onClickInitConfirm',
+  'onClickInitConfirmWithLock',
+  'onClickInitConfirmCH',
+  'onClickInitConfirmCHWithLock',
+]);
+
+const RUNTIME_CLICK_GAME_CONFIRM_EVENTS = new Set([
+  'onClickInitGameConfirm',
+  'onClickInitGameConfirmWithLock',
+  'onClickInitGameConfirmCH',
+  'onClickInitGameConfirmCHWithLock',
+]);
+
+const PAGE_TURN_ACTION_TYPES = new Set([
+  'pageTurnGoTo',
+  'pageTurnPrevOnce',
+  'pageTurnNextOnce',
+  'pageTurnPrevLoop',
+  'pageTurnNextLoop',
+]);
+
+const RUNTIME_CLICK_ACTION_TYPES = new Set([
+  'toggleVisible',
+  'setVisible',
+  'playSound',
+  'playRightSound',
+  'playWrongSound',
+  'showAnswerRight',
+  'showAnswerRightLock',
+  'showAnswerWrong',
+  'playKcRightAni',
+  'playKcRightAniLock',
+  'playKcWrongAni',
+  'animate',
+]);
+
+function findActionElement(allElements: Element[], id: string | undefined): Element | undefined {
+  return id ? allElements.find((element) => element.id === id) : undefined;
+}
+
+function hasRuntimeClickActionBody(action: Action, allElements: Element[]): boolean {
+  if (isPageAction(action)) {
+    return action.actionType === 'closeInternalDialog'
+      || (typeof action.pageTargetId === 'string' && action.pageTargetId !== '');
+  }
+  if (PAGE_TURN_ACTION_TYPES.has(action.actionType)) {
+    return findActionElement(allElements, action.targetId)?.type === 'PageTurnBox';
+  }
+  if (action.actionType === 'setProperty') {
+    return typeof action.property === 'string' && action.property !== '';
+  }
+  return RUNTIME_CLICK_ACTION_TYPES.has(action.actionType);
+}
+
+function isRuntimeClickTrigger(element: Element, allElements: Element[]): boolean {
+  return (element.actions ?? []).some((action) => {
+    if (action.event === SDK_JUDGE_EVENT) {
+      return Boolean(getSdkJudgeCapability(findActionElement(allElements, action.judgeTargetId)));
+    }
+    if (action.event === 'onClick' || action.event === 'onClickSound') {
+      return hasRuntimeClickActionBody(action, allElements);
+    }
+    if (RUNTIME_CLICK_CONFIRM_EVENTS.has(action.event)) {
+      const target = findActionElement(allElements, action.targetId);
+      return isInputRuleHost(target) || target?.layaType === 'ChoiceBox';
+    }
+    if (RUNTIME_CLICK_GAME_CONFIRM_EVENTS.has(action.event)) {
+      const target = findActionElement(allElements, action.targetId);
+      return target?.type === 'DragViewBox' || target?.type === 'MatchingGame';
+    }
+    return false;
+  });
+}
+
 /** 收集所有需要在 .ts 中通过 this.xxx 引用的元素 ID。
  *  规则：
  *  - 有 actions 的元素（作为事件源）
@@ -557,8 +632,8 @@ function buildSceneNode(
   }
   // hidden=true → visible=false（勾选隐藏时导出不可见）
   if (rewritten.hidden === true) props.visible = false;
-  // blockThrough=true → mouseEnabled=true, mouseThrough=false（勾选阻止穿透时导出拦截点击）
-  if (rewritten.blockThrough === true) {
+  // 点击触发源必须有运行时热区；blockThrough 保持手动阻止穿透语义。
+  if (rewritten.blockThrough === true || isRuntimeClickTrigger(element, allElements)) {
     props.mouseEnabled = true;
     props.mouseThrough = false;
   }
