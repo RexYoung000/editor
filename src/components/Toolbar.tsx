@@ -183,12 +183,12 @@ export default function Toolbar({ isDirty, onBack }: { isDirty?: boolean; onBack
     if (!currentCourse) return;
     const issues = collectInternalPageIssues(currentCourse);
     const blocking = issues.filter((issue) => issue.severity === 'blocking');
-    if (blocking.length > 0 && mode === 'publish') {
+    if (blocking.length > 0) {
       const details = blocking.slice(0, 8).map((issue) => `• ${issue.message}`).join('\n');
       const more = blocking.length > 8 ? `\n另有 ${blocking.length - 8} 项未显示` : '';
-      throw new Error(`内部页面关系尚未完成，不能发布：\n\n${details}${more}`);
+      const action = mode === 'preview' ? '预览' : '发布';
+      throw new Error(`内部页面关系尚未完成，不能${action}：\n\n${details}${more}`);
     }
-    if (blocking.length > 0) showToast(`内部页面有 ${blocking.length} 项阻塞发布的问题；本次仅预览，仍可继续检查`, 'warning');
     const warnings = issues.filter((issue) => issue.severity === 'warning' && issue.code !== 'capacity');
     if (warnings.length > 0) showToast(`内部页面有 ${warnings.length} 项非阻塞提醒，可在专注工作区查看`, 'info');
   };

@@ -350,6 +350,17 @@ export function internalPagesCourseFixture(): Course {
                 actionType: 'navigateInternalPage',
                 pageTargetId: contentPage.id,
               }),
+            ],
+          }),
+          element({
+            id: 'open-dialog',
+            type: 'ScaleButton',
+            layaType: 'ScaleButton',
+            name: 'open dialog',
+            x: 120,
+            y: 220,
+            props: { skin: exportPaths.builtinConfirm },
+            actions: [
               action({
                 id: 'open-dialog',
                 event: 'onClick',

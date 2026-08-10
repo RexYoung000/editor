@@ -37,6 +37,11 @@ function getActionElementLabel(element: Element): string {
   return getLayerDisplayName(element, elementMeta[element.type]?.label);
 }
 
+function getInternalPageOptionLabel(page: { kind: 'main' | 'content' | 'dialog'; name: string }): string {
+  if (page.kind === 'main') return '主界面';
+  return `${page.kind === 'dialog' ? '弹窗' : '内容页'} / ${page.name}`;
+}
+
 interface Props {
   element: Element;
   pages: Page[];
@@ -857,7 +862,7 @@ export default function ActionEditor({
                         <option value="">请选择页面</option>
                         {internalPageRefs
                           .filter((page) => action.actionType === 'openInternalDialog' ? page.kind === 'dialog' : page.kind !== 'dialog')
-                          .map((page) => <option key={page.id} value={page.id}>{page.kind === 'main' ? '内容页 / ' : page.kind === 'dialog' ? '弹窗 / ' : '内容页 / '}{page.name}</option>)}
+                          .map((page) => <option key={page.id} value={page.id}>{getInternalPageOptionLabel(page)}</option>)}
                       </select>
                     </div>
                   )}
@@ -878,10 +883,10 @@ export default function ActionEditor({
                         >
                           <option value="">返回打开前页面</option>
                           <optgroup label="关闭后跳转">
-                            {internalPageRefs.filter((page) => page.kind !== 'dialog').map((page) => <option key={`navigate:${page.id}`} value={`navigate:${page.id}`}>{page.name}</option>)}
+                            {internalPageRefs.filter((page) => page.kind !== 'dialog').map((page) => <option key={`navigate:${page.id}`} value={`navigate:${page.id}`}>{getInternalPageOptionLabel(page)}</option>)}
                           </optgroup>
                           <optgroup label="替换为弹窗">
-                            {internalPageRefs.filter((page) => page.kind === 'dialog' && page.id !== currentInternalPageId).map((page) => <option key={`openDialog:${page.id}`} value={`openDialog:${page.id}`}>{page.name}</option>)}
+                            {internalPageRefs.filter((page) => page.kind === 'dialog' && page.id !== currentInternalPageId).map((page) => <option key={`openDialog:${page.id}`} value={`openDialog:${page.id}`}>{getInternalPageOptionLabel(page)}</option>)}
                           </optgroup>
                         </select>
                       </div>
