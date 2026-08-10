@@ -14,6 +14,7 @@ import {
   INPUT_SDK_JUDGE_EVENT,
   isInputSdkJudgeTarget,
   isSdkJudgeTarget,
+  PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
   SDK_JUDGE_EVENT,
   type JudgeCondition,
 } from '../utils/sdkJudge';
@@ -166,6 +167,7 @@ export default function ActionEditor({
     { value: 'playSound',     label: t('actionPlaySound') },
     { value: 'playRightSound', label: '播放正确音效' },
     { value: 'playWrongSound', label: '播放错误音效' },
+    { value: PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION, label: '播放正确音效+锁定判断输入框' },
     { value: 'showAnswerRight', label: '播放SDK通用胜利动画' },
     { value: 'showAnswerRightLock', label: '播放SDK通用胜利动画+锁屏' },
     { value: 'showAnswerWrong', label: '播放SDK通用失败动画' },

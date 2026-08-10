@@ -15,6 +15,7 @@ import CanvasRuler, { RULER_PX } from './CanvasRuler';
 import { LockKeyhole, PanelTopOpen } from 'lucide-react';
 import { createDefaultElement } from '../elements/elementMeta';
 import { layoutText } from '../utils/textLayout';
+import type { RichTextStyleController } from '../utils/richText';
 import { getCourseDirPath, readFileAsDataUrl } from '../utils/electronFs';
 import { showToast } from '../utils/toast';
 import { extractVideoFirstFrame, getCachedVideoThumbnail } from '../utils/videoThumbnail';
@@ -91,9 +92,10 @@ function sortChildrenParentFirst(children: Element[], topLevelIds: Set<string>):
 
 interface CanvasProps {
   textCreateRequest?: number;
+  onTextStyleControllerChange?: (controller: RichTextStyleController) => void;
 }
 
-export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
+export default function Canvas({ textCreateRequest = 0, onTextStyleControllerChange }: CanvasProps) {
   const { t } = useI18n();
   const currentCourse    = useEditorStore((s) => s.currentCourse);
   const currentStageId = useEditorStore((s) => s.currentStageId);
@@ -1122,6 +1124,7 @@ export default function Canvas({ textCreateRequest = 0 }: CanvasProps) {
                 setTextCaretPoint(null);
                 setSelectAllTextOnEdit(false);
               }}
+              onTextStyleControllerChange={onTextStyleControllerChange}
             />
           </div>
         )}

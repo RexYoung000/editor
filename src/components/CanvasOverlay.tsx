@@ -9,6 +9,14 @@ import { resolveElementFont } from '../utils/fontLoader';
 import { DEFAULT_FONT_FACE } from '../elements/fontLibrary';
 import { caretOffsetAtPoint, layoutText, normalizeTextSizingMode } from '../utils/textLayout';
 import type { RenderTextProps } from '../utils/textToImage';
+import {
+  EMPTY_RICH_TEXT_STYLE_CONTROLLER,
+  plainTextToHtml,
+  richTextToPlainText,
+  sanitizeRichTextHtml,
+  type RichTextCommand,
+  type RichTextStyleController,
+} from '../utils/richText';
 import { NEW_TEXT_DEFAULT_CONTENT } from '../elements/elementMeta';
 import {
   getElementWorldBounds,
@@ -109,6 +117,107 @@ function formatSpacingDistance(distance: number): string {
   return Math.abs(distance - rounded) < 0.05 ? String(rounded) : distance.toFixed(1);
 }
 
+interface EditableBoundary {
+  node: Node;
+  offset: number;
+}
+
+function buildEditableBoundaryMap(root: HTMLElement): EditableBoundary[] {
+  const boundaries: EditableBoundary[] = [];
+  let offset = 0;
+  boundaries[0] = { node: root, offset: 0 };
+
+  const setBoundary = (node: Node, nodeOffset: number) => {
+    boundaries[offset] = { node, offset: nodeOffset };
+  };
+
+  const walk = (node: Node): void => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? '';
+      for (let index = 0; index < text.length; index += 1) {
+        offset += 1;
+        setBoundary(node, index + 1);
+      }
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+    const element = node as HTMLElement;
+    const tag = element.tagName.toUpperCase();
+    if (tag === 'BR') {
+      offset += 1;
+      const parent = element.parentNode ?? root;
+      const parentIndex = Array.prototype.indexOf.call(parent.childNodes, element);
+      setBoundary(parent, parentIndex + 1);
+      return;
+    }
+
+    for (const child of Array.from(element.childNodes)) {
+      walk(child);
+    }
+
+    if ((tag === 'DIV' || tag === 'P') && element !== root) {
+      const onlyBreak = element.childNodes.length === 1 && element.firstChild?.nodeName === 'BR';
+      if (!onlyBreak) {
+        offset += 1;
+        const parent = element.parentNode ?? root;
+        const parentIndex = Array.prototype.indexOf.call(parent.childNodes, element);
+        setBoundary(parent, parentIndex + 1);
+      }
+    }
+  };
+
+  for (const child of Array.from(root.childNodes)) {
+    walk(child);
+  }
+
+  if (!boundaries[offset]) boundaries[offset] = { node: root, offset: root.childNodes.length };
+  return boundaries;
+}
+
+function setEditableSelection(root: HTMLElement, start: number, end: number): void {
+  const selection = window.getSelection();
+  if (!selection) return;
+  const boundaries = buildEditableBoundaryMap(root);
+  const clamp = (value: number) => Math.max(0, Math.min(value, boundaries.length - 1));
+  const startBoundary = boundaries[clamp(Math.min(start, end))] ?? boundaries[0];
+  const endBoundary = boundaries[clamp(Math.max(start, end))] ?? boundaries[clamp(Math.min(start, end))] ?? boundaries[0];
+  const range = document.createRange();
+  try {
+    range.setStart(startBoundary.node, startBoundary.offset);
+    range.setEnd(endBoundary.node, endBoundary.offset);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  } catch {
+    selection.removeAllRanges();
+    const fallback = document.createRange();
+    fallback.selectNodeContents(root);
+    fallback.collapse(false);
+    selection.addRange(fallback);
+  }
+}
+
+function getActiveRichTextStyles(editor: HTMLDivElement): { bold: boolean; italic: boolean; underline: boolean } {
+  const selection = window.getSelection();
+  const inside = Boolean(selection && selection.rangeCount > 0 && (
+    editor.contains(selection.anchorNode) || editor.contains(selection.focusNode)
+  ));
+  if (!inside) return { bold: false, italic: false, underline: false };
+  const doc = editor.ownerDocument ?? document;
+  const query = (command: string) => {
+    try {
+      return Boolean(doc.queryCommandState(command));
+    } catch {
+      return false;
+    }
+  };
+  return {
+    bold: query('bold'),
+    italic: query('italic'),
+    underline: query('underline'),
+  };
+}
+
 interface WorldState {
   zoom: number;
   panX: number;
@@ -188,6 +297,7 @@ interface CanvasOverlayProps {
   selectAllTextOnEdit: boolean;
   setSelectAllTextOnEdit: (value: boolean) => void;
   onTextSessionEnd: (id: string) => void;
+  onTextStyleControllerChange?: (controller: RichTextStyleController) => void;
 }
 
 export default function CanvasOverlay({
@@ -208,6 +318,7 @@ export default function CanvasOverlay({
   selectAllTextOnEdit,
   setSelectAllTextOnEdit,
   onTextSessionEnd,
+  onTextStyleControllerChange,
 }: CanvasOverlayProps) {
   const hoveredElementId = useEditorStore((state) => state.hoveredElementId);
   const interactionRef = useRef<PointerInteraction | null>(null);
@@ -219,23 +330,49 @@ export default function CanvasOverlay({
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [spacingHints, setSpacingHints] = useState<EqualSpacingHint[]>([]);
   const [distanceHint, setDistanceHint] = useState<DistanceHint | null>(null);
-  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textEditorRef = useRef<HTMLDivElement | null>(null);
   const textResizeFrameRef = useRef<number | null>(null);
   const pendingTextResizeRef = useRef<{ element: Element; width: number; height: number } | null>(null);
   const caretAppliedForRef = useRef<string | null>(null);
   const committedTextSessionRef = useRef<string | null>(null);
-  const [textDraftState, setTextDraftState] = useState({ id: '', value: '' });
+  const [textDraftState, setTextDraftState] = useState({ id: '', html: '', text: '' });
+  const [textStyleActiveStyles, setTextStyleActiveStyles] = useState({ bold: false, italic: false, underline: false });
   const editingTextId = editingElement?.type === 'NewTextArea' ? editingElement.id : null;
+  const textDraftHtml = editingTextId && textDraftState.id === editingTextId
+    ? textDraftState.html
+    : editingElement?.type === 'NewTextArea'
+      ? sanitizeRichTextHtml(String(editingElement.props.textHtml ?? plainTextToHtml(String(editingElement.props.text ?? ''))), String(editingElement.props.text ?? ''))
+      : '';
   const textDraft = editingTextId && textDraftState.id === editingTextId
-    ? textDraftState.value
+    ? textDraftState.text
     : editingElement?.type === 'NewTextArea'
       ? String(editingElement.props.text ?? '')
       : '';
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     committedTextSessionRef.current = null;
     caretAppliedForRef.current = null;
   }, [editingTextId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!editingElement || editingElement.type !== 'NewTextArea') {
+        setTextDraftState({ id: '', html: '', text: '' });
+        setTextStyleActiveStyles({ bold: false, italic: false, underline: false });
+        onTextStyleControllerChange?.(EMPTY_RICH_TEXT_STYLE_CONTROLLER);
+        return;
+      }
+      const props = editingElement.props as Record<string, unknown>;
+      const plainText = String(props.text ?? '');
+      const html = sanitizeRichTextHtml(String(props.textHtml ?? plainTextToHtml(plainText)), plainText);
+      setTextDraftState({ id: editingElement.id, html, text: plainText });
+      setTextStyleActiveStyles({ bold: false, italic: false, underline: false });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [editingElement, onTextStyleControllerChange]);
   const worldRef = useRef(world);
   const currentPageRef = useRef(currentPage);
   const snapRef = useRef(snap);
@@ -324,11 +461,15 @@ export default function CanvasOverlay({
     if (!editingElement || editingElement.type !== 'NewTextArea') return;
     if (committedTextSessionRef.current === editingElement.id) return;
     committedTextSessionRef.current = editingElement.id;
+    const editor = textEditorRef.current;
     const props = editingElement.props as Record<string, unknown>;
-    const nextProps = { ...props, text: textDraft };
-    const layout = layoutText(textDraft, editingElement.width, editingElement.height, nextProps as RenderTextProps, overlayFontFamily);
+    const html = sanitizeRichTextHtml(editor?.innerHTML ?? textDraftHtml, textDraft);
+    const text = editor ? richTextToPlainText(html, editor.textContent ?? '') : textDraft;
+    const nextProps = { ...props, text, textHtml: html };
+    const layout = layoutText(text, editingElement.width, editingElement.height, nextProps as RenderTextProps, overlayFontFamily);
     const mode = normalizeTextSizingMode(props.textSizingMode);
-    const changed = textDraft !== String(props.text ?? '')
+    const changed = text !== String(props.text ?? '')
+      || html !== String(props.textHtml ?? '')
       || (mode !== 'fixed' && (layout.width !== editingElement.width || layout.height !== editingElement.height));
     if (changed) {
       useEditorStore.getState().updateElement(editingElement.id, {
@@ -340,46 +481,135 @@ export default function CanvasOverlay({
     }
     setEditingId(null);
     onTextSessionEnd(editingElement.id);
-  }, [editingElement, onTextSessionEnd, overlayFontFamily, setEditingId, textDraft]);
+  }, [editingElement, onTextSessionEnd, overlayFontFamily, setEditingId, textDraft, textDraftHtml]);
+
+  const syncTextDraftFromEditor = useCallback(() => {
+    const editor = textEditorRef.current;
+    if (!editor || !editingElement || editingElement.type !== 'NewTextArea') return;
+    const html = sanitizeRichTextHtml(editor.innerHTML, editor.textContent ?? '');
+    const text = richTextToPlainText(html, editor.textContent ?? '');
+    setTextDraftState((previous) => (
+      previous.id === editingElement.id && previous.html === html && previous.text === text
+        ? previous
+        : { id: editingElement.id, html, text }
+    ));
+  }, [editingElement]);
+
+  const syncTextStyleState = useCallback(() => {
+    const editor = textEditorRef.current;
+    if (!editor || !editingElement || editingElement.type !== 'NewTextArea') {
+      setTextStyleActiveStyles({ bold: false, italic: false, underline: false });
+      return;
+    }
+    setTextStyleActiveStyles((previous) => {
+      const next = getActiveRichTextStyles(editor);
+      return previous.bold === next.bold && previous.italic === next.italic && previous.underline === next.underline
+        ? previous
+        : next;
+    });
+  }, [editingElement]);
+
+  const applyTextStyleCommand = useCallback((command: RichTextCommand) => {
+    const editor = textEditorRef.current;
+    if (!editor || !editingElement || editingElement.type !== 'NewTextArea') return false;
+    editor.focus();
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return false;
+    try {
+      const applied = document.execCommand(command, false);
+      syncTextDraftFromEditor();
+      syncTextStyleState();
+      return applied;
+    } catch {
+      return false;
+    }
+  }, [editingElement, syncTextDraftFromEditor, syncTextStyleState]);
 
   useLayoutEffect(() => {
-    const textarea = textAreaRef.current;
-    if (!textarea || !editingElement || editingElement.type !== 'NewTextArea') return;
+    const editor = textEditorRef.current;
+    if (!editor || !editingElement || editingElement.type !== 'NewTextArea') return;
     if (caretAppliedForRef.current === editingElement.id) return;
     caretAppliedForRef.current = editingElement.id;
-    textarea.focus();
+    editor.innerHTML = sanitizeRichTextHtml(textDraftHtml, textDraft);
+    editor.focus();
     if (selectAllTextOnEdit) {
-      textarea.setSelectionRange(0, textDraft.length);
+      setEditableSelection(editor, 0, textDraft.length);
     } else if (textCaretPoint) {
       const props = editingElement.props as Record<string, unknown>;
-      textarea.setSelectionRange(
-        caretOffsetAtPoint(textDraft, editingElement.width, props, textCaretPoint.x, textCaretPoint.y, overlayFontFamily),
-        caretOffsetAtPoint(textDraft, editingElement.width, props, textCaretPoint.x, textCaretPoint.y, overlayFontFamily),
-      );
+      const caretOffset = caretOffsetAtPoint(textDraft, editingElement.width, props, textCaretPoint.x, textCaretPoint.y, overlayFontFamily);
+      setEditableSelection(editor, caretOffset, caretOffset);
     } else {
-      textarea.setSelectionRange(textDraft.length, textDraft.length);
+      setEditableSelection(editor, textDraft.length, textDraft.length);
     }
-  }, [editingElement, overlayFontFamily, selectAllTextOnEdit, textCaretPoint, textDraft]);
+    syncTextStyleState();
+  }, [editingElement, overlayFontFamily, selectAllTextOnEdit, syncTextStyleState, textCaretPoint, textDraft, textDraftHtml]);
 
   // CanvasOverlay 阻止画布默认 pointer 行为时，浏览器不会替 textarea 自然触发失焦。
   // 在文档捕获阶段主动提交，保证点击画布、属性面板或工具栏都能结束编辑。
   useEffect(() => {
-    if (!editingTextId) return;
-    const handleDocumentPointerDown = (event: Event) => {
-      const textarea = textAreaRef.current;
-      const target = event.target;
-      if (!textarea || !(target instanceof Node)) return;
-      const editor = textarea.closest('[data-text-editor]');
-      if (editor?.contains(target)) return;
-      textarea.blur();
+    if (!onTextStyleControllerChange) return;
+    if (!editingElement || editingElement.type !== 'NewTextArea' || !editingTextId) {
+      onTextStyleControllerChange(EMPTY_RICH_TEXT_STYLE_CONTROLLER);
+      return;
+    }
+    onTextStyleControllerChange({
+      elementId: editingElement.id,
+      activeStyles: textStyleActiveStyles,
+      applyCommand: applyTextStyleCommand,
+    });
+  }, [applyTextStyleCommand, editingElement, editingTextId, onTextStyleControllerChange, textStyleActiveStyles]);
+
+  useEffect(() => {
+    const editor = textEditorRef.current;
+    if (!editor || !editingTextId) return;
+    const handleSelectionChange = () => syncTextStyleState();
+    const handleInput = () => {
+      syncTextDraftFromEditor();
+      syncTextStyleState();
     };
-    document.addEventListener('pointerdown', handleDocumentPointerDown, true);
-    document.addEventListener('mousedown', handleDocumentPointerDown, true);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        const key = event.key.toLowerCase();
+        if (key === 'b' || key === 'i' || key === 'u') event.preventDefault();
+      }
+      if (event.key === 'Escape' || (event.key === 'Enter' && (event.ctrlKey || event.metaKey))) {
+        event.preventDefault();
+        finishTextEditing();
+      }
+    };
+    editor.addEventListener('input', handleInput);
+    editor.addEventListener('keyup', handleSelectionChange);
+    editor.addEventListener('mouseup', handleSelectionChange);
+    editor.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
-      document.removeEventListener('pointerdown', handleDocumentPointerDown, true);
-      document.removeEventListener('mousedown', handleDocumentPointerDown, true);
+      editor.removeEventListener('input', handleInput);
+      editor.removeEventListener('keyup', handleSelectionChange);
+      editor.removeEventListener('mouseup', handleSelectionChange);
+      editor.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('selectionchange', handleSelectionChange);
     };
-  }, [editingTextId]);
+  }, [editingTextId, finishTextEditing, syncTextDraftFromEditor, syncTextStyleState]);
+
+  useEffect(() => {
+    if (!editingTextId) return;
+    const handleDocumentPointerDown = (event: MouseEvent | PointerEvent) => {
+      if (event.defaultPrevented) return;
+      const editor = textEditorRef.current;
+      const target = event.target;
+      if (!editor || !(target instanceof Node)) return;
+      const textEditorShell = editor.closest('[data-text-editor]');
+      if (textEditorShell?.contains(target)) return;
+      if (target instanceof Element && target.closest('[data-property-panel]')) return;
+      finishTextEditing();
+    };
+    document.addEventListener('pointerdown', handleDocumentPointerDown);
+    document.addEventListener('mousedown', handleDocumentPointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', handleDocumentPointerDown);
+      document.removeEventListener('mousedown', handleDocumentPointerDown);
+    };
+  }, [editingTextId, finishTextEditing]);
 
   const pointerToWorld = useCallback((clientX: number, clientY: number) => {
     const host = layaHostRef.current;
@@ -1564,7 +1794,8 @@ export default function CanvasOverlay({
         const props = editingElement.props as Record<string, unknown>;
         const fontSize = (props.fontSize as number) ?? 16;
         const leading = (props.leading as number) ?? 0;
-        const liveLayout = layoutText(textDraft, editingElement.width, editingElement.height, props, overlayFontFamily);
+        const liveProps = { ...props, textHtml: textDraftHtml };
+        const liveLayout = layoutText(textDraft, editingElement.width, editingElement.height, liveProps, overlayFontFamily);
         const matrix = getElementWorldMatrix(editingElement, elements);
         const decorationScale = 1 / Math.max(zoom, 0.05);
         return (
@@ -1586,18 +1817,15 @@ export default function CanvasOverlay({
             pointerEvents: 'auto',
             cursor: 'text',
           }}>
-            <textarea
-              ref={textAreaRef}
-              value={textDraft}
+            <div
+              key={`rich-editor-${editingElement.id}`}
+              ref={textEditorRef}
+              contentEditable
+              suppressContentEditableWarning
+              role="textbox"
+              aria-multiline="true"
+              spellCheck={false}
               aria-label="编辑文本"
-              onChange={(event) => setTextDraftState({ id: editingElement.id, value: event.target.value })}
-              onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                if (event.key === 'Escape' || (event.key === 'Enter' && (event.ctrlKey || event.metaKey))) {
-                  event.preventDefault();
-                  event.currentTarget.blur();
-                }
-              }}
               onBlur={finishTextEditing}
               style={{
                 display: 'block',
@@ -1610,9 +1838,6 @@ export default function CanvasOverlay({
                 background: 'transparent',
                 backgroundColor: 'transparent',
                 backgroundImage: 'none',
-                appearance: 'none',
-                WebkitAppearance: 'none',
-                resize: 'none',
                 cursor: 'text',
                 caretColor: '#ff2d55',
                 overflow: normalizeTextSizingMode(props.textSizingMode) === 'fixed' ? 'auto' : 'hidden',
@@ -1620,11 +1845,14 @@ export default function CanvasOverlay({
                 fontSize,
                 fontWeight: props.bold ? 700 : 400,
                 fontStyle: props.italic ? 'italic' : 'normal',
+                textDecoration: props.underline ? 'underline' : 'none',
                 lineHeight: `${fontSize + leading}px`,
                 color: (props.color as string) ?? '#333',
                 textAlign: (props.align as 'left' | 'center' | 'right') ?? 'left',
                 whiteSpace: props.wordWrap === false ? 'pre' : 'pre-wrap',
                 wordBreak: props.wordWrap === false ? 'normal' : 'break-word',
+                overflowWrap: props.wordWrap === false ? 'normal' : 'break-word',
+                userSelect: 'text',
               }}
             />
           </div>

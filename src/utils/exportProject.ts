@@ -18,9 +18,11 @@ import {
 import { buildOrdinaryActionBindings, isSharedOrdinaryAction } from './ordinaryActionCompiler';
 import {
   collectCourseConfirmTargetIssues,
+  getInputSdkJudgeTargets,
   getSdkJudgeCapability,
   INPUT_SDK_JUDGE_EVENT,
   isInputSdkJudgeTarget,
+  PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
   SDK_JUDGE_EVENT,
 } from './sdkJudge';
 import {
@@ -354,6 +356,71 @@ function filterOptionalFileFields(props: Record<string, unknown>, keys: string[]
 let _compId = 0;
 function nextId() { return ++_compId; }
 
+function getKeyboardTargetsForInputs(page: Pick<SubPage, 'elements'>, inputs: Element[]): Element[] {
+  const camps = new Set(inputs
+    .map((input) => String((input.props as Record<string, unknown> | undefined)?.camp ?? '').trim())
+    .filter(Boolean));
+  if (camps.size === 0) return [];
+  return page.elements.filter((element) => (
+    element.type === 'KlBaseKeyboard'
+    && camps.has(String((element.props as Record<string, unknown> | undefined)?.camp ?? '').trim())
+  ));
+}
+
+/**
+ * 为“播放正确音效+锁定判断输入框”动作生成运行时代码。
+ *
+ * 生成逻辑包括播放正确音效、锁定输入框、清除错误态和关闭同 camp 键盘；
+ * 如果目标不是输入判定对象，则退化为仅播放音效。
+ */
+export function buildRightSoundLockJudgeInputCode(
+  action: Action,
+  page: SubPage,
+  getVar: (element: Element) => string,
+  uiNamespace: string,
+  source?: Element,
+): string {
+  const soundCode = `this.playSound("${uiNamespace}/sound/right.mp3");`;
+  const inputs = getInputSdkJudgeTargets(action, page, source);
+  if (inputs.length === 0) return soundCode;
+
+  const keyboards = getKeyboardTargetsForInputs(page, inputs);
+  const inputRefs = inputs.map((input) => `this.${getVar(input)}`).join(', ');
+  const keyboardRefs = keyboards.map((keyboard) => `this.${getVar(keyboard)}`).join(', ');
+
+  return [
+    soundCode,
+    '(function(){',
+    `    var __inputs = [${inputRefs}];`,
+    `    var __keyboards = [${keyboardRefs}];`,
+    '    for (var __i = 0; __i < __inputs.length; __i++) {',
+    '        var __input = __inputs[__i];',
+    '        if (!__input) continue;',
+    '        __input.isSelected = false;',
+    '        __input._isSelected = false;',
+    '        __input.canSelected = false;',
+    '        __input.mouseEnabled = false;',
+    '        if (__input.guangbiaoI) __input.guangbiaoI.visible = false;',
+    '        var __bg = __input._bg || (typeof __input.getChildByName === "function" ? __input.getChildByName("bg") : null);',
+    '        if (__bg) { __bg.visible = false; __bg.filters = []; }',
+    '        var __wrong = typeof __input.getChildByName === "function" ? __input.getChildByName("wrong") : null;',
+    '        if (__wrong) { __wrong.visible = false; __wrong.filters = []; }',
+    '        __input.filters = [];',
+    '        var __camp = String(__input.camp || "");',
+    '        if (!__camp) continue;',
+    '        for (var __j = 0; __j < __keyboards.length; __j++) {',
+    '            var __keyboard = __keyboards[__j];',
+    '            if (!__keyboard || String(__keyboard.camp || "") !== __camp) continue;',
+    '            if (typeof __keyboard.setVisible === "function") __keyboard.setVisible(false);',
+    '            else __keyboard.visible = false;',
+    '            if ("currIptXpath" in __keyboard) __keyboard.currIptXpath = null;',
+    '            __keyboard._currIpt = null;',
+    '        }',
+    '    }',
+    '}).call(this);',
+  ].join('\n            ');
+}
+
 /** 收集所有需要在 .ts 中通过 this.xxx 引用的元素 ID。
  *  规则：
  *  - 有 actions 的元素（作为事件源）
@@ -374,6 +441,11 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
       for (const action of el.actions) {
         if (action.targetId) needsVar.add(action.targetId);
         if (action.judgeTargetId) needsVar.add(action.judgeTargetId);
+        if (action.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION) {
+          const lockInputs = getInputSdkJudgeTargets(action, page, el);
+          for (const input of lockInputs) needsVar.add(input.id);
+          for (const keyboard of getKeyboardTargetsForInputs(page, lockInputs)) needsVar.add(keyboard.id);
+        }
       }
     }
   }
@@ -1063,6 +1135,8 @@ export function makeActionBuilder(
         return `this.playSound("${uiNamespace}/sound/right.mp3");`;
       case 'playWrongSound':
         return `this.playSound("${uiNamespace}/sound/wrong.mp3");`;
+      case PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION:
+        return buildRightSoundLockJudgeInputCode(action, pg, getVar, uiNamespace, sourceEl);
       case 'showAnswerRight':
         return `this.showAnswerFace(1);`;
       case 'showAnswerRightLock':
@@ -2493,7 +2567,7 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
           if (!el.actions?.length) continue;
           for (const action of el.actions) {
             if (action.event === 'onClickSound') needBtnClick = true;
-            if (action.actionType === 'playRightSound') needRight = true;
+            if (action.actionType === 'playRightSound' || action.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION) needRight = true;
             if (action.actionType === 'playWrongSound') needWrong = true;
             // onClickInitConfirm / onClickInitConfirmWithLock 目标是 ChoiceBox 时也需要 right/wrong 音效
             if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
@@ -2644,7 +2718,7 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
           if (!el.actions?.length) continue;
           for (const action of el.actions) {
             if (action.event === 'onClickSound') needBtnClick = true;
-            if (action.actionType === 'playRightSound') needRight = true;
+            if (action.actionType === 'playRightSound' || action.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION) needRight = true;
             if (action.actionType === 'playWrongSound') needWrong = true;
             // onClickInitConfirm / onClickInitConfirmWithLock 目标是 ChoiceBox 时也需要 right/wrong 音效
             if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
@@ -3022,7 +3096,7 @@ export async function exportProject(course: Course, options: { cleanBuildOutput?
           if (!el.actions?.length) continue;
           for (const action of el.actions) {
             if (action.event === 'onClickSound') hwGameZipFiles.add('sound/btn_click.wav');
-            if (action.actionType === 'playRightSound') hwGameZipFiles.add('sound/right.mp3');
+            if (action.actionType === 'playRightSound' || action.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION) hwGameZipFiles.add('sound/right.mp3');
             if (action.actionType === 'playWrongSound') hwGameZipFiles.add('sound/wrong.mp3');
             if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
               const targetEl = action.targetId ? sp.elements.find(e => e.id === action.targetId) : null;
@@ -3117,7 +3191,7 @@ export async function exportProject(course: Course, options: { cleanBuildOutput?
         if (!el.actions?.length) continue;
         for (const action of el.actions) {
           if (action.event === 'onClickSound') gameZipFiles.add('sound/btn_click.wav');
-          if (action.actionType === 'playRightSound') gameZipFiles.add('sound/right.mp3');
+          if (action.actionType === 'playRightSound' || action.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION) gameZipFiles.add('sound/right.mp3');
           if (action.actionType === 'playWrongSound') gameZipFiles.add('sound/wrong.mp3');
           if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
             const targetEl = action.targetId ? sp.elements.find(e => e.id === action.targetId) : null;

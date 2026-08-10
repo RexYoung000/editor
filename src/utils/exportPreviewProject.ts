@@ -27,6 +27,7 @@ import {
   compileInternalPagesCourse,
 } from './internalPageCompiler';
 import { buildInputRuleConfirmInitCode, buildInputRuleInitCode, isInputRuleHost } from './inputAnswerRules';
+import { PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION } from './sdkJudge';
 import { buildOrdinaryActionBindings } from './ordinaryActionCompiler';
 
 // ─── 预习场景差异 ───
@@ -427,7 +428,7 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
           if (!el.actions?.length) continue;
           for (const action of el.actions) {
             if (action.event === 'onClickSound') needBtnClick = true;
-            if (action.actionType === 'playRightSound') needRight = true;
+            if (action.actionType === 'playRightSound' || action.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION) needRight = true;
             if (action.actionType === 'playWrongSound') needWrong = true;
           }
         }
@@ -569,7 +570,7 @@ export async function exportPreviewProject(course: Course): Promise<void> {
         if (!el.actions?.length) continue;
         for (const action of el.actions) {
           if (action.event === 'onClickSound') gameZipFiles.add('sound/btn_click.wav');
-          if (action.actionType === 'playRightSound') gameZipFiles.add('sound/right.mp3');
+          if (action.actionType === 'playRightSound' || action.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION) gameZipFiles.add('sound/right.mp3');
           if (action.actionType === 'playWrongSound') gameZipFiles.add('sound/wrong.mp3');
           if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
             const targetEl = action.targetId ? sp.elements.find(e => e.id === action.targetId) : null;

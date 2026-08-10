@@ -14,6 +14,7 @@ import FocusWorkspace from './components/FocusWorkspace';
 import { isInternalPagesSubPage, isInternalPagesWorkbenchReadonly } from './utils/internalPages';
 import { requestPageThumbnailFlush } from './utils/pageThumbnailSync';
 import { commitPendingPropertyEdits } from './utils/propertyEditSession';
+import { EMPTY_RICH_TEXT_STYLE_CONTROLLER, type RichTextStyleController } from './utils/richText';
 
 function App() {
   const setCurrentCourse = useEditorStore((state) => state.setCurrentCourse);
@@ -36,6 +37,7 @@ function App() {
   const [isDirty, setIsDirty] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [textCreateRequest, setTextCreateRequest] = useState(0);
+  const [textStyleController, setTextStyleController] = useState<RichTextStyleController>(EMPTY_RICH_TEXT_STYLE_CONTROLLER);
   const [focusWidth, setFocusWidth] = useState(() => Math.min(440, Math.max(280, Number(localStorage.getItem('forge_focus_workspace_width')) || 320)));
   const internalPageWorkbenchReadonly = isInternalPagesWorkbenchReadonly(currentCourse, currentSubPageId, focusSubPageId);
 
@@ -220,8 +222,8 @@ function App() {
                 }}
               />
             ) : null}
-            canvas={<><ElementToolbar onCreateText={() => setTextCreateRequest((value) => value + 1)} /><Canvas textCreateRequest={textCreateRequest} /></>}
-            propertyPanel={<PropertyPanel />}
+            canvas={<><ElementToolbar onCreateText={() => setTextCreateRequest((value) => value + 1)} /><Canvas textCreateRequest={textCreateRequest} onTextStyleControllerChange={setTextStyleController} /></>}
+            propertyPanel={<PropertyPanel textStyleController={textStyleController} />}
           />
         </div>
       )}
