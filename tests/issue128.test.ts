@@ -5,14 +5,42 @@ import { buildExportRegressionArtifacts } from '../src/utils/exportProject';
 import { buildPreviewExportRegressionArtifacts } from '../src/utils/exportPreviewProject';
 import {
   evaluationCourseFixture,
+  exportPaths,
   homeworkCourseFixture,
   normalCourseFixture,
   previewCourseFixture,
   reviewCourseFixture,
 } from './fixtures/export-courses';
 
+interface SceneNode {
+  type?: string;
+  props?: Record<string, unknown>;
+  child?: SceneNode[];
+}
+
 function count(source: string, value: string): number {
   return source.split(value).length - 1;
+}
+
+function sceneNodes(scene: Record<string, unknown>): SceneNode[] {
+  const nodes: SceneNode[] = [];
+  const visit = (node: SceneNode) => {
+    nodes.push(node);
+    for (const child of node.child ?? []) visit(child);
+  };
+  visit(scene as SceneNode);
+  return nodes;
+}
+
+function findSceneNode(scene: Record<string, unknown>, name: string): SceneNode {
+  const node = sceneNodes(scene).find((item) => item.props?.name === name || item.props?.var === name);
+  assert.ok(node, `应导出场景节点 ${name}`);
+  return node;
+}
+
+function assertClickHotZone(label: string, node: SceneNode): void {
+  assert.equal(node.props?.mouseEnabled, true, `[${label}] 点击触发源应启用鼠标热区`);
+  assert.equal(node.props?.mouseThrough, false, `[${label}] 点击触发源不应穿透点击`);
 }
 
 function configureOrdinaryActions(course: Course, preview = false): void {
@@ -92,4 +120,78 @@ test('复习课继续保持纯视频结构且不生成普通事件场景', () =>
   }];
 
   assert.equal(buildExportRegressionArtifacts(review).scenes.length, 0);
+});
+
+test('普通图片和文本作为点击触发源时自动导出运行时点击热区', () => {
+  const scenarios = [
+    { label: '正课', course: normalCourseFixture(), preview: false, previewExport: false },
+    { label: '预习', course: previewCourseFixture(), preview: true, previewExport: true },
+    { label: '作业', course: homeworkCourseFixture(), preview: false, previewExport: false },
+    { label: '专题测评', course: evaluationCourseFixture(), preview: false, previewExport: false },
+  ];
+
+  for (const scenario of scenarios) {
+    const stages = scenario.preview ? scenario.course.previewStages ?? [] : scenario.course.stages;
+    const page = stages[0]?.subPages[0];
+    assert.ok(page, `[${scenario.label}] 应存在测试页面`);
+    const target = page.elements.find((element) => element.type === 'Image') ?? page.elements[0];
+    assert.ok(target, `[${scenario.label}] 应存在显隐目标`);
+
+    page.elements.push(
+      {
+        id: `${scenario.course.id}-image-trigger`,
+        type: 'Image',
+        layaType: 'Image',
+        name: 'ordinary_image_trigger',
+        x: 40,
+        y: 40,
+        width: 120,
+        height: 80,
+        rotation: 0,
+        opacity: 1,
+        props: { skin: exportPaths.smallImage },
+        actions: [{
+          id: `${scenario.course.id}-image-toggle`,
+          event: 'onClick',
+          actionType: 'toggleVisible',
+          targetId: target.id,
+        }],
+      },
+      {
+        id: `${scenario.course.id}-text-trigger`,
+        type: 'NewTextArea',
+        layaType: 'TextArea',
+        name: 'ordinary_text_trigger',
+        x: 200,
+        y: 40,
+        width: 220,
+        height: 80,
+        rotation: 0,
+        opacity: 1,
+        props: {
+          text: '点击文本',
+          fontSize: 32,
+          color: '#ffffff',
+          mouseEnabled: false,
+        },
+        actions: [{
+          id: `${scenario.course.id}-text-show`,
+          event: 'onClick',
+          actionType: 'setVisible',
+          targetId: target.id,
+          value: true,
+        }],
+      },
+    );
+
+    const artifact = scenario.previewExport
+      ? buildPreviewExportRegressionArtifacts(scenario.course).scenes[0]
+      : buildExportRegressionArtifacts(scenario.course).scenes[0];
+    assertClickHotZone(`${scenario.label} 图片`, findSceneNode(artifact.scene, 'ordinary_image_trigger'));
+    assertClickHotZone(`${scenario.label} 文本`, findSceneNode(artifact.scene, 'ordinary_text_trigger'));
+    assert.match(artifact.source, /this\.ordinary_image_trigger\.on\('click'/);
+    assert.match(artifact.source, /this\.ordinary_text_trigger\.on\('click'/);
+    assert.match(artifact.source, /\.visible = !t\.visible/);
+    assert.match(artifact.source, /\.visible = true/);
+  }
 });

@@ -140,6 +140,7 @@ Dialog 底部有一个"继续"按钮，label 由触发来源决定：
 - **DropObj `tipSkin` → name=tip Image 子节点**：同时设置 `props.isNeedTip = true`；没有 tipSkin 时显式 `isNeedTip = false`
 - **`exportChildren` 注入**：从 `elementMeta.exportChildren` 或 `_keyboardPreset.children` 读固定子节点（如 KlInputImage 的三层皮肤），递归 `cloneFixed` 克隆
 - **`_` 前缀 props 一律剥掉**（编辑器专用）；`runtime` / `hidden` / `blockThrough` 不写入 scene
+- **点击触发源热区**：只要元素会被导出为运行时 `click` 监听源，`.scene` 自动写入 `mouseEnabled=true, mouseThrough=false`。这覆盖普通 `onClick` / `onClickSound`、`onClickSdkJudge`、内部页面点击动作、翻页动作和历史确认按钮事件；`blockThrough` 继续作为手动阻止穿透开关保留，但不再是点击事件能触发的前提
 - **ChoiceBox 的 `mouseEnabled` 不导出**，由 runtime 内部控制
 - **ChoiceBox 答案转换**：编辑器 `_correctOptionIds` 不进入 scene；导出时按直属选项当前名称生成 `rightItemNames`，并按答案数量生成 `upperLimit`（1 个为单选，2 个及以上为不限数量多选）
 - **选项文字点击穿透**：选择题选项内部 Label 强制 `mouseEnabled=false, mouseThrough=true`，点击文字区域仍由选项元素接收
