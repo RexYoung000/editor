@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import type { Action, Course, Element, SubPage } from '../src/types';
 import {
@@ -532,6 +533,39 @@ test('播放正确音效+锁定判断输入框生成局部锁定和键盘关闭�
   const vars = collectElementsNeedingVar(page);
   assert.equal(vars.has(input.id), true);
   assert.equal(vars.has(keyboard.id), true);
+});
+
+test('播放正确音效+锁定判断输入框只在 SDK 判定正确分支可选并导出', () => {
+  const actionEditorSource = readFileSync('src/components/ActionEditor.tsx', 'utf8');
+  const baseStart = actionEditorSource.indexOf('const BASE_ACTION_OPTS = [');
+  const baseEnd = actionEditorSource.indexOf('const PAGE_TURN_ACTION_OPTS = [');
+  const baseOptions = actionEditorSource.slice(baseStart, baseEnd);
+  assert.ok(baseStart >= 0);
+  assert.ok(baseEnd > baseStart);
+  assert.equal(baseOptions.includes('PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION'), false);
+  assert.match(actionEditorSource, /isSdkJudgeRightBranch\(action\)/);
+  assert.match(actionEditorSource, /actionType: cond !== 'right' && a\.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION/);
+
+  const input = element('wrong-branch-lock-input', 'KlInputImage', {
+    props: { _judgeAnswer: 'A', camp: 'wrong-branch-camp' },
+  });
+  const source = element('wrong-branch-source', 'Image');
+  const page: SubPage = { id: 'page', name: '页面', elements: [source, input] };
+  const code = buildRightSoundLockJudgeInputCode(
+    {
+      id: 'wrong-lock',
+      event: INPUT_SDK_JUDGE_EVENT,
+      actionType: PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
+      branchCondition: 'wrong',
+      judgeTargetId: input.id,
+    },
+    page,
+    (item) => item.name ?? item.id,
+    'game_preview',
+    source,
+  );
+
+  assert.equal(code, '');
 });
 
 test('播放正确音效+锁定判断输入框支持容器内多个输入并对非法目标降级为音效', () => {

@@ -600,7 +600,7 @@ export default function CanvasOverlay({
       if (!editor || !(target instanceof Node)) return;
       const textEditorShell = editor.closest('[data-text-editor]');
       if (textEditorShell?.contains(target)) return;
-      if (target instanceof Element && target.closest('[data-property-panel]')) return;
+      if (target instanceof Element && target.closest('[data-text-style-controller]')) return;
       finishTextEditing();
     };
     document.addEventListener('pointerdown', handleDocumentPointerDown);

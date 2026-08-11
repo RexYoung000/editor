@@ -26,6 +26,20 @@ export interface ConfirmTargetIssue {
 const THREE_STATE: JudgeCondition[] = ['right', 'wrong', 'null'];
 const TWO_STATE: JudgeCondition[] = ['right', 'wrong'];
 
+/** 判断动作是否处在 SDK 判定的正确结果分支。 */
+export function isSdkJudgeRightBranch(action: Pick<Action, 'event' | 'branchCondition'>): boolean {
+  return (action.event === SDK_JUDGE_EVENT || action.event === INPUT_SDK_JUDGE_EVENT)
+    && action.branchCondition === 'right';
+}
+
+/** “播放正确音效+锁定判断输入框”只允许在 SDK 判定正确分支执行。 */
+export function isRightSoundLockJudgeInputAction(
+  action: Pick<Action, 'actionType' | 'event' | 'branchCondition'>,
+): boolean {
+  return action.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION
+    && isSdkJudgeRightBranch(action);
+}
+
 export function getSdkJudgeCapability(element: Element | undefined): SdkJudgeCapability | null {
   if (!element) return null;
   if (element.type === 'KlInputImage' || element.type === 'FractionInput') {

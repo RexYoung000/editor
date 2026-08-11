@@ -1591,7 +1591,7 @@ export default function PropertyPanel({ textStyleController = EMPTY_RICH_TEXT_ST
 
               {/* 组件属性（按 group 分组，advanced 字段单独折叠） */}
               {single?.type === 'NewTextArea' && (
-                <div className="mb-2 pb-2 border-b border-slate-700">
+                <div data-text-style-controller className="mb-2 pb-2 border-b border-slate-700">
                   <div className="text-xs text-slate-500 mb-1.5">文本样式</div>
                   <div className="grid grid-cols-3 gap-1" role="group" aria-label="文本样式">
                     {([

@@ -13,6 +13,7 @@ import {
   getSdkJudgeConditionLabel,
   INPUT_SDK_JUDGE_EVENT,
   isInputSdkJudgeTarget,
+  isSdkJudgeRightBranch,
   isSdkJudgeTarget,
   PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
   SDK_JUDGE_EVENT,
@@ -172,7 +173,6 @@ export default function ActionEditor({
     { value: 'playSound',     label: t('actionPlaySound') },
     { value: 'playRightSound', label: '播放正确音效' },
     { value: 'playWrongSound', label: '播放错误音效' },
-    { value: PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION, label: '播放正确音效+锁定判断输入框' },
     { value: 'showAnswerRight', label: '播放SDK通用胜利动画' },
     { value: 'showAnswerRightLock', label: '播放SDK通用胜利动画+锁屏' },
     { value: 'showAnswerWrong', label: '播放SDK通用失败动画' },
@@ -193,9 +193,19 @@ export default function ActionEditor({
     { value: 'pageTurnNextLoop', label: '向右翻页(循环)' },
     { value: 'pageTurnGoTo',     label: '跳转到指定页' },
   ];
+  const RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION_OPT = {
+    value: PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
+    label: '播放正确音效+锁定判断输入框',
+  };
   const getActionOpts = (action: Action) => {
     const targetEl = action.targetId ? allElements.find(e => e.id === action.targetId) : undefined;
     let opts = BASE_ACTION_OPTS;
+    if (isSdkJudgeRightBranch(action)) {
+      const insertIndex = opts.findIndex((option) => option.value === 'showAnswerRight');
+      opts = insertIndex >= 0
+        ? [...opts.slice(0, insertIndex), RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION_OPT, ...opts.slice(insertIndex)]
+        : [...opts, RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION_OPT];
+    }
     if (targetEl?.type === 'PageTurnBox') opts = [...opts, ...PAGE_TURN_ACTION_OPTS];
     const isClickEvent = action.event === 'onClick' || action.event === 'onClickSound';
     const isJudgeEvent = action.event === 'onChoiceJudge' || action.event === 'onInputJudge'
@@ -354,7 +364,13 @@ export default function ActionEditor({
   const updateBranchCondition = (group: Group, branchId: string, cond: JudgeCondition) =>
     onChange(actions.map((a, idx) =>
       group.indices.includes(idx) && (a.branchId ?? '_default') === branchId
-        ? { ...a, branchCondition: cond }
+        ? {
+            ...a,
+            branchCondition: cond,
+            actionType: cond !== 'right' && a.actionType === PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION
+              ? 'none'
+              : a.actionType,
+          }
         : a,
     ));
 

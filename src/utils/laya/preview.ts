@@ -9,6 +9,7 @@ import {
   getInputSdkJudgeTargets,
   getSdkJudgeCapability,
   INPUT_SDK_JUDGE_EVENT,
+  isRightSoundLockJudgeInputAction,
   isInputSdkJudgeTarget,
   PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
   SDK_JUDGE_EVENT,
@@ -68,6 +69,7 @@ function _executePreviewAction(action: Action, selfId: string): void {
       if (action.value && L?.SoundManager) L.SoundManager.playSound(String(action.value));
       break;
     case PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION:
+      if (!isRightSoundLockJudgeInputAction(action)) break;
       if (L?.SoundManager) L.SoundManager.playSound('/builtin/runtime/game/sound/right.mp3');
       if (page) _lockJudgeInputInPreview(page, action, selfId);
       break;
