@@ -1,10 +1,20 @@
-import type { Action, Page } from '../../types';
+import type { Action, Element, Page } from '../../types';
 import { laya, clearAllObjects, setPreviewMode } from './core';
 import { createLayaComponent, applyKlProps } from './components';
 import { registerObject } from './core';
 import { objects } from './core';
-import { evaluateStructuredInputRuleState, getInputAnswerCandidates } from '../inputAnswerRules';
-import { getSdkJudgeCapability, SDK_JUDGE_EVENT, type JudgeCondition } from '../sdkJudge';
+import { evaluateStructuredInputRuleState, getFillAnswerInputs, getInputAnswerCandidates } from '../inputAnswerRules';
+import { KL_KEYBOARD_INPUT_LATER_EVENT } from '../keyboardEvents';
+import {
+  getInputSdkJudgeTargets,
+  getSdkJudgeCapability,
+  INPUT_SDK_JUDGE_EVENT,
+  isRightSoundLockJudgeInputAction,
+  isInputSdkJudgeTarget,
+  PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
+  SDK_JUDGE_EVENT,
+  type JudgeCondition,
+} from '../sdkJudge';
 
 let _previewPages: Page[] = [];
 let _previewPageIdx = 0;
@@ -26,6 +36,7 @@ function _executePreviewAction(action: Action, selfId: string): void {
   const targetId = action.targetId ?? selfId;
   const _objs = objects();
   const L = laya();
+  const page = _previewPages[_previewPageIdx];
   switch (action.actionType) {
     case 'toggleVisible': {
       const obj = _objs.get(targetId);
@@ -57,6 +68,11 @@ function _executePreviewAction(action: Action, selfId: string): void {
     case 'playSound':
       if (action.value && L?.SoundManager) L.SoundManager.playSound(String(action.value));
       break;
+    case PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION:
+      if (!isRightSoundLockJudgeInputAction(action)) break;
+      if (L?.SoundManager) L.SoundManager.playSound('/builtin/runtime/game/sound/right.mp3');
+      if (page) _lockJudgeInputInPreview(page, action, selfId);
+      break;
     case 'stopSound':
       if (L?.SoundManager) L.SoundManager.stopAll();
       break;
@@ -68,6 +84,88 @@ function _executePreviewAction(action: Action, selfId: string): void {
       if (obj?.play) obj.play(String(action.value ?? 'shan'));
       break;
     }
+  }
+}
+
+function _setPreviewInputWrongState(inputObject: unknown, visible: boolean): void {
+  const input = inputObject as {
+    getChildByName?: (name: string) => {
+      visible?: boolean;
+      filters?: unknown[] | null;
+      __forgeWrongGlowFilter?: unknown;
+    } | null;
+  };
+  const wrong = input?.getChildByName?.('wrong');
+  const bg = input?.getChildByName?.('bg');
+  if (wrong) {
+    wrong.visible = visible;
+    if (visible) {
+      const L = laya();
+      if (L?.GlowFilter) {
+        wrong.__forgeWrongGlowFilter = wrong.__forgeWrongGlowFilter || new L.GlowFilter('#ef4444', 14, 0, 0);
+        wrong.filters = [wrong.__forgeWrongGlowFilter];
+      }
+    } else {
+      wrong.filters = [];
+    }
+  }
+  if (visible && bg) {
+    bg.visible = false;
+    bg.filters = [];
+  }
+}
+
+function _setPreviewInputSdkJudgeWrongState(page: Page, action: Action, visible: boolean): void {
+  _getInputSdkJudgeObjects(page, action).forEach((inputObject) => {
+    _setPreviewInputWrongState(inputObject, visible);
+  });
+}
+
+function _lockJudgeInputInPreview(page: Page, action: Action, sourceId: string): void {
+  const inputElements = getInputSdkJudgeTargets(action, page, page.elements.find((element) => element.id === sourceId));
+  const inputObjects = inputElements
+    .map((element) => objects().get(element.id))
+    .filter(Boolean) as Array<Record<string, unknown> & {
+      getChildByName?: (name: string) => { visible?: boolean; filters?: unknown[] } | null;
+    }>;
+  if (inputObjects.length === 0) return;
+
+  const camps = new Set<string>();
+  for (const inputObject of inputObjects) {
+    inputObject.isSelected = false;
+    inputObject._isSelected = false;
+    inputObject.canSelected = false;
+    inputObject.mouseEnabled = false;
+    const cursor = inputObject.guangbiaoI as { visible?: boolean } | undefined;
+    if (cursor) cursor.visible = false;
+    const bg = (inputObject._bg as { visible?: boolean; filters?: unknown[] } | undefined)
+      ?? inputObject.getChildByName?.('bg');
+    if (bg) {
+      bg.visible = false;
+      bg.filters = [];
+    }
+    const wrong = inputObject.getChildByName?.('wrong');
+    if (wrong) {
+      wrong.visible = false;
+      wrong.filters = [];
+    }
+    if (!inputObject.filters || Array.isArray(inputObject.filters)) {
+      inputObject.filters = [];
+    }
+    const camp = String(inputObject.camp ?? '').trim();
+    if (camp) camps.add(camp);
+  }
+
+  if (camps.size === 0) return;
+  for (const keyboard of page.elements.filter((element) => element.type === 'KlBaseKeyboard')) {
+    const keyboardObject = objects().get(keyboard.id) as (Record<string, unknown> & {
+      setVisible?: (visible: boolean) => void;
+    }) | undefined;
+    if (!keyboardObject || !camps.has(String(keyboardObject.camp ?? '').trim())) continue;
+    if (typeof keyboardObject.setVisible === 'function') keyboardObject.setVisible(false);
+    else keyboardObject.visible = false;
+    keyboardObject.currIptXpath = null;
+    keyboardObject._currIpt = null;
   }
 }
 
@@ -115,6 +213,42 @@ function _getSdkJudgeCondition(page: Page, action: Action): JudgeCondition | nul
   return isNull ? 'null' : 'wrong';
 }
 
+function _runPreviewSdkJudgeGroup(page: Page, source: Element, group: Action[]): void {
+  const condition = _getSdkJudgeCondition(page, group[0]);
+  if (!condition) return;
+  if (group[0]?.event === INPUT_SDK_JUDGE_EVENT) {
+    _setPreviewInputSdkJudgeWrongState(page, group[0], condition === 'wrong');
+  }
+  group
+    .filter((action) => (action.branchCondition ?? 'right') === condition)
+    .forEach((action) => _executePreviewAction(action, source.id));
+}
+
+function _groupJudgeActions(actions: Action[]): Map<string, Action[]> {
+  const groups = new Map<string, Action[]>();
+  actions.forEach((action) => {
+    const key = action.groupId ?? `__legacy:${action.judgeTargetId ?? ''}`;
+    const group = groups.get(key) ?? [];
+    group.push(action);
+    groups.set(key, group);
+  });
+  return groups;
+}
+
+function _getInputSdkJudgeObjects(page: Page, action: Action): unknown[] {
+  const target = action.judgeTargetId
+    ? page.elements.find((element) => element.id === action.judgeTargetId)
+    : undefined;
+  if (!target || !isInputSdkJudgeTarget(target)) return [];
+  if (target.type === 'KlInputImage' || target.type === 'FractionInput') {
+    const targetObject = objects().get(target.id);
+    return targetObject ? [targetObject] : [];
+  }
+  return getFillAnswerInputs(target, page.elements)
+    .map((input) => objects().get(input.id))
+    .filter(Boolean);
+}
+
 function _renderPreviewPage(idx: number): void {
   clearAllObjects();
   const page = _previewPages[idx];
@@ -123,6 +257,10 @@ function _renderPreviewPage(idx: number): void {
     const obj = createLayaComponent(el);
     if (!obj) return;
     registerObject(el.id, obj);
+  });
+  page.elements.forEach((el) => {
+    const obj = objects().get(el.id);
+    if (!obj) return;
     // 绑定所有事件
     const eventMap: Record<string, string> = {
       onClick: 'click',
@@ -141,20 +279,20 @@ function _renderPreviewPage(idx: number): void {
               eventActions.forEach((action) => _executePreviewAction(action, el.id));
               return;
             }
-            const groups = new Map<string, Action[]>();
-            eventActions.forEach((action) => {
-              const key = action.groupId ?? `__legacy:${action.judgeTargetId ?? ''}`;
-              const group = groups.get(key) ?? [];
-              group.push(action);
-              groups.set(key, group);
-            });
-            groups.forEach((group) => {
-              const condition = _getSdkJudgeCondition(page, group[0]);
-              if (!condition) return;
-              group
-                .filter((action) => (action.branchCondition ?? 'right') === condition)
-                .forEach((action) => _executePreviewAction(action, el.id));
-            });
+            _groupJudgeActions(eventActions).forEach((group) => _runPreviewSdkJudgeGroup(page, el, group));
+          });
+        }
+        if (evt === INPUT_SDK_JUDGE_EVENT) {
+          const eventActions = el.actions?.filter((action) => action.event === INPUT_SDK_JUDGE_EVENT) ?? [];
+          _groupJudgeActions(eventActions).forEach((group) => {
+            for (const inputObject of _getInputSdkJudgeObjects(page, group[0])) {
+              if (inputObject && typeof (inputObject as { on?: unknown }).on === 'function') {
+                (inputObject as { on: (event: string, caller: unknown, listener: () => void) => void })
+                  .on(KL_KEYBOARD_INPUT_LATER_EVENT, null, () => _runPreviewSdkJudgeGroup(page, el, group));
+                (inputObject as { on: (event: string, caller: unknown, listener: () => void) => void })
+                  .on('click', null, () => _setPreviewInputSdkJudgeWrongState(page, group[0], false));
+              }
+            }
           });
         }
       });

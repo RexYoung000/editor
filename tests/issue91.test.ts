@@ -199,6 +199,19 @@ test('game.zip 包含数学键盘三色资源和百分比输入字库', async ()
   }
 });
 
+test('klInput active resource uses semantic yellow filename in registry and game.zip', async () => {
+  const active = BUILTIN_ASSETS.find((asset) => asset.id === 'klInput.active');
+  assert.equal(active?.src, 'runtime/game/inputImg/kl_input_active_yellow.png');
+  assert.equal(active?.exportPath, 'game/inputImg/kl_input_active_yellow.png');
+  assert.ok(active && existsSync(join(process.cwd(), 'public/builtin', active.src)));
+
+  const zip = await JSZip.loadAsync(
+    readFileSync(join(process.cwd(), 'public/builtin/runtime/game.zip')),
+  );
+  assert.ok(zip.file('inputImg/kl_input_active_yellow.png'));
+  assert.equal(zip.file('inputImg/img_2.png'), null);
+});
+
 test('百分比预设绑定后使用包含百分号的普通输入框字库', () => {
   assert.equal(elementMeta.KlInputImage?.defaultProps?.sheet, '0123456789°+-*/=().');
   assert.match(String(elementMeta.KlInputImage?.defaultProps?.fontClipSkin), /inputImg\/jp_num40\.png$/);

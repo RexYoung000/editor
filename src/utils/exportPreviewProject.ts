@@ -9,6 +9,7 @@ import {
   buildScene,
   buildChoiceVisualInitCode,
   buildSdkJudgeClickInitCode,
+  buildSdkJudgeInputInitCode,
   buildMathKeyboardInitCode,
   collectGameZipFiles,
   collectResources,
@@ -26,6 +27,7 @@ import {
   compileInternalPagesCourse,
 } from './internalPageCompiler';
 import { buildInputRuleConfirmInitCode, buildInputRuleInitCode, isInputRuleHost } from './inputAnswerRules';
+import { isRightSoundLockJudgeInputAction } from './sdkJudge';
 import { buildOrdinaryActionBindings } from './ordinaryActionCompiler';
 
 // ─── 预习场景差异 ───
@@ -62,6 +64,7 @@ function generatePreviewSceneTs(sceneName: string, _flags: SceneFlags, page: Sub
   initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_preview');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
+  initCode += buildSdkJudgeInputInitCode(page, getVar, buildActionBody);
   initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, 'game_preview');
   // onClickInitConfirm / onClickInitConfirmWithLock 事件：按判定目标注入对应确认逻辑。
   for (const el of page.elements) {
@@ -425,7 +428,7 @@ function buildPreviewConfigJson(course: Course, resourceMap: Map<string, string>
           if (!el.actions?.length) continue;
           for (const action of el.actions) {
             if (action.event === 'onClickSound') needBtnClick = true;
-            if (action.actionType === 'playRightSound') needRight = true;
+            if (action.actionType === 'playRightSound' || isRightSoundLockJudgeInputAction(action)) needRight = true;
             if (action.actionType === 'playWrongSound') needWrong = true;
           }
         }
@@ -567,7 +570,7 @@ export async function exportPreviewProject(course: Course): Promise<void> {
         if (!el.actions?.length) continue;
         for (const action of el.actions) {
           if (action.event === 'onClickSound') gameZipFiles.add('sound/btn_click.wav');
-          if (action.actionType === 'playRightSound') gameZipFiles.add('sound/right.mp3');
+          if (action.actionType === 'playRightSound' || isRightSoundLockJudgeInputAction(action)) gameZipFiles.add('sound/right.mp3');
           if (action.actionType === 'playWrongSound') gameZipFiles.add('sound/wrong.mp3');
           if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
             const targetEl = action.targetId ? sp.elements.find(e => e.id === action.targetId) : null;

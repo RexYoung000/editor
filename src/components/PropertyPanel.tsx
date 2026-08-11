@@ -46,6 +46,12 @@ import { layoutText, normalizeTextSizingMode } from '../utils/textLayout';
 import { createPropertyEditSession, parseFiniteNumberDraft } from '../utils/propertyEditSession';
 import { readCustomAnswerKeyboardConfig } from '../elements/keyboardPresets';
 import { getSelectionSetBounds, type SelectionGeometryKey } from '../utils/selectionSet';
+import {
+  EMPTY_RICH_TEXT_STYLE_CONTROLLER,
+  plainTextToHtml,
+  type RichTextCommand,
+  type RichTextStyleController,
+} from '../utils/richText';
 
 const DRAG_GAME_TYPES = ['DragViewBox', 'DragDropBox', 'DragDragBox', 'DragObj', 'DropObj'];
 const DRAG_GAME_NAME_HIDDEN = ['DragObj', 'DropObj', 'DragDropBox', 'DragDragBox'];
@@ -199,7 +205,11 @@ function EditorLayerGroupProperties({
   );
 }
 
-export default function PropertyPanel() {
+interface PropertyPanelProps {
+  textStyleController?: RichTextStyleController;
+}
+
+export default function PropertyPanel({ textStyleController = EMPTY_RICH_TEXT_STYLE_CONTROLLER }: PropertyPanelProps) {
   const { t, language } = useI18n();
   const currentCourse = useEditorStore((s) => s.currentCourse);
   const currentSubPageId = useEditorStore((s) => s.currentSubPageId);
@@ -585,6 +595,7 @@ export default function PropertyPanel() {
         newProps.place = String(value ?? '').length + 1;
       }
       if (el.type === 'NewTextArea') {
+        if (key === 'text') newProps.textHtml = plainTextToHtml(String(value ?? ''));
         const mode = normalizeTextSizingMode(newProps.textSizingMode);
         const measured = layoutText(String(newProps.text ?? ''), el.width, el.height, newProps);
         updateElement(el.id, {
@@ -693,6 +704,7 @@ export default function PropertyPanel() {
   // 文本尺寸模式在变换区域提供专用分段入口，避免在属性分组中重复出现。
   const properties: PropertyDef[] = (meta?.properties ?? []).filter((field) => (
     !(single?.type === 'NewTextArea' && field.key === 'textSizingMode')
+    && !(single?.type === 'NewTextArea' && ['bold', 'italic', 'underline'].includes(field.key))
     && !(single?.type === 'Video' && singleLayerState?.effectiveLocked && field.key === 'videoUrl')
   ));
 
@@ -1578,6 +1590,38 @@ export default function PropertyPanel() {
               </div>
 
               {/* 组件属性（按 group 分组，advanced 字段单独折叠） */}
+              {single?.type === 'NewTextArea' && (
+                <div data-text-style-controller className="mb-2 pb-2 border-b border-slate-700">
+                  <div className="text-xs text-slate-500 mb-1.5">文本样式</div>
+                  <div className="grid grid-cols-3 gap-1" role="group" aria-label="文本样式">
+                    {([
+                      { command: 'bold' as const, label: '粗体', active: textStyleController.activeStyles.bold },
+                      { command: 'italic' as const, label: '斜体', active: textStyleController.activeStyles.italic },
+                      { command: 'underline' as const, label: '下划线', active: textStyleController.activeStyles.underline },
+                    ] satisfies Array<{ command: RichTextCommand; label: string; active: boolean }>).map((option) => {
+                      const enabled = textStyleController.elementId === single.id && !singleLayerState?.effectiveLocked;
+                      return (
+                        <button
+                          key={option.command}
+                          type="button"
+                          disabled={!enabled}
+                          aria-pressed={enabled ? option.active : false}
+                          title={enabled ? option.label : '进入文本编辑并选中文字后可用'}
+                          onPointerDown={(event) => event.preventDefault()}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => { if (enabled) textStyleController.applyCommand(option.command); }}
+                          className={`min-w-0 border px-1 py-1.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${enabled && option.active
+                            ? 'border-blue-400 bg-blue-600/80 text-white'
+                            : 'border-slate-600 bg-slate-700 text-slate-300 hover:border-slate-500 hover:bg-slate-600'}`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {properties.length > 0 && (() => {
                 const customAnswerKeyboard = single?.type === 'KlBaseKeyboard'
                   && (single.props as { _keyboardPreset?: { id?: unknown } } | undefined)?._keyboardPreset?.id === 'customAnswer';

@@ -26,7 +26,7 @@ export interface BuiltinAsset {
 export const BUILTIN_ASSETS: BuiltinAsset[] = [
   // KlInputImage 三态背景 + 字体图（编辑器和运行时都需要）
   { id: 'klInput.bg',          src: 'runtime/game/inputImg/img_1.png',     exportPath: 'game/inputImg/img_1.png' },
-  { id: 'klInput.active',      src: 'runtime/game/inputImg/img_2.png',     exportPath: 'game/inputImg/img_2.png' },
+  { id: 'klInput.active',      src: 'runtime/game/inputImg/kl_input_active_yellow.png', exportPath: 'game/inputImg/kl_input_active_yellow.png' },
   { id: 'klInput.wrong',       src: 'runtime/game/inputImg/img_3.png',     exportPath: 'game/inputImg/img_3.png' },
   { id: 'klInput.font',        src: 'runtime/game/inputImg/jp_num40.png',  exportPath: 'game/inputImg/jp_num40.png' },
   { id: 'klInput.fontPercent', src: 'runtime/game/inputImg/jp_num40_percent.png', exportPath: 'game/inputImg/jp_num40_percent.png' },

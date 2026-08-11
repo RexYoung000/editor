@@ -27,6 +27,38 @@ function dr(g: LayaAny, x: number, y: number, w: number, h: number, fill: string
   else if (fill) g.drawRect(x, y, w, h, fill);
 }
 
+function toPreviewBuiltinSkin(skin: unknown): unknown {
+  if (typeof skin !== 'string') return skin;
+  const builtin = lookupBuiltinByExportPath(skin);
+  return builtin ? `/builtin/${builtin.src}` : skin;
+}
+
+function addPreviewInputStateLayer(parent: LayaObj, name: string, skin: string, width: number, height: number): void {
+  const cu = classUtils();
+  const child = cu?.getInstance('Image');
+  if (!child) return;
+  child.name = name;
+  child.skin = toPreviewBuiltinSkin(skin);
+  child.anchorX = 0.5;
+  child.anchorY = 0.5;
+  child.x = width / 2;
+  child.y = height / 2;
+  child.width = name === 'bg' ? width + 22 : width + 14;
+  child.height = name === 'bg' ? 99 : 91;
+  child.sizeGrid = name === 'bg' ? '12,49,12,49' : '12,45,12,45';
+  child.mouseEnabled = false;
+  child.visible = false;
+  parent.addChild(child);
+}
+
+function addPreviewInputStateLayers(comp: LayaObj, element: Element): void {
+  if (!isPreviewMode()) return;
+  if (element.type !== 'KlInputImage' && element.type !== 'FractionInput') return;
+  if (comp.getChildByName?.('wrong')) return;
+  addPreviewInputStateLayer(comp, 'bg', 'game/inputImg/kl_input_active_yellow.png', element.width, element.height);
+  addPreviewInputStateLayer(comp, 'wrong', 'game/inputImg/img_3.png', element.width, element.height);
+}
+
 export function applyNewTextAreaRender(comp: LayaObj, element: Element): void {
   const props: Record<string, unknown> = {
     ...(elementMeta[element.type]?.defaultProps ?? {}),
@@ -444,10 +476,9 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
       'share/comp/vslider.png': skins.vslider,
     };
     if (skinMap[props.skin]) props.skin = skinMap[props.skin];
-  } else if (!isPreviewMode() && typeof props.skin === 'string') {
+  } else if (typeof props.skin === 'string') {
     // 内置资源：编辑模式下按 export path 反查 src，重写为 /builtin/<src> 让 dev server 可加载
-    const builtin = lookupBuiltinByExportPath(props.skin);
-    if (builtin) props.skin = `/builtin/${builtin.src}`;
+    props.skin = toPreviewBuiltinSkin(props.skin);
   }
   const skinToApply = generatedSkin ?? props.skin;
   if (props) {
@@ -510,6 +541,7 @@ export function applyKlProps(comp: LayaObj, element: Element): void {
     applyCustomAnswerKeyboardRender(comp, element);
     applyMathKeyboardRender(comp, element);
   }
+  addPreviewInputStateLayers(comp, element);
 
   // DropObj 编辑模式：用 Box 渲染，手动管理 skin + tipSkin 两个子 Image
   if (!isPreviewMode() && element.type === 'DropObj') {

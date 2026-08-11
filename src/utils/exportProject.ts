@@ -16,7 +16,16 @@ import {
   internalPageActionBody,
 } from './internalPageCompiler';
 import { buildOrdinaryActionBindings, isSharedOrdinaryAction } from './ordinaryActionCompiler';
-import { collectCourseConfirmTargetIssues, getSdkJudgeCapability, SDK_JUDGE_EVENT } from './sdkJudge';
+import {
+  collectCourseConfirmTargetIssues,
+  getInputSdkJudgeTargets,
+  getSdkJudgeCapability,
+  INPUT_SDK_JUDGE_EVENT,
+  isInputSdkJudgeTarget,
+  isRightSoundLockJudgeInputAction,
+  PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION,
+  SDK_JUDGE_EVENT,
+} from './sdkJudge';
 import {
   buildInputRuleConfirmInitCode,
   buildInputRuleInitCode,
@@ -348,6 +357,72 @@ function filterOptionalFileFields(props: Record<string, unknown>, keys: string[]
 let _compId = 0;
 function nextId() { return ++_compId; }
 
+function getKeyboardTargetsForInputs(page: Pick<SubPage, 'elements'>, inputs: Element[]): Element[] {
+  const camps = new Set(inputs
+    .map((input) => String((input.props as Record<string, unknown> | undefined)?.camp ?? '').trim())
+    .filter(Boolean));
+  if (camps.size === 0) return [];
+  return page.elements.filter((element) => (
+    element.type === 'KlBaseKeyboard'
+    && camps.has(String((element.props as Record<string, unknown> | undefined)?.camp ?? '').trim())
+  ));
+}
+
+/**
+ * 为“播放正确音效+锁定判断输入框”动作生成运行时代码。
+ *
+ * 生成逻辑包括播放正确音效、锁定输入框、清除错误态和关闭同 camp 键盘；
+ * 如果目标不是输入判定对象，则退化为仅播放音效。
+ */
+export function buildRightSoundLockJudgeInputCode(
+  action: Action,
+  page: SubPage,
+  getVar: (element: Element) => string,
+  uiNamespace: string,
+  source?: Element,
+): string {
+  if (!isRightSoundLockJudgeInputAction(action)) return '';
+  const soundCode = `this.playSound("${uiNamespace}/sound/right.mp3");`;
+  const inputs = getInputSdkJudgeTargets(action, page, source);
+  if (inputs.length === 0) return soundCode;
+
+  const keyboards = getKeyboardTargetsForInputs(page, inputs);
+  const inputRefs = inputs.map((input) => `this.${getVar(input)}`).join(', ');
+  const keyboardRefs = keyboards.map((keyboard) => `this.${getVar(keyboard)}`).join(', ');
+
+  return [
+    soundCode,
+    '(function(){',
+    `    var __inputs = [${inputRefs}];`,
+    `    var __keyboards = [${keyboardRefs}];`,
+    '    for (var __i = 0; __i < __inputs.length; __i++) {',
+    '        var __input = __inputs[__i];',
+    '        if (!__input) continue;',
+    '        __input.isSelected = false;',
+    '        __input._isSelected = false;',
+    '        __input.canSelected = false;',
+    '        __input.mouseEnabled = false;',
+    '        if (__input.guangbiaoI) __input.guangbiaoI.visible = false;',
+    '        var __bg = __input._bg || (typeof __input.getChildByName === "function" ? __input.getChildByName("bg") : null);',
+    '        if (__bg) { __bg.visible = false; __bg.filters = []; }',
+    '        var __wrong = typeof __input.getChildByName === "function" ? __input.getChildByName("wrong") : null;',
+    '        if (__wrong) { __wrong.visible = false; __wrong.filters = []; }',
+    '        __input.filters = [];',
+    '        var __camp = String(__input.camp || "");',
+    '        if (!__camp) continue;',
+    '        for (var __j = 0; __j < __keyboards.length; __j++) {',
+    '            var __keyboard = __keyboards[__j];',
+    '            if (!__keyboard || String(__keyboard.camp || "") !== __camp) continue;',
+    '            if (typeof __keyboard.setVisible === "function") __keyboard.setVisible(false);',
+    '            else __keyboard.visible = false;',
+    '            if ("currIptXpath" in __keyboard) __keyboard.currIptXpath = null;',
+    '            __keyboard._currIpt = null;',
+    '        }',
+    '    }',
+    '}).call(this);',
+  ].join('\n            ');
+}
+
 const RUNTIME_CLICK_CONFIRM_EVENTS = new Set([
   'onClickInitConfirm',
   'onClickInitConfirmWithLock',
@@ -443,6 +518,11 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
       for (const action of el.actions) {
         if (action.targetId) needsVar.add(action.targetId);
         if (action.judgeTargetId) needsVar.add(action.judgeTargetId);
+        if (isRightSoundLockJudgeInputAction(action)) {
+          const lockInputs = getInputSdkJudgeTargets(action, page, el);
+          for (const input of lockInputs) needsVar.add(input.id);
+          for (const keyboard of getKeyboardTargetsForInputs(page, lockInputs)) needsVar.add(keyboard.id);
+        }
       }
     }
   }
@@ -476,7 +556,20 @@ export function collectElementsNeedingVar(page: SubPage): Set<string> {
     for (const input of getFillAnswerInputs(el, elements)) needsVar.add(input.id);
   }
 
-  // 数学键盘初始化代码会直接引用这些组件，需要把对应 var 写入 scene。
+  // 输入后立即 SDK 判断会直接引用判定目标或容器内输入格，需要把对应 var 写入 scene。
+  for (const el of elements) {
+    for (const action of el.actions ?? []) {
+      if (action.event !== INPUT_SDK_JUDGE_EVENT || !action.judgeTargetId) continue;
+      const target = elements.find((item) => item.id === action.judgeTargetId);
+      if (!target || !isInputSdkJudgeTarget(target)) continue;
+      if (target.type === 'KlInputImage' || target.type === 'FractionInput') {
+        needsVar.add(target.id);
+      } else {
+        for (const input of getFillAnswerInputs(target, elements)) needsVar.add(input.id);
+      }
+    }
+  }
+
   const decimalCamps = new Set(elements.flatMap((el) => {
     const props = el.props as { _keyboardPreset?: { id?: string }; camp?: unknown } | undefined;
     return el.type === 'KlBaseKeyboard'
@@ -1119,6 +1212,8 @@ export function makeActionBuilder(
         return `this.playSound("${uiNamespace}/sound/right.mp3");`;
       case 'playWrongSound':
         return `this.playSound("${uiNamespace}/sound/wrong.mp3");`;
+      case PLAY_RIGHT_SOUND_LOCK_JUDGE_INPUT_ACTION:
+        return buildRightSoundLockJudgeInputCode(action, pg, getVar, uiNamespace, sourceEl);
       case 'showAnswerRight':
         return `this.showAnswerFace(1);`;
       case 'showAnswerRightLock':
@@ -1342,6 +1437,35 @@ type ActionBodyBuilder = (
   sourceElement?: Element,
 ) => string;
 
+function buildSdkJudgeChecks(
+  target: Element,
+  targetRef: string,
+): { rightCheck: string; nullCheck: string | null } | null {
+  const capability = getSdkJudgeCapability(target);
+  if (!capability) return null;
+  const rightCheck = capability.kind === 'inputImage'
+    ? `!${targetRef}.valueOrSkinIsNull && (${JSON.stringify(getInputAnswerCandidates(target))}).indexOf(String(${targetRef}.fontClipValue || "")) >= 0`
+    : capability.kind === 'input'
+    ? `${targetRef}.isRight()`
+    : capability.kind === 'drag'
+      ? `${targetRef}.dragsOnRightDrops()`
+      : `${targetRef}.${capability.kind === 'matching' ? 'allRight' : 'isRight'}`;
+  const nullCheck = capability.kind === 'inputImage'
+    ? `${targetRef}.valueOrSkinIsNull`
+    : capability.kind === 'input' || capability.kind === 'matching'
+    ? `${targetRef}.isNull()`
+    : capability.kind === 'choice'
+      ? `${targetRef}.isNull`
+      : null;
+  return { rightCheck, nullCheck };
+}
+
+function buildInputWrongStateCode(inputRefs: string[], visible: boolean): string {
+  return inputRefs.map((inputRef) =>
+    `(function(__input) { var __wrong = __input && __input.getChildByName ? __input.getChildByName("wrong") : null; var __bg = __input && __input.getChildByName ? __input.getChildByName("bg") : null; if (__wrong) { __wrong.visible = ${visible}; if (${visible}) { if (typeof Laya !== "undefined" && Laya.GlowFilter) { __wrong.__forgeWrongGlowFilter = __wrong.__forgeWrongGlowFilter || new Laya.GlowFilter("#ef4444", 14, 0, 0); __wrong.filters = [__wrong.__forgeWrongGlowFilter]; } } else { __wrong.filters = []; } } if (${visible} && __bg) { __bg.visible = false; __bg.filters = []; } })(${inputRef});`,
+  ).join(' ');
+}
+
 /**
  * 把触发元素上的通用 SDK 判定关系转换为点击监听。
  * 判定只读取目标组件已有 SDK 状态，结果动作仍使用 action.targetId。
@@ -1397,26 +1521,94 @@ export function buildSdkJudgeClickInitCode(
         return parts.join(' ');
       };
 
-      const rightCheck = capability.kind === 'inputImage'
-        ? `!${targetRef}.valueOrSkinIsNull && (${JSON.stringify(getInputAnswerCandidates(target))}).indexOf(String(${targetRef}.fontClipValue || "")) >= 0`
-        : capability.kind === 'input'
-        ? `${targetRef}.isRight()`
-        : capability.kind === 'drag'
-          ? `${targetRef}.dragsOnRightDrops()`
-          : `${targetRef}.${capability.kind === 'matching' ? 'allRight' : 'isRight'}`;
-      const nullCheck = capability.kind === 'inputImage'
-        ? `${targetRef}.valueOrSkinIsNull`
-        : capability.kind === 'input' || capability.kind === 'matching'
-        ? `${targetRef}.isNull()`
-        : capability.kind === 'choice'
-          ? `${targetRef}.isNull`
-          : null;
+      const checks = buildSdkJudgeChecks(target, targetRef);
+      if (!checks) continue;
 
       code += `        if (${sourceRef}) ${sourceRef}.on(Laya.Event.CLICK, this, function() {\n`;
-      code += `            if (${rightCheck}) { ${resultBody('right')} }\n`;
-      if (nullCheck) code += `            else if (${nullCheck}) { ${resultBody('null')} }\n`;
+      code += `            if (${checks.rightCheck}) { ${resultBody('right')} }\n`;
+      if (checks.nullCheck) code += `            else if (${checks.nullCheck}) { ${resultBody('null')} }\n`;
       code += `            else { ${resultBody('wrong')} }\n`;
       code += `        });\n`;
+    }
+  }
+
+  return code;
+}
+
+export function buildSdkJudgeInputInitCode(
+  page: SubPage,
+  getVar: (element: Element) => string,
+  buildActionBody: ActionBodyBuilder,
+  writeHomeworkResult = false,
+): string {
+  let code = '';
+
+  for (const source of page.elements) {
+    const judgeActions = (source.actions ?? []).filter((action) => action.event === INPUT_SDK_JUDGE_EVENT);
+    if (judgeActions.length === 0) continue;
+
+    const groups = new Map<string, Action[]>();
+    for (const action of judgeActions) {
+      const key = action.groupId ?? `__legacy:${action.judgeTargetId ?? ''}`;
+      const group = groups.get(key) ?? [];
+      group.push(action);
+      groups.set(key, group);
+    }
+
+    for (const actions of groups.values()) {
+      const judgeTargetId = actions[0]?.judgeTargetId;
+      const target = judgeTargetId
+        ? page.elements.find((element) => element.id === judgeTargetId)
+        : undefined;
+      if (!target || !isInputSdkJudgeTarget(target)) continue;
+
+      const sourceRef = `this.${getVar(source)}`;
+      const targetRef = `this.${getVar(target)}`;
+      const checks = buildSdkJudgeChecks(target, targetRef);
+      const capability = getSdkJudgeCapability(target);
+      if (!checks || !capability) continue;
+
+      const branchBodies: Record<'right' | 'wrong' | 'null', string[]> = {
+        right: [],
+        wrong: [],
+        null: [],
+      };
+      for (const action of actions) {
+        const condition = action.branchCondition ?? 'right';
+        if (!capability.conditions.includes(condition)) continue;
+        const body = buildActionBody(action, sourceRef, page, source);
+        if (body) branchBodies[condition].push(body);
+      }
+
+      const resultBody = (condition: 'right' | 'wrong' | 'null') => {
+        const parts = [...branchBodies[condition]];
+        if (writeHomeworkResult) {
+          const value = condition === 'right' ? 'true' : condition === 'wrong' ? 'false' : 'null';
+          parts.unshift(`this.result = ${value};`);
+        }
+        return parts.join(' ');
+      };
+
+      const inputRefs = target.type === 'KlInputImage' || target.type === 'FractionInput'
+        ? [targetRef]
+        : getFillAnswerInputs(target, page.elements).map((input) => `this.${getVar(input)}`);
+      if (inputRefs.length === 0) continue;
+
+      const clearWrongState = buildInputWrongStateCode(inputRefs, false);
+      const showWrongState = buildInputWrongStateCode(inputRefs, true);
+      const handlerBody = [
+        clearWrongState,
+        `if (${checks.rightCheck}) { ${resultBody('right')} }`,
+        checks.nullCheck ? `else if (${checks.nullCheck}) { ${resultBody('null')} }` : '',
+        `else { ${showWrongState} ${resultBody('wrong')} }`,
+      ].filter(Boolean).join('\n            ');
+
+      for (const inputRef of inputRefs) {
+        code += `        if (${inputRef}) ${inputRef}.on(KlKeyboardEvent.INPUT_LATER, this, function() {\n`;
+        code += `            ${handlerBody}\n`;
+        code += `        });\n`;
+        code += `        if (${inputRef}) ${inputRef}.on(Laya.Event.CLICK, this, function() { ${clearWrongState} });\n`;
+      }
     }
   }
 
@@ -1621,6 +1813,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
   // ─── DragViewBox 统一处理（每个 DVB 一对 EVENT_SUCCESS/EVENT_FAILD，合并 dropSkin + onDragJudge）───
   initCode += buildDvbInitCode(page, getVar, buildActionBody as never, uiNamespace);
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody);
+  initCode += buildSdkJudgeInputInitCode(page, getVar, buildActionBody);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, uiNamespace);
   initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, uiNamespace);
 
@@ -1686,7 +1879,7 @@ function generateSceneTs(sceneName: string, page: SubPage, resourceMap: Map<stri
       }
 
       // 通用 SDK 判定已由 buildSdkJudgeClickInitCode 按 groupId 和结果分支统一生成。
-      if (rawEvent === SDK_JUDGE_EVENT) continue;
+      if (rawEvent === SDK_JUDGE_EVENT || rawEvent === INPUT_SDK_JUDGE_EVENT) continue;
 
       // onClickInitConfirm / onClickInitConfirmWithLock：直接在 initView 注入 GameUtils.initConfirm / initChoiceBoxConfirm，不绑定事件
       if (rawEvent === 'onClickInitConfirm' || rawEvent === 'onClickInitConfirmWithLock') {
@@ -2019,6 +2212,7 @@ function generateHomeworkSceneTs(
   initCode += buildInputRuleInitCode(page, getVar);
   initCode += buildInternalPageActionBindings(page, getVar, buildActionBody, 'game_hw');
   initCode += buildSdkJudgeClickInitCode(page, getVar, buildActionBody, true);
+  initCode += buildSdkJudgeInputInitCode(page, getVar, buildActionBody, true);
   initCode += buildChoiceVisualInitCode(page, getVar, false);
   initCode += buildOrdinaryActionBindings(page, getVar, buildActionBody, 'game_hw');
 
@@ -2450,7 +2644,7 @@ function buildConfigJson(course: Course, resourceMap: Map<string, string>, image
           if (!el.actions?.length) continue;
           for (const action of el.actions) {
             if (action.event === 'onClickSound') needBtnClick = true;
-            if (action.actionType === 'playRightSound') needRight = true;
+            if (action.actionType === 'playRightSound' || isRightSoundLockJudgeInputAction(action)) needRight = true;
             if (action.actionType === 'playWrongSound') needWrong = true;
             // onClickInitConfirm / onClickInitConfirmWithLock 目标是 ChoiceBox 时也需要 right/wrong 音效
             if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
@@ -2601,7 +2795,7 @@ function buildHomeworkConfigJson(course: Course, resourceMap: Map<string, string
           if (!el.actions?.length) continue;
           for (const action of el.actions) {
             if (action.event === 'onClickSound') needBtnClick = true;
-            if (action.actionType === 'playRightSound') needRight = true;
+            if (action.actionType === 'playRightSound' || isRightSoundLockJudgeInputAction(action)) needRight = true;
             if (action.actionType === 'playWrongSound') needWrong = true;
             // onClickInitConfirm / onClickInitConfirmWithLock 目标是 ChoiceBox 时也需要 right/wrong 音效
             if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
@@ -2980,7 +3174,7 @@ export async function exportProject(course: Course, options: { cleanBuildOutput?
           if (!el.actions?.length) continue;
           for (const action of el.actions) {
             if (action.event === 'onClickSound') hwGameZipFiles.add('sound/btn_click.wav');
-            if (action.actionType === 'playRightSound') hwGameZipFiles.add('sound/right.mp3');
+            if (action.actionType === 'playRightSound' || isRightSoundLockJudgeInputAction(action)) hwGameZipFiles.add('sound/right.mp3');
             if (action.actionType === 'playWrongSound') hwGameZipFiles.add('sound/wrong.mp3');
             if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
               const targetEl = action.targetId ? sp.elements.find(e => e.id === action.targetId) : null;
@@ -3075,7 +3269,7 @@ export async function exportProject(course: Course, options: { cleanBuildOutput?
         if (!el.actions?.length) continue;
         for (const action of el.actions) {
           if (action.event === 'onClickSound') gameZipFiles.add('sound/btn_click.wav');
-          if (action.actionType === 'playRightSound') gameZipFiles.add('sound/right.mp3');
+          if (action.actionType === 'playRightSound' || isRightSoundLockJudgeInputAction(action)) gameZipFiles.add('sound/right.mp3');
           if (action.actionType === 'playWrongSound') gameZipFiles.add('sound/wrong.mp3');
           if (action.event === 'onClickInitConfirm' || action.event === 'onClickInitConfirmWithLock') {
             const targetEl = action.targetId ? sp.elements.find(e => e.id === action.targetId) : null;

@@ -44,7 +44,7 @@ test('双击默认文本全选，其他文本仍按点击位置放置光标', ()
   assert.match(doubleClickSource, /setSelectAllTextOnEdit\(selectDefaultContent\)/);
   assert.match(
     overlaySource,
-    /if \(selectAllTextOnEdit\) \{\s*textarea\.setSelectionRange\(0, textDraft\.length\);/,
+    /if \(selectAllTextOnEdit\) \{\s*setEditableSelection\(editor, 0, textDraft\.length\);/,
   );
   assert.match(overlaySource, /caretOffsetAtPoint\(textDraft/);
 });
@@ -55,7 +55,7 @@ test('文本清空后退出仍保留组件', () => {
     'const finishTextEditing = useCallback',
     'useLayoutEffect(() =>',
   );
-  assert.match(finishSource, /const nextProps = \{ \.\.\.props, text: textDraft \};/);
+  assert.match(finishSource, /const nextProps = \{ \.\.\.props, text, textHtml: html \};/);
   assert.match(finishSource, /updateElement\(editingElement\.id/);
   assert.doesNotMatch(
     finishSource,
@@ -70,4 +70,11 @@ test('文本编辑态提供独立光标和稳定缩放的高对比反馈', () =>
   assert.match(overlaySource, /outline: `\$\{2 \* decorationScale\}px solid #06b6d4`/);
   assert.match(overlaySource, /cursor: 'text'/);
   assert.match(overlaySource, /caretColor: '#ff2d55'/);
+});
+
+test('rich text HTML is sanitized before DOM writes and persistence', () => {
+  assert.match(overlaySource, /sanitizeRichTextHtml/);
+  assert.match(overlaySource, /editor\.innerHTML = sanitizeRichTextHtml\(textDraftHtml, textDraft\);/);
+  assert.match(overlaySource, /const html = sanitizeRichTextHtml\(editor\?\.innerHTML \?\? textDraftHtml, textDraft\);/);
+  assert.match(overlaySource, /const html = sanitizeRichTextHtml\(editor\.innerHTML, editor\.textContent \?\? ''\);/);
 });
