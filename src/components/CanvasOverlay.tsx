@@ -594,7 +594,6 @@ export default function CanvasOverlay({
   useEffect(() => {
     if (!editingTextId) return;
     const handleDocumentPointerDown = (event: MouseEvent | PointerEvent) => {
-      if (event.defaultPrevented) return;
       const editor = textEditorRef.current;
       const target = event.target;
       if (!editor || !(target instanceof Node)) return;
