@@ -1,7 +1,7 @@
 ﻿# 画笔组件（NewBrushSprite）设计
 
 > 日期：2026-06-15
-> 关联文档：[docs/画笔功能.md](../../画笔功能.md)
+> 关联文档：docs/画笔功能.md（该参考文档未提交到本仓库，原引用为相对链接已改为文字说明）
 > 参考 .scene：`D:\project\v8\V8\S8\s8_v8_test_51_hw\Game1_HW\laya\pages\game_hw\Game1.scene`
 
 ## 背景

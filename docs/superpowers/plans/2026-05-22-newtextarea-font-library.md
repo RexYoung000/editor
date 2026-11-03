@@ -77,7 +77,7 @@ Test-Path "d:\aiproject\forge\public\res\atlas\share\方正兰亭黑简体.TTF"
 
 - [ ] **Step 2.1: 创建 fontLibrary.ts 文件**
 
-写入完整内容到 [src/elements/fontLibrary.ts](src/elements/fontLibrary.ts):
+写入完整内容到 [src/elements/fontLibrary.ts](../../../src/elements/fontLibrary.ts):
 
 ```ts
 // 字体库元数据。新增字体只改这一份配置,UI 下拉、loader、烘焙都从这里读取。
@@ -138,7 +138,7 @@ pnpm exec tsc -b --noEmit
 
 - [ ] **Step 3.1: 创建 fontLoader.ts**
 
-写入到 [src/utils/fontLoader.ts](src/utils/fontLoader.ts):
+写入到 [src/utils/fontLoader.ts](../../../src/utils/fontLoader.ts):
 
 ```ts
 // 编辑器侧字体加载,所有 TTF 入口统一从这里走。
@@ -234,20 +234,20 @@ pnpm exec tsc -b --noEmit
 ## Task 4: 替换三处旧 TTF 硬编码引用,统一走 fontLoader
 
 **Files:**
-- Modify: [src/utils/laya/core.ts](src/utils/laya/core.ts) 行 190-196(硬编码 `new FontFace(...)` 块)
-- Modify: [src/utils/textToImage.ts](src/utils/textToImage.ts) 整体重构
-- Modify: [src/utils/fontGenerator.ts](src/utils/fontGenerator.ts) 移除内部 FontFace 注册
+- Modify: [src/utils/laya/core.ts](../../../src/utils/laya/core.ts) 行 190-196(硬编码 `new FontFace(...)` 块)
+- Modify: [src/utils/textToImage.ts](../../../src/utils/textToImage.ts) 整体重构
+- Modify: [src/utils/fontGenerator.ts](../../../src/utils/fontGenerator.ts) 移除内部 FontFace 注册
 
 - [ ] **Step 4.1: 改造 src/utils/laya/core.ts**
 
-在 [src/utils/laya/core.ts](src/utils/laya/core.ts) 文件顶部 import 区(约行 1-10)添加:
+在 [src/utils/laya/core.ts](../../../src/utils/laya/core.ts) 文件顶部 import 区(约行 1-10)添加:
 
 ```ts
 import { loadLibraryFont } from '../fontLoader';
 import { DEFAULT_FONT_ID } from '../../elements/fontLibrary';
 ```
 
-把 [src/utils/laya/core.ts:190-196](src/utils/laya/core.ts#L190-L196) 这段:
+把 [src/utils/laya/core.ts:190-196](../../../src/utils/laya/core.ts#L190-L196) 这段:
 
 ```ts
     const fontFace = new FontFace('FZLanTingHei', 'url(res/atlas/share/方正兰亭黑简体.TTF)');
@@ -271,7 +271,7 @@ import { DEFAULT_FONT_ID } from '../../elements/fontLibrary';
 
 - [ ] **Step 4.2: 重构 src/utils/textToImage.ts**
 
-把 [src/utils/textToImage.ts](src/utils/textToImage.ts) **整体替换**为:
+把 [src/utils/textToImage.ts](../../../src/utils/textToImage.ts) **整体替换**为:
 
 ```ts
 /**
@@ -370,7 +370,7 @@ export async function renderTextToImage(
 
 - [ ] **Step 4.3: 改造 src/utils/fontGenerator.ts**
 
-修改 [src/utils/fontGenerator.ts:22-56](src/utils/fontGenerator.ts#L22-L56) 区域。
+修改 [src/utils/fontGenerator.ts:22-56](../../../src/utils/fontGenerator.ts#L22-L56) 区域。
 
 (a) 移除原顶部:
 
@@ -472,12 +472,12 @@ pnpm dev
 ## Task 5: NewTextArea 元素元数据扩展(新增 fontLibraryId / fontLocalPath)
 
 **Files:**
-- Modify: [src/elements/elementMeta.ts:219-236](src/elements/elementMeta.ts#L219-L236)(NewTextArea 定义)
-- Modify: [src/elements/elementMeta.ts:415-428](src/elements/elementMeta.ts#L415-L428)(`createDefaultElement` 注入"上次选择"记忆)
+- Modify: [src/elements/elementMeta.ts:219-236](../../../src/elements/elementMeta.ts#L219-L236)(NewTextArea 定义)
+- Modify: [src/elements/elementMeta.ts:415-428](../../../src/elements/elementMeta.ts#L415-L428)(`createDefaultElement` 注入"上次选择"记忆)
 
 - [ ] **Step 5.1: 修改 NewTextArea defaultProps 与 properties**
 
-把 [src/elements/elementMeta.ts:219-236](src/elements/elementMeta.ts#L219-L236) 整段:
+把 [src/elements/elementMeta.ts:219-236](../../../src/elements/elementMeta.ts#L219-L236) 整段:
 
 ```ts
   NewTextArea: {
@@ -543,7 +543,7 @@ pnpm dev
 
 - [ ] **Step 5.2: 在 createDefaultElement 注入"上次选择"字体**
 
-打开 [src/elements/elementMeta.ts:415-428](src/elements/elementMeta.ts#L415-L428):
+打开 [src/elements/elementMeta.ts:415-428](../../../src/elements/elementMeta.ts#L415-L428):
 
 ```ts
 export function createDefaultElement(type: string): Element {
@@ -608,14 +608,14 @@ pnpm exec tsc -b --noEmit
 ## Task 6: PropertyDef 类型扩展 + IPC saveFontToCourse
 
 **Files:**
-- Modify: [src/elements/elementMeta.ts](src/elements/elementMeta.ts)(PropertyDef.type 联合类型扩展)
-- Modify: [electron/main.cjs](electron/main.cjs)(新增 `save-font-to-course` handler)
-- Modify: [electron/preload.cjs](electron/preload.cjs)(暴露 `saveFontToCourse`)
-- Modify: [src/types/electron.d.ts](src/types/electron.d.ts)(类型声明)
+- Modify: [src/elements/elementMeta.ts](../../../src/elements/elementMeta.ts)(PropertyDef.type 联合类型扩展)
+- Modify: [electron/main.cjs](../../../electron/main.cjs)(新增 `save-font-to-course` handler)
+- Modify: [electron/preload.cjs](../../../electron/preload.cjs)(暴露 `saveFontToCourse`)
+- Modify: [src/types/electron.d.ts](../../../src/types/electron.d.ts)(类型声明)
 
 - [ ] **Step 6.1: 扩展 PropertyDef.type 联合类型**
 
-打开 [src/elements/elementMeta.ts](src/elements/elementMeta.ts) 顶部 `PropertyDef` 定义。先用搜索定位:
+打开 [src/elements/elementMeta.ts](../../../src/elements/elementMeta.ts) 顶部 `PropertyDef` 定义。先用搜索定位:
 
 ```powershell
 pnpm exec grep -n "type:" src/elements/elementMeta.ts | Select-Object -First 5
@@ -647,7 +647,7 @@ pnpm exec tsc -b --noEmit
 
 - [ ] **Step 6.3: 新增 IPC `save-font-to-course` handler**
 
-打开 [electron/main.cjs](electron/main.cjs),在 `ipcMain.handle('save-image-to-course', ...)`(行 257)代码块结束后追加:
+打开 [electron/main.cjs](../../../electron/main.cjs),在 `ipcMain.handle('save-image-to-course', ...)`(行 257)代码块结束后追加:
 
 ```js
 ipcMain.handle('save-font-to-course', (_event, courseDir, _fileName, base64Data, ext) => {
@@ -674,7 +674,7 @@ ipcMain.handle('save-font-to-course', (_event, courseDir, _fileName, base64Data,
 
 - [ ] **Step 6.4: 在 preload.cjs 暴露 saveFontToCourse**
 
-打开 [electron/preload.cjs:14](electron/preload.cjs#L14) 附近,找到 `saveImageToCourse: (...) => ipcRenderer.invoke('save-image-to-course', ...)` 这一行,**在它之后**增加:
+打开 [electron/preload.cjs:14](../../../electron/preload.cjs#L14) 附近,找到 `saveImageToCourse: (...) => ipcRenderer.invoke('save-image-to-course', ...)` 这一行,**在它之后**增加:
 
 ```js
   saveFontToCourse: (courseDir, fileName, base64Data, ext) => ipcRenderer.invoke('save-font-to-course', courseDir, fileName, base64Data, ext),
@@ -684,7 +684,7 @@ ipcMain.handle('save-font-to-course', (_event, courseDir, _fileName, base64Data,
 
 - [ ] **Step 6.5: 在 src/types/electron.d.ts 增加类型签名**
 
-打开 [src/types/electron.d.ts](src/types/electron.d.ts),找到 `saveImageToCourse: (courseDir: string, fileName: string, base64Data: string, ext: string) => Promise<string>;` 那一行,**紧接其后**追加同样形态的:
+打开 [src/types/electron.d.ts](../../../src/types/electron.d.ts),找到 `saveImageToCourse: (courseDir: string, fileName: string, base64Data: string, ext: string) => Promise<string>;` 那一行,**紧接其后**追加同样形态的:
 
 ```ts
 saveFontToCourse: (courseDir: string, fileName: string, base64Data: string, ext: string) => Promise<string>;
@@ -700,7 +700,7 @@ pnpm exec tsc -b --noEmit
 
 - [ ] **Step 6.7: cleanupUnreferencedImages 加入 fonts 子目录**
 
-打开 [electron/main.cjs:345-372](electron/main.cjs#L345-L372)。找到:
+打开 [electron/main.cjs:345-372](../../../electron/main.cjs#L345-L372)。找到:
 
 ```js
   const dirsToClean = ['images', 'images/animation', 'images/sound'];
@@ -716,7 +716,7 @@ pnpm exec tsc -b --noEmit
 
 - [ ] **Step 6.8: collectImageReferences 自动覆盖 fontLocalPath**
 
-阅读 [src/utils/electronFs.ts:162-187](src/utils/electronFs.ts#L162-L187) 现有实现:它遍历 `el.props` 所有字符串值,只要以 `images/` 开头就收集。`fontLocalPath` 形如 `images/fonts/<md5>.ttf`,**已经天然命中**,无需改动。
+阅读 [src/utils/electronFs.ts:162-187](../../../src/utils/electronFs.ts#L162-L187) 现有实现:它遍历 `el.props` 所有字符串值,只要以 `images/` 开头就收集。`fontLocalPath` 形如 `images/fonts/<md5>.ttf`,**已经天然命中**,无需改动。
 
 只验证不修改:
 
@@ -731,11 +731,11 @@ pnpm exec tsc -b --noEmit
 ## Task 7: FieldRenderer 新增 fontLibrary / fontLocal 渲染器
 
 **Files:**
-- Modify: [src/components/FieldRenderer.tsx](src/components/FieldRenderer.tsx)
+- Modify: [src/components/FieldRenderer.tsx](../../../src/components/FieldRenderer.tsx)
 
 - [ ] **Step 7.1: 在文件顶部添加 import**
 
-在 [src/components/FieldRenderer.tsx:1-11](src/components/FieldRenderer.tsx#L1-L11) 现有 import 区追加:
+在 [src/components/FieldRenderer.tsx:1-11](../../../src/components/FieldRenderer.tsx#L1-L11) 现有 import 区追加:
 
 ```ts
 import { FONT_LIBRARY, FONT_CATEGORIES, lookupFont } from '../elements/fontLibrary';
@@ -744,7 +744,7 @@ import { loadLocalFont } from '../utils/fontLoader';
 
 - [ ] **Step 7.2: 在 FieldRenderer switch 中增加两个 case**
 
-打开 [src/components/FieldRenderer.tsx:486-490](src/components/FieldRenderer.tsx#L486-L490) 区域(`case 'spineFolder' ... default: return null;`),在 `default:` 之前插入两个新 case:
+打开 [src/components/FieldRenderer.tsx:486-490](../../../src/components/FieldRenderer.tsx#L486-L490) 区域(`case 'spineFolder' ... default: return null;`),在 `default:` 之前插入两个新 case:
 
 ```ts
     case 'fontLibrary': {
@@ -872,12 +872,12 @@ pnpm dev
 ## Task 8: 编辑器画布渲染联动 + 双击编辑浮层字体
 
 **Files:**
-- Modify: [src/utils/laya/components.ts](src/utils/laya/components.ts)(`applyKlProps` 增加 NewTextArea 字体分支)
-- Modify: [src/components/CanvasOverlay.tsx](src/components/CanvasOverlay.tsx)(双击编辑 textarea 应用字体)
+- Modify: [src/utils/laya/components.ts](../../../src/utils/laya/components.ts)(`applyKlProps` 增加 NewTextArea 字体分支)
+- Modify: [src/components/CanvasOverlay.tsx](../../../src/components/CanvasOverlay.tsx)(双击编辑 textarea 应用字体)
 
 - [ ] **Step 8.1: applyKlProps 写入 Label.font(NewTextArea 编辑模式分支)**
 
-打开 [src/utils/laya/components.ts](src/utils/laya/components.ts) 顶部 imports 区,追加:
+打开 [src/utils/laya/components.ts](../../../src/utils/laya/components.ts) 顶部 imports 区,追加:
 
 ```ts
 import { resolveElementFont } from '../fontLoader';
@@ -901,11 +901,11 @@ import { resolveElementFont } from '../fontLoader';
   }
 ```
 
-放置位置说明:必须在 [src/utils/laya/components.ts:287-292](src/utils/laya/components.ts#L287-L292) 通用 `for (const [key, value] of Object.entries(props))` 循环**之后**,因为该循环里有 `try { comp[key] = value; }` 兜底,但我们的 `font` 字段不在 props 里(已从 defaultProps 移除),不会被那里改写。同时要在函数最后 `}` 之前。
+放置位置说明:必须在 [src/utils/laya/components.ts:287-292](../../../src/utils/laya/components.ts#L287-L292) 通用 `for (const [key, value] of Object.entries(props))` 循环**之后**,因为该循环里有 `try { comp[key] = value; }` 兜底,但我们的 `font` 字段不在 props 里(已从 defaultProps 移除),不会被那里改写。同时要在函数最后 `}` 之前。
 
 - [ ] **Step 8.2: 双击编辑浮层使用解析后的字体**
 
-打开 [src/components/CanvasOverlay.tsx](src/components/CanvasOverlay.tsx),顶部 imports 追加:
+打开 [src/components/CanvasOverlay.tsx](../../../src/components/CanvasOverlay.tsx),顶部 imports 追加:
 
 ```ts
 import { useEffect, useState } from 'react';   // 若已 import 仅追加缺失项
@@ -913,7 +913,7 @@ import { resolveElementFont } from '../utils/fontLoader';
 import { useEditorStore } from '../store/editorStore';   // 若已 import 跳过
 ```
 
-在 [src/components/CanvasOverlay.tsx:457-516](src/components/CanvasOverlay.tsx#L457-L516) `inline editing textarea` 块上方(进入 IIFE 之前的合适位置),增加一个 hook 解析字体名:
+在 [src/components/CanvasOverlay.tsx:457-516](../../../src/components/CanvasOverlay.tsx#L457-L516) `inline editing textarea` 块上方(进入 IIFE 之前的合适位置),增加一个 hook 解析字体名:
 
 定位到形如 `{editingElement && (() => {` 的开头(行 458)。把整个 IIFE 替换为带字体 state 的版本。**简化做法**:在 `CanvasOverlay` 函数体顶部,与其他 `useState` 一起声明:
 
@@ -935,7 +935,7 @@ useEffect(() => {
 }, [editingElement]);
 ```
 
-把 [src/components/CanvasOverlay.tsx:505](src/components/CanvasOverlay.tsx#L505) 的 textarea 内联样式:
+把 [src/components/CanvasOverlay.tsx:505](../../../src/components/CanvasOverlay.tsx#L505) 的 textarea 内联样式:
 
 ```ts
                 fontFamily: 'inherit',
@@ -970,13 +970,13 @@ pnpm dev
 ## Task 9: 烘焙时使用元素字体 + Course 级 publish 校验
 
 **Files:**
-- Modify: [src/utils/exportProject.ts:21-48](src/utils/exportProject.ts#L21-L48)(`bakeTextElements`)
-- Modify: [src/utils/exportPreviewProject.ts](src/utils/exportPreviewProject.ts)(若有镜像 `bakeTextElements`)
-- Create: [src/utils/checkFontReady.ts](src/utils/checkFontReady.ts)
+- Modify: [src/utils/exportProject.ts:21-48](../../../src/utils/exportProject.ts#L21-L48)(`bakeTextElements`)
+- Modify: [src/utils/exportPreviewProject.ts](../../../src/utils/exportPreviewProject.ts)(若有镜像 `bakeTextElements`)
+- Create: src/utils/checkFontReady.ts（历史计划目标；当前未创建，现行方案见本文开头说明）
 
 - [ ] **Step 9.1: 改造 exportProject.ts 的 bakeTextElements,传入 courseId**
 
-打开 [src/utils/exportProject.ts:21-48](src/utils/exportProject.ts#L21-L48),把整段函数:
+打开 [src/utils/exportProject.ts:21-48](../../../src/utils/exportProject.ts#L21-L48),把整段函数:
 
 ```ts
 async function bakeTextElements(course: Course): Promise<Course> {
@@ -1050,7 +1050,7 @@ pnpm exec grep -n "bakeTextElements\|renderTextToImage" src/utils/exportPreviewP
 
 - [ ] **Step 9.3: 创建 checkFontReady.ts**
 
-写入到 [src/utils/checkFontReady.ts](src/utils/checkFontReady.ts):
+写入到 src/utils/checkFontReady.ts（历史计划目标；当前未创建，现行方案见本文开头说明）:
 
 ```ts
 import type { Course, Stage } from '../types';
