@@ -428,5 +428,5 @@ playEnd() {
 
 ## 风险与未决事项
 
-- **GameUtile API 由 SDK 团队提供**：本设计假定 `GameUtile.initConfirmCH` / `initChoiceBoxCH` 已经或将由 sdk_baiya 团队实现，签名与文档[添加新的事件.md](../../添加新的事件.md)一致。如果实际 API 名或参数不同，Part 4 生成的代码需要相应调整
+- **GameUtile API 由 SDK 团队提供**：本设计假定 `GameUtile.initConfirmCH` / `initChoiceBoxCH` 已经或将由 sdk_baiya 团队实现，原设计引用《添加新的事件.md》约定签名（参考文件未收录于本仓库；仍需向 SDK 团队确认接口）。如果实际 API 名或参数不同，Part 4 生成的代码需要相应调整
 - **位置坐标硬编码**：x/y 直接来自测试工程，如果将来需要让用户自定义反馈动画的位置，要把这部分改成可配置（例如从一个全局配置或 ConfirmButton 的 props 里读）。当前需求是"按现在的摆放"，所以直接硬编码

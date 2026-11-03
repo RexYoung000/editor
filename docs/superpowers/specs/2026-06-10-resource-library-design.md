@@ -101,7 +101,7 @@ forge 当前的"内置资源"机制（`src/elements/builtinAssets.ts` + `public/
 
 ## 5. UI 设计：LibraryBrowser
 
-新建组件 [src/components/LibraryBrowser.tsx](src/components/LibraryBrowser.tsx)。
+新建组件 [src/components/LibraryBrowser.tsx](../../../src/components/LibraryBrowser.tsx)。
 
 ### 5.1 整体形态
 
@@ -222,7 +222,7 @@ public/builtin/library/
 **关键约束**：
 - 不约束顶层分类、不约束层级深度，**完全靠维护者自由组织**
 - Spine 工程文件夹**必须**含 `<name>.json + <name>.atlas + <name>.png` 三件套同名共存
-  - 三种支持布局：平铺 / `json/` 子目录 / 同名子目录（详见 [electron/spineToSk/spineToSkCli.cjs:34-67](electron/spineToSk/spineToSkCli.cjs#L34-L67) 的 `locateSpineFiles` 注释）
+  - 三种支持布局：平铺 / `json/` 子目录 / 同名子目录（详见 [electron/spineToSk/spineToSkCli.cjs:34-67](../../../electron/spineToSk/spineToSkCli.cjs#L34-L67) 的 `locateSpineFiles` 注释）
   - 不支持的布局：三件套分散在不同子目录
 - 不支持的资源类型（按扩展名）会被前端过滤掉
 
@@ -233,7 +233,7 @@ public/builtin/library/
 
 ## 7. Vite 后端接口
 
-所有接口加在 [vite.config.ts](vite.config.ts) 的 `forgePlugin()` 里，跟 `/api/upload-compiled-zip`、`/api/upload-resource` 同位置。`pnpm build` 不带这些接口（仅 dev 时存在），跟现有约定一致。
+所有接口加在 [vite.config.ts](../../../vite.config.ts) 的 `forgePlugin()` 里，跟 `/api/upload-compiled-zip`、`/api/upload-resource` 同位置。`pnpm build` 不带这些接口（仅 dev 时存在），跟现有约定一致。
 
 ### 7.1 `GET /api/library/list?path=<相对路径>`
 
@@ -313,7 +313,7 @@ function sanitizeLibraryPath(rel: string): { ok: true; value: string } | { ok: f
 
 ### 8.1 图片/音频：`downloadLibraryFile()`
 
-新增到 [src/utils/electronFs.ts](src/utils/electronFs.ts)。
+新增到 [src/utils/electronFs.ts](../../../src/utils/electronFs.ts)。
 
 ```ts
 export async function downloadLibraryFile(courseId: string, libraryPath: string): Promise<{ localRelPath: string }> {
@@ -496,7 +496,7 @@ properties: [
 | Spine 转换 | `convertSpineAll(in, out)` |
 | Spine manifest 维护 | 现有 `importSpineFolder` 内部已实现 |
 
-[electron/preload.cjs](electron/preload.cjs) 和 [electron/main.cjs](electron/main.cjs) **一字不动**。
+[electron/preload.cjs](../../../electron/preload.cjs) 和 [electron/main.cjs](../../../electron/main.cjs) **一字不动**。
 
 ## 12. 旧课件兼容
 
@@ -520,25 +520,25 @@ properties: [
 
 | 文件 | 职责 |
 |---|---|
-| [src/components/LibraryBrowser.tsx](src/components/LibraryBrowser.tsx) | 资源库浏览器组件（弹窗 + 面包屑 + 文件夹/文件网格 + 选中确认） |
+| [src/components/LibraryBrowser.tsx](../../../src/components/LibraryBrowser.tsx) | 资源库浏览器组件（弹窗 + 面包屑 + 文件夹/文件网格 + 选中确认） |
 
 ### 13.2 修改（5 个文件）
 
 | 文件 | 改动 |
 |---|---|
-| [vite.config.ts](vite.config.ts) | `forgePlugin()` 加 3 个接口：`/api/library/list`、`/api/library/file-info`、`/api/library/spine-files`；新增 `sanitizeLibraryPath`、`detectSpineProject`、hash 缓存 |
-| [src/components/FieldRenderer.tsx](src/components/FieldRenderer.tsx) | `case 'file'` 分支增加"资源库文件"按钮；`SpineFolderField` 增加"资源库 Spine 文件夹"按钮（按钮文案"上传"改"本地文件"，"选择 Spine 文件夹"改"本地 Spine 文件夹"） |
-| [src/types/index.ts](src/types/index.ts) | 给 ElementProperty 类型加可选 `fileType?: 'image' \| 'audio' \| 'video'` |
-| [src/elements/elementMeta.ts](src/elements/elementMeta.ts) | Video 组件 `videoUrl` 字段加 `fileType: 'video'` |
-| [src/utils/electronFs.ts](src/utils/electronFs.ts) | 新增 `downloadLibraryFile()` 和 `downloadLibrarySpine()` 函数 |
+| [vite.config.ts](../../../vite.config.ts) | `forgePlugin()` 加 3 个接口：`/api/library/list`、`/api/library/file-info`、`/api/library/spine-files`；新增 `sanitizeLibraryPath`、`detectSpineProject`、hash 缓存 |
+| [src/components/FieldRenderer.tsx](../../../src/components/FieldRenderer.tsx) | `case 'file'` 分支增加"资源库文件"按钮；`SpineFolderField` 增加"资源库 Spine 文件夹"按钮（按钮文案"上传"改"本地文件"，"选择 Spine 文件夹"改"本地 Spine 文件夹"） |
+| [src/types/index.ts](../../../src/types/index.ts) | 给 ElementProperty 类型加可选 `fileType?: 'image' \| 'audio' \| 'video'` |
+| [src/elements/elementMeta.ts](../../../src/elements/elementMeta.ts) | Video 组件 `videoUrl` 字段加 `fileType: 'video'` |
+| [src/utils/electronFs.ts](../../../src/utils/electronFs.ts) | 新增 `downloadLibraryFile()` 和 `downloadLibrarySpine()` 函数 |
 
 ### 13.3 不动（关键现有逻辑）
 
-- [src/utils/exportProject.ts](src/utils/exportProject.ts) — 资源收集和路径转换
-- [src/utils/coursePackage.ts](src/utils/coursePackage.ts) — 课程包打包
-- [electron/preload.cjs](electron/preload.cjs) / [electron/main.cjs](electron/main.cjs) — IPC 全部复用
-- [electron/spineToSk/spineToSkCli.cjs](electron/spineToSk/spineToSkCli.cjs) — Spine 转换逻辑
-- [src/elements/builtinAssets.ts](src/elements/builtinAssets.ts) — 老内置资源体系（保留兼容）
+- [src/utils/exportProject.ts](../../../src/utils/exportProject.ts) — 资源收集和路径转换
+- [src/utils/coursePackage.ts](../../../src/utils/coursePackage.ts) — 课程包打包
+- [electron/preload.cjs](../../../electron/preload.cjs) / [electron/main.cjs](../../../electron/main.cjs) — IPC 全部复用
+- [electron/spineToSk/spineToSkCli.cjs](../../../electron/spineToSk/spineToSkCli.cjs) — Spine 转换逻辑
+- [src/elements/builtinAssets.ts](../../../src/elements/builtinAssets.ts) — 老内置资源体系（保留兼容）
 
 ## 14. 风险与权衡
 
